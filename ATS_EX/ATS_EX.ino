@@ -9,7 +9,7 @@
 // 02.2024
 // http://github.com/goshante
 // ----------------------------------------------------------------------
-// MOD_NO_RDS_v3.2 by diqezit
+// MOD_NO_RDS_v3.3 by diqezit
 // More info you can get below
 // https://github.com/goshante/ats20_ats_ex/issues/42
 // ----------------------------------------------------------------------
@@ -41,7 +41,7 @@ bool isSSB() {
 // ------- Main logic -------
 // --------------------------
 
-#define APP_VERSION 118
+#define APP_VERSION 111
 
 // Helper function to get the current context (AM or SSB/CW)
 ModeContext getModeContext() {
@@ -374,38 +374,17 @@ void resetEepromDelay() {
 
 // Save favorites FM stations to EEPROM
 void saveFMFav() {
-    uint8_t savedCount = EEPROM.read(EEPROM_FM_FAVORITES_COUNT);
-
-    if (g_totalFavorites == 0 && savedCount == 0) {
-        return;
-    }
-
-    // Check if count changed
-    bool changed = (savedCount != g_totalFavorites);
-
-    // Check if frequencies changed
-    if (!changed && g_totalFavorites > 0) {
-        uint16_t addr = EEPROM_FM_FAVORITES_START;
-        for (uint8_t i = 0; i < g_totalFavorites; i++) {
-            uint16_t savedFreq = (EEPROM.read(addr++) << 8) | EEPROM.read(addr++);
-            if (savedFreq != g_fmFavorites[i].frequency) {
-                changed = true;
-                break;
-            }
-        }
-    }
-
-    // Save only if changed
-    if (!changed) return;
-
     EEPROM.update(EEPROM_FM_FAVORITES_COUNT, g_totalFavorites);
+
     uint16_t addr = EEPROM_FM_FAVORITES_START;
     for (uint8_t i = 0; i < MAX_FM_FAVORITES; i++) {
         if (i < g_totalFavorites) {
-            EEPROM.update(addr++, g_fmFavorites[i].frequency >> 8);
-            EEPROM.update(addr++, g_fmFavorites[i].frequency & 0xFF);
+            uint16_t freq = g_fmFavorites[i].frequency;
+            EEPROM.update(addr++, freq >> 8);
+            EEPROM.update(addr++, freq & 0xFF);
         }
         else {
+            // Fill unused slots with value 0xFFFFFF
             EEPROM.update(addr++, 0xFF);
             EEPROM.update(addr++, 0xFF);
         }
@@ -642,25 +621,22 @@ void updateLowerDisplayLine() {
 
 // Converts setting parameter value to UI display string
 // Handles different setting types (Num, ZeroAuto, Switch, SwitchAuto)
-// Uses PROGMEM table for text values to save memory
 void SettingParamToUI(char* buf, uint8_t idx) {
     int8_t param = g_Settings[idx].param;
-    uint8_t textIdx = 0xFF;
+    uint8_t textIdx;
 
     switch (g_Settings[idx].type) {
     case SettingType::Num:
-        // For Brightness, display the internal value (0-9) as (1-10) to the user
         if (idx == SettingsIndex::Brightness) param += 1;
-
-        // For numeric type, convert number to string
         convertToChar(buf, abs(param), 3);
         if (param < 0) buf[0] = '-';
         buf[3] = '\0';
         return;
 
     case SettingType::ZeroAuto:
-        // Zero shows "AUT", other values show as numbers
-        if (param == 0) textIdx = 0; // "AUT"
+        if (param == 0) {
+            textIdx = 0; // "AUT"
+        }
         else {
             convertToChar(buf, param, 3);
             buf[3] = '\0';
@@ -669,30 +645,24 @@ void SettingParamToUI(char* buf, uint8_t idx) {
         break;
 
     case SettingType::SwitchAuto:
-        // Direct mapping: 0="AUT", 1="On ", 2="Off"
         textIdx = param;
         break;
 
-    case SettingType::Switch:
-        // Different switches have different text mappings
-        if (idx == SettingsIndex::DeEmp)
-            textIdx = 3 + param; // 0="50u", 1="75u"
-        else if (idx == SettingsIndex::SWUnits)
-            textIdx = 5 + param; // 0="kHz", 1="MHz"
-        else if (idx == SettingsIndex::SSM)
-            textIdx = 7 + param; // 0="RSS", 1="SNR"
-        else if (idx == SettingsIndex::CWSwitch)
-            textIdx = 9 + param; // 0="LSB", 1="USB"
-        else if (idx == SettingsIndex::CPUSpeed)
-            textIdx = 11 + param; // 0="100", 1="50%"
-        else if (idx == SettingsIndex::AntennaCap)
-            textIdx = (param == 0) ? 1 : 2; // 0="On ", 1="Off"
-        else
-            textIdx = 2 - param; // Generic: 0="Off", 1="On "
+    case SettingType::Switch: {
+        // Read conversion rules directly from the PROGMEM map
+        uint8_t base = pgm_read_byte(&switch_setting_map[idx].baseIndex);
+        bool inv = pgm_read_byte(&switch_setting_map[idx].inverted);
+
+        if (inv) {
+            textIdx = base - param;
+        }
+        else {
+            textIdx = base + param;
+        }
         break;
     }
+    }
 
-    // Copy text from PROGMEM to buffer
     strcpy_P(buf, paramTexts[textIdx]);
 }
 
@@ -772,7 +742,7 @@ void switchSettings() {
 
 //Draw curremt modulation
 void showModulation() {
-    oledPrint(g_bandModeDesc[g_currentMode], 0, 0, DEFAULT_FONT, g_cmdBand && g_currentMode == FM);
+    oledPrint(g_bandModeDesc[g_currentMode], 0, 0, DEFAULT_FONT, g_activeCommand == CMD_BAND && g_currentMode == FM);
     oled.print(' ');
     updateStereoIndicator();
     showBandTag();
@@ -791,11 +761,10 @@ void updateStereoIndicator() {
 
 //Draw current band
 void showBandTag() {
-    //-- if (g_sMeterOn || g_displayRDS || g_settingsActive) // S-Meter check removed
     if (g_settingsActive)
         return;
 
-    bool invert = g_cmdBand && g_currentMode != FM;
+    bool invert = (g_activeCommand == CMD_BAND) && g_currentMode != FM;
 
     if (g_bandIndex == SW_BAND_TYPE) {
         uint16_t freq = g_currentFrequency;
@@ -839,7 +808,7 @@ void showVolume() {
         buf[2] = 0;
     }
 
-    oledPrint(buf, (128 - (8 * 2) + 2 - 6), 0, DEFAULT_FONT, g_cmdVolume);
+    oledPrint(buf, (128 - (8 * 2) + 2 - 6), 0, DEFAULT_FONT, g_activeCommand == CMD_VOLUME);
 }
 
 // RSSI drawings
@@ -1005,30 +974,40 @@ void showStep() {
     }
 
     uint8_t off = 50;
-    oledPrint("St:", off - 16, 6, DEFAULT_FONT, g_cmdStep);
-    oledPrint(buf, off + 8, 6, DEFAULT_FONT, g_cmdStep);
+    oledPrint("St:", off - 16, 6, DEFAULT_FONT, g_activeCommand == CMD_STEP);
+    oledPrint(buf, off + 8, 6, DEFAULT_FONT, g_activeCommand == CMD_STEP);
 }
 
 //Draw bandwidth (Ignored for CW mode)
 void showBandwidth() {
     char bw[5];
+    const char* const* table_ptr = NULL;
+    int8_t index = 0;
 
     if (isSSB()) {
         if (g_currentMode == CW) {
             bw[0] = '\0';
         }
         else {
-            strcpy_P(bw, (char*)pgm_read_word(&(bw_ssb_table[g_bwIndexSSB])));
+            table_ptr = bw_ssb_table;
+            index = g_bwIndexSSB;
         }
     }
     else if (g_currentMode == AM) {
-        strcpy_P(bw, (char*)pgm_read_word(&(bw_am_table[g_bwIndexAM])));
+        table_ptr = bw_am_table;
+        index = g_bwIndexAM;
     }
-    else {
-        strcpy_P(bw, (char*)pgm_read_word(&(bw_fm_table[g_bwIndexFM])));
+    else { // FM
+        table_ptr = bw_fm_table;
+        index = g_bwIndexFM;
     }
 
-    oledPrint(bw, 45, 0, DEFAULT_FONT, g_cmdBw);
+    // Perform the copy operation only if a table was selected (handles CW mode)
+    if (table_ptr != NULL) {
+        strcpy_P(bw, (char*)pgm_read_word(&table_ptr[index]));
+    }
+
+    oledPrint(bw, 45, 0, DEFAULT_FONT, g_activeCommand == CMD_BW);
 }
 
 uint16_t getNextSWSuBband(bool up) {
@@ -1209,6 +1188,22 @@ void configureAMCommon(uint16_t minFreq, uint16_t maxFreq) {
     g_si4735.setSeekAmSpacing(g_tabStep[g_stepIndexAM]);
 }
 
+// Applies AGC settings based on current mode and stored values
+void applyAgcSettings() {
+    ModeContext modeCtx = getModeContext();
+    int8_t att_val = g_modeSettings[MODE_SETTING_AGC][modeCtx];
+
+    // ñcorrectly handles the AUTO mode (att_val = 0)
+    bool disableAgc = att_val > 0;
+    uint8_t agcNdx = 0;
+
+    if (att_val > 1) {
+        agcNdx = att_val - 1;
+    }
+
+    g_si4735.setAutomaticGainControl(disableAgc, agcNdx);
+}
+
 // Main band switching logic that coordinates mode transitions and amplifier control
 void applyBandConfiguration(bool extraSSBReset) {
     // if transitioning between FM and pure AM
@@ -1250,15 +1245,7 @@ void applyBandConfiguration(bool extraSSBReset) {
         configureAMCommon(minFreq, maxFreq);
     }
 
-    ModeContext modeCtx = getModeContext();
-    uint8_t att_val = g_modeSettings[MODE_SETTING_AGC][modeCtx];
-    uint8_t max_att = (g_currentMode == FM) ? 26 : 37;
-
-    if (att_val > max_att || att_val == 0) {
-        att_val = max_att;
-        g_modeSettings[MODE_SETTING_AGC][modeCtx] = att_val;
-    }
-    g_si4735.setAutomaticGainControl(true, att_val - 1);
+    applyAgcSettings();
 
     if (!g_settingsActive) {
         // Clear OLED buffer
@@ -1346,12 +1333,14 @@ void doSwitchLogic(int8_t& param, int8_t low, int8_t high, int8_t step) {
 //Settings: Attenuation
 void doAttenuation(int8_t v) {
     uint8_t max_att_value = (g_currentMode == FM) ? 26 : 37;
-    doSwitchLogic(g_Settings[ATT].param, 1, max_att_value, v);
+    doSwitchLogic(g_Settings[ATT].param, 0, max_att_value, v);
 
     // Apply the change immediately for real-time feedback in the menu
-    uint8_t att_val = g_Settings[ATT].param;
-    uint8_t disableAgc = (att_val > 0);
+    int8_t att_val = g_Settings[ATT].param;
+
+    bool disableAgc = (att_val > 0);
     uint8_t agcNdx = (att_val > 1) ? (att_val - 1) : 0;
+
     g_si4735.setAutomaticGainControl(disableAgc, agcNdx);
 }
 
@@ -1505,50 +1494,42 @@ void doBandwidth(uint8_t v) {
         doSwitchLogic(g_bwIndexAM, 0, g_maxFilterAM, v);
         g_si4735.setBandwidth(g_bwAMIdx[g_bwIndexAM], 1);
     }
-    else {
-        doSwitchLogic(g_bwIndexFM, 0, 4, v);
+    else { // FM
+        // The table is ordered wide-to-narrow, so a right turn (v=+1) should decrease the index
+        doSwitchLogic(g_bwIndexFM, 0, 4, -v);
         g_si4735.setFmBandwidth(g_bwIndexFM);
     }
     showBandwidth();
 }
 
-void switchCommand(bool* b, void (*showFunction)()) {
-    static bool* prev = NULL;
-    static void (*prevFunc)() = NULL;
-
-    if (!b) {
-        if (prev) {
-            *prev = false;
-            if (prevFunc)
-                prevFunc();
-            g_lastAdjustmentTime = 0;
-            prev = NULL;
-        }
-        return;
+// switch command modes
+void switchCommand(CommandMode mode) {
+    if (g_activeCommand != mode) { // Switching to a new mode or activating one
+        g_activeCommand = mode;
+        g_lastAdjustmentTime = millis();
+    }
+    else { // Pressing the same button again to deactivate
+        g_activeCommand = CMD_NONE;
+        g_lastAdjustmentTime = 0;
     }
 
-    bool last = *b;
-    prev = b;
-    prevFunc = showFunction;
+    // Refresh all indicators to show the new state
+    showVolume();
+    showStep();
+    showBandwidth();
+    showModulation();
+}
 
-    if (*b == false) {
-        g_cmdVolume = false;
-        g_cmdStep = false;
-        g_cmdBw = false;
-        g_cmdBand = false;
-        g_lastAdjustmentTime = millis();
+//  helper to reset any active command mode
+void resetCommandMode() {
+    if (g_activeCommand != CMD_NONE) {
+        g_activeCommand = CMD_NONE;
+        g_lastAdjustmentTime = 0;
         showVolume();
         showStep();
         showBandwidth();
         showModulation();
     }
-    else
-        g_lastAdjustmentTime = 0;
-
-    *b = !last;
-
-    if (showFunction)
-        showFunction();
 }
 
 bool clampSSBBand() {
@@ -1666,11 +1647,7 @@ void doFrequencyTuneSSB() {
     if (redundant != 0) {
         g_si4735.setFrequency(g_currentFrequency);
         // Re-apply AGC settings after a large frequency jump
-        ModeContext modeCtx = getModeContext();
-        uint8_t att_val = g_modeSettings[MODE_SETTING_AGC][modeCtx];
-        uint8_t disableAgc = (att_val > 0);
-        uint8_t agcNdx = (att_val > 1) ? (att_val - 1) : 0;
-        g_si4735.setAutomaticGainControl(disableAgc, agcNdx);
+        applyAgcSettings();
 
         g_currentFrequency = g_si4735.getFrequency();
         g_bandList[g_bandIndex].currentFreq = g_currentFrequency;
@@ -1683,91 +1660,115 @@ void doFrequencyTuneSSB() {
         showFrequency();
 }
 
-// key process for all keys
-void processButtonEvents() {
-    uint8_t evt;
+// helper functions for processButtonEvents
+// declared as static inline to hint the compiler, avoids function call overhead
+// this refactoring improves code readability with a minimal impact on flash size
 
-    // Lambda to cleanly exit the favorites menu
-    auto exitFavorites = [&]() {
+static inline void handleEncoderButton() {
+    // encoder button handler
+    uint8_t evt = btn_Encoder.checkEvent(simpleEvent);
+    if (BUTTONEVENT_SHORTPRESS != evt) return;
+
+    if (g_activeCommand != CMD_NONE) {
+        // if a command mode is active, encoder button cancels it
+        resetCommandMode();
+    }
+    else if (g_settingsActive) {
+        // in settings menu, it toggles editing mode for the selected item
+        g_SettingEditing = !g_SettingEditing;
+        DrawSetting(g_SettingSelected, true);
+    }
+    else if (g_favoritesActive) {
+        // in favorites menu, it tunes to the selected favorite and exits
+        if (g_totalFavorites) {
+            g_currentFrequency = g_fmFavorites[g_favoriteSelected].frequency;
+            g_si4735.setFrequency(g_currentFrequency);
+        }
+        // original lambda 'exitFavorites' inlined here to save flash
         g_favoritesActive = false;
         oled.clear();
         showStatus();
-        };
-
-    // --- Encoder Button ---
-    evt = btn_Encoder.checkEvent(simpleEvent);
-    if (BUTTONEVENT_SHORTPRESS == evt) {
-        if (g_lastAdjustmentTime) {
-            switchCommand(NULL, NULL); // Cancel any active command mode
-        }
-        else if (g_settingsActive) {
-            g_SettingEditing = !g_SettingEditing;
-            DrawSetting(g_SettingSelected, true);
-        }
-        else if (g_favoritesActive) {
-            if (g_totalFavorites) {
-                g_currentFrequency = g_fmFavorites[g_favoriteSelected].frequency;
-                g_si4735.setFrequency(g_currentFrequency);
-            }
-            exitFavorites();
-        }
-        else if (isSSB() || !g_Settings[ScanSwitch].param) {
-            switchCommand(&g_cmdStep, showStep);
-        }
-        else if (g_currentMode == FM || g_currentMode == AM) {
-            doSeek();
-        }
     }
-
-    // --- Bandwidth (BW) Button ---
-    evt = btn_Bandwidth.checkEvent(simpleEvent);
-    if (BUTTONEVENT_SHORTPRESS == evt) {
-        if (g_favoritesActive) {
-            delFav();
-            oled.clear();
-            showFav();
-        }
-        else if (!g_settingsActive && g_currentMode != CW) {
-            switchCommand(&g_cmdBw, showBandwidth);
-        }
+    else if (isSSB() || !g_Settings[ScanSwitch].param) {
+        // default action: enter step adjustment mode, seek is disabled in ssb
+        switchCommand(CMD_STEP);
     }
-
-    // --- Band Up Button ---
-    evt = btn_BandUp.checkEvent(bandEvent);
-    if (BUTTONEVENT_SHORTPRESS == evt) {
-        if (g_favoritesActive) {
-            exitFavorites();
-        }
-        else if (g_settingsActive) {
-            switchSettingsPage();
-        }
-        else {
-            switchCommand(&g_cmdBand, showModulation);
-        }
+    else if (g_currentMode == FM || g_currentMode == AM) {
+        // in am/fm, if scan is enabled in settings, it starts the seek function
+        doSeek();
     }
+}
 
-    // --- Band Down Button ---
-    evt = btn_BandDn.checkEvent(bandEvent);
-    if (BUTTONEVENT_SHORTPRESS == evt) {
-        if (g_favoritesActive) {
-            exitFavorites();
-        }
-        else {
-            if (!g_settingsActive) switchCommand(NULL, NULL);
-            g_settingsActive = !g_settingsActive;
-            switchSettings();
-        }
+static inline void handleBandwidthButton() {
+    // bandwidth (bw) button handler
+    uint8_t evt = btn_Bandwidth.checkEvent(simpleEvent);
+    if (BUTTONEVENT_SHORTPRESS != evt) return;
+
+    if (g_favoritesActive) {
+        // in favorites menu, this button deletes the selected favorite
+        delFav();
+        oled.clear();
+        showFav();
     }
+    else if (!g_settingsActive && g_currentMode != CW) {
+        // in main screen, it enters bandwidth adjustment mode (not available for cw)
+        switchCommand(CMD_BW);
+    }
+}
 
-    // --- Volume Up Button ---
-    evt = btn_VolumeUp.checkEvent(volumeEvent);
+static inline void handleBandUpButton() {
+    // band up button handler
+    uint8_t evt = btn_BandUp.checkEvent(bandEvent);
+    if (BUTTONEVENT_SHORTPRESS != evt) return;
+
+    if (g_favoritesActive) {
+        // any navigation button exits the favorites menu
+        g_favoritesActive = false;
+        oled.clear();
+        showStatus();
+    }
+    else if (g_settingsActive) {
+        // in settings menu, it switches to the next page
+        switchSettingsPage();
+    }
+    else {
+        // in main screen, it enters band selection mode
+        switchCommand(CMD_BAND);
+    }
+}
+
+static inline void handleBandDownButton() {
+    // band down button (settings) handler
+    uint8_t evt = btn_BandDn.checkEvent(bandEvent);
+    if (BUTTONEVENT_SHORTPRESS != evt) return;
+
+    if (g_favoritesActive) {
+        // any navigation button exits the favorites menu
+        g_favoritesActive = false;
+        oled.clear();
+        showStatus();
+    }
+    else {
+        // this button's primary role is to toggle the main settings menu
+        resetCommandMode(); // ensure no command is active when entering settings
+        g_settingsActive = !g_settingsActive;
+        switchSettings();
+    }
+}
+
+static inline void handleVolumeUpButton() {
+    // volume up button handler
+    uint8_t evt = btn_VolumeUp.checkEvent(volumeEvent);
     if (BUTTONEVENT_SHORTPRESS == evt && !g_settingsActive && !g_favoritesActive && !g_muteVolume) {
-        switchCommand(&g_cmdVolume, showVolume);
+        switchCommand(CMD_VOLUME);
     }
+}
 
-    // --- Volume Down Button (Mute) ---
-    evt = btn_VolumeDn.checkEvent(volumeEvent);
-    if (BUTTONEVENT_SHORTPRESS == evt && !g_favoritesActive && !g_cmdVolume) {
+static inline void handleVolumeDownButton() {
+    // volume down button (mute) handler
+    uint8_t evt = btn_VolumeDn.checkEvent(volumeEvent);
+    if (BUTTONEVENT_SHORTPRESS == evt && !g_favoritesActive && g_activeCommand != CMD_VOLUME) {
+        // toggles mute, saves the current volume to restore it later
         uint8_t vol = g_si4735.getCurrentVolume();
         if (vol && !g_muteVolume) {
             g_muteVolume = vol;
@@ -1779,54 +1780,64 @@ void processButtonEvents() {
         }
         showVolume();
     }
+}
 
-    // --- AGC Button (Display On/Off, Sync) ---
-    evt = btn_AGC.checkEvent(simpleEvent);
+static inline void handleAgcButton() {
+    // agc button (display on/off) handler
+    uint8_t evt = btn_AGC.checkEvent(simpleEvent);
     if (BUTTONEVENT_SHORTPRESS == evt) {
+        // toggles the oled display on and off
         if (!g_settingsActive || (g_settingsActive && !g_displayOn)) {
             g_displayOn = !g_displayOn;
             g_displayOn ? oled.on() : oled.off();
         }
     }
-    else if (BUTTONEVENT_LONGPRESS == evt && !g_settingsActive && !g_favoritesActive && isSSB()) {
-        doSync(1);
-    }
+}
 
-    // --- Step Button ---
-    evt = btn_Step.checkEvent(simpleEvent);
+static inline void handleStepButton() {
+    // step button handler
+    uint8_t evt = btn_Step.checkEvent(simpleEvent);
     if (BUTTONEVENT_SHORTPRESS == evt && !g_settingsActive && !g_favoritesActive) {
-        switchCommand(&g_cmdStep, showStep);
+        switchCommand(CMD_STEP);
     }
+}
 
-    // --- Mode Button (Favorites, Modulation) ---
-    evt = btn_Mode.checkEvent(simpleEvent);
+static inline void handleModeButton() {
+    // mode button (favorites, modulation) handler
+    uint8_t evt = btn_Mode.checkEvent(simpleEvent);
+
+    // short press logic
     if (BUTTONEVENT_SHORTPRESS == evt && !g_settingsActive) {
         if (g_favoritesActive) {
-            exitFavorites();
+            g_favoritesActive = false;
+            oled.clear();
+            showStatus();
         }
         else if (g_currentMode == FM) {
+            // in fm mode, this button enters the favorites menu
             g_favoritesActive = true;
             g_favoriteSelected = 0;
             oled.clear();
             showFav();
         }
         else {
-            // This block handles modulation switching between AM, LSB, USB, CW
+            // in am/ssb/cw modes, it cycles through the available modulations
             uint8_t bw = (g_currentMode == AM) ? g_bwIndexAM : g_bwIndexSSB;
             syncActiveStateToBand();
 
             if (g_currentMode == CW) safeAmpOff();
 
-            // When switching from AM to SSB, the patch must be loaded.
+            // when switching from am to ssb for the first time, the patch must be loaded
             if (g_currentMode == AM) {
                 loadSSBPatch();
                 g_bwIndexSSB = bw;
                 g_processFreqChange = false;
             }
 
-            g_currentMode = (g_currentMode + 1) % 4; // AM -> LSB -> USB -> CW -> AM
+            // cycle through am(0), lsb(1), usb(2), cw(3)
+            g_currentMode = (g_currentMode + 1) % 4;
 
-            // When switching back to AM, unload SSB patch flag
+            // when switching back to am, unload the ssb patch flag to return to normal am operation
             if (g_currentMode == AM) {
                 g_ssbLoaded = false;
                 g_bwIndexAM = bw;
@@ -1837,13 +1848,28 @@ void processButtonEvents() {
             if (!g_ssbLoaded && g_currentMode == AM) safeAmpOn();
         }
     }
+    // long press logic (only for fm mode)
     else if (BUTTONEVENT_LONGPRESSDONE == evt && !g_settingsActive && g_currentMode == FM && !g_favoritesActive) {
+        // in fm mode, a long press adds the current station to favorites
         addFav();
         oled.setCursor(45, 3);
         oled.print(F("SAVED"));
         delay(500);
         showFrequency(true);
     }
+}
+
+// key process for all keys
+void processButtonEvents() {
+    handleEncoderButton();
+    handleBandwidthButton();
+    handleBandUpButton();
+    handleBandDownButton();
+    handleVolumeUpButton();
+    handleVolumeDownButton();
+    handleAgcButton();
+    handleStepButton();
+    handleModeButton();
 }
 
 // Safely reads the accumulated encoder value from the interrupt context.
@@ -1871,7 +1897,7 @@ void handleFavoritesMenu() {
 // Handles encoder actions for settings, commands, and frequency tuning.
 // Returns true if the action was a frequency tune, false otherwise.
 bool processEncoderActions() {
-    if (g_lastAdjustmentTime) g_lastAdjustmentTime = millis();
+    if (g_lastAdjustmentTime && g_activeCommand != CMD_NONE) g_lastAdjustmentTime = millis();
 
     g_encoderCount = g_safeEncoderMovement;
 
@@ -1892,23 +1918,32 @@ bool processEncoderActions() {
             delay(MIN_ELAPSED_TIME);
         }
     }
-    else if (g_cmdVolume) doVolume(g_safeEncoderMovement);
-    else if (g_cmdStep) doStep(g_safeEncoderMovement);
-    else if (g_cmdBw) doBandwidth(g_safeEncoderMovement);
-    else if (g_cmdBand) bandSwitch(g_safeEncoderMovement == 1);
-    else if (isSSB()) {
-        doFrequencyTuneSSB();
-        g_safeEncoderMovement = 0;
-        g_encoderCount = 0;
-        resetEepromDelay();
-        return true; // This replaces skip = true
-    }
     else {
-        doFrequencyTune();
-        g_safeEncoderMovement = 0;
-        g_encoderCount = 0;
-        resetEepromDelay();
-        return true; // This replaces skip = true
+        switch (g_activeCommand) {
+        case CMD_VOLUME:
+            doVolume(g_safeEncoderMovement);
+            break;
+        case CMD_STEP:
+            doStep(g_safeEncoderMovement);
+            break;
+        case CMD_BW:
+            doBandwidth(g_safeEncoderMovement);
+            break;
+        case CMD_BAND:
+            bandSwitch(g_safeEncoderMovement == 1);
+            break;
+        case CMD_NONE: // If no command mode is active, tune frequency
+            if (isSSB()) {
+                doFrequencyTuneSSB();
+            }
+            else {
+                doFrequencyTune();
+            }
+            g_safeEncoderMovement = 0;
+            g_encoderCount = 0;
+            resetEepromDelay();
+            return true; // This replaces skip = true
+        }
     }
 
     g_safeEncoderMovement = 0;
@@ -1958,8 +1993,9 @@ void handlePeriodicTasks() {
         }
     }
 
-    if (g_lastAdjustmentTime && millis() - g_lastAdjustmentTime > ADJUSTMENT_ACTIVE_TIMEOUT)
-        switchCommand(NULL, NULL);
+    if (g_lastAdjustmentTime && millis() - g_lastAdjustmentTime > ADJUSTMENT_ACTIVE_TIMEOUT) {
+        resetCommandMode();
+    }
 
     updateAndShowBattery(false);
 
@@ -1996,6 +2032,11 @@ void loop() {
     // Process buttons only if the encoder was not used for frequency tuning in this cycle
     if (!frequencyTuned) {
         processButtonEvents();
+    }
+
+    // Check for command mode timeout
+    if (g_lastAdjustmentTime && millis() - g_lastAdjustmentTime > ADJUSTMENT_ACTIVE_TIMEOUT) {
+        resetCommandMode();
     }
 
     handlePeriodicTasks();

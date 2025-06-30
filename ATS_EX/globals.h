@@ -25,6 +25,15 @@ const uint8_t g_SettingsMaxPages = 3;
 const int16_t CW_PITCH_OFFSET_HZ = 500; // 500 Hz pitch for CW tone generation
 const uint8_t MAX_FM_FAVORITES = 10;
 
+// NEW ENUM for Command Mode
+enum CommandMode : uint8_t {
+    CMD_NONE,
+    CMD_VOLUME,
+    CMD_STEP,
+    CMD_BW,
+    CMD_BAND,
+    CMD_SLEEP
+};
 
 // Enum for convenient access to mode-dependent settings
 enum ModeSettingType {
@@ -129,11 +138,7 @@ bool g_displayOn = true;
 bool g_seekStop = false;
 uint32_t g_lastAdjustmentTime = 0;
 
-bool g_cmdVolume = false;
-bool g_cmdStep = false;
-bool g_cmdBw = false;
-bool g_cmdBand = false;
-
+volatile CommandMode g_activeCommand = CMD_NONE;
 bool g_settingsActive = false;
 bool g_settingsDirty = false;
 int8_t g_SettingSelected = 0;
@@ -166,6 +171,12 @@ bool g_favoritesActive = false;
 uint8_t g_favoriteSelected = 0;
 uint8_t g_totalFavorites = 0;
 
+// Sleep Timer Feature
+bool g_isEditingSleepMute = false;   // 0 = Display timer, 1 = Mute timer
+uint8_t g_sleepDisplayMinutes = 0;   // Minutes to turn off display (0=off)
+uint8_t g_sleepMuteMinutes = 0;      // Minutes to mute volume (0=off)
+uint32_t g_sleepDisplayEndTime = 0;  // 0 if timer is not active
+uint32_t g_sleepMuteEndTime = 0;     // 0 if timer is not active
 
 SimpleButton  btn_Bandwidth(BANDWIDTH_BUTTON);
 SimpleButton  btn_BandUp(BAND_BUTTON);
@@ -188,9 +199,9 @@ int8_t g_modeSettings[MODE_SETTINGS_COUNT][MODE_CONTEXT_COUNT];
 // Source for default values, centralized here
 const ModeDefaults defaultModeSettings[MODE_CONTEXT_COUNT] = {
     // [MODE_CONTEXT_AM]
-    {.agc = 1, .soft_mute = 0, .avc = 90 },
+    {.agc = 0, .soft_mute = 0, .avc = 90 },
     // [MODE_CONTEXT_SSB]
-    {.agc = 1, .soft_mute = 0, .avc = 90 }
+    {.agc = 0, .soft_mute = 0, .avc = 90 }
 };
 
 // used by SettingParamToUI function to convert parameter values to display strings
@@ -199,29 +210,57 @@ const char PROGMEM paramTexts[][4] = {
   "RSS", "SNR", "LSB", "USB", "100", "50%"
 };
 
-// "UI Buffer" - a temporary buffer for the settings UI
-// It is populated from g_modeSettings upon entering the menu
-// Initial values now correspond to the AM context defaults
+// "UI Buffer" - A temporary buffer for the settings UI, stored in RAM
+// It holds the live state of settings while the user is in the menu
+// This buffer is populated from g_modeSettings upon entering the menu
+// The initial values here are defaults and will be overwritten
 SettingsItem g_Settings[] =
 {
-    { "ATT", 1,  SettingType::ZeroAuto,     doAttenuation     },
-    { "SM ", 0,  SettingType::Num,          doSoftMute        },
-    { "SVC", 1,  SettingType::Switch,       doSSBAVC          },
-    { "SYN", 0,  SettingType::Switch,       doSync            },
-    { "DE",  1,  SettingType::Switch,       doDeEmp           },
-    { "AVC", 90, SettingType::Num,          doAvc             },
-    { "SCR", 9,  SettingType::Num,          doBrightness      },
-    { "SWU", 0,  SettingType::Switch,       doSWUnits         },
-    { "SSM", 1,  SettingType::Switch,       doSSBSoftMuteMode },
-    { "COF", 0,  SettingType::SwitchAuto,   doCutoffFilter    },
-    { "CPU", 0,  SettingType::Switch,       doCPUSpeed        },
-    { "BFO", 0,  SettingType::Num,          doBFOCalibration  },
-    { "UNI", 1,  SettingType::Switch,       doUnitsSwitch     },
-    { "SCN", 1,  SettingType::Switch,       doScanSwitch      },
-    { "CW ", 0,  SettingType::Switch,       doCWSwitch        },
-    { "CAP", 1,  SettingType::Switch,       doAntennaCapacitor},
+    //  { Name, Default Param,     Behavior,    Callback          }
+        { "ATT", 0,  SettingType::ZeroAuto,     doAttenuation     },
+        { "SM ", 0,  SettingType::Num,          doSoftMute        },
+        { "SVC", 1,  SettingType::Switch,       doSSBAVC          },
+        { "SYN", 0,  SettingType::Switch,       doSync            },
+        { "DE",  1,  SettingType::Switch,       doDeEmp           },
+        { "AVC", 90, SettingType::Num,          doAvc             },
+        { "SCR", 9,  SettingType::Num,          doBrightness      },
+        { "SWU", 0,  SettingType::Switch,       doSWUnits         },
+        { "SSM", 1,  SettingType::Switch,       doSSBSoftMuteMode },
+        { "COF", 0,  SettingType::SwitchAuto,   doCutoffFilter    },
+        { "CPU", 0,  SettingType::Switch,       doCPUSpeed        },
+        { "BFO", 0,  SettingType::Num,          doBFOCalibration  },
+        { "UNI", 1,  SettingType::Switch,       doUnitsSwitch     },
+        { "SCN", 1,  SettingType::Switch,       doScanSwitch      },
+        { "CW ", 0,  SettingType::Switch,       doCWSwitch        },
+        { "CAP", 1,  SettingType::Switch,       doAntennaCapacitor},
 };
 
+// Defines how a setting's parameter is converted into a text index
+struct SwitchMapEntry {
+    uint8_t baseIndex;
+    bool inverted;     // if true, the parameter is subtracted from the base index
+};
+
+// defines the text conversion rules ONLY for settings of type 'Switch'
+// it  is indexed here by the SettingsIndex enum
+const PROGMEM SwitchMapEntry switch_setting_map[] = {
+    [ATT] = {0, false}, // Ignored, type is ZeroAuto
+    [SoftMute] = {0, false}, // Ignored, type is Num
+    [SVC] = {2, true},
+    [Sync] = {2, true},
+    [DeEmp] = {3, false},
+    [AutoVolControl] = {0, false}, // Ignored, type is Num
+    [Brightness] = {0, false}, // Ignored, type is Num
+    [SWUnits] = {5, false},
+    [SSM] = {7, false},
+    [CutoffFilter] = {0, false}, // Ignored, type is SwitchAuto
+    [CPUSpeed] = {11, false},
+    [BFO] = {0, false}, // Ignored, type is Num
+    [UnitsSwitch] = {2, true},
+    [ScanSwitch] = {2, true},
+    [CWSwitch] = {9, false},
+    [AntennaCap] = {1, false}
+};
 
 // For SSB - using PROGMEM to save RAM
 const char bw_ssb_0[] PROGMEM = "0.5k";

@@ -11,40 +11,20 @@ void oledSetFont(const DCfont* font)
     }
 }
 
-void oledPrint(const char* text, int offX = -1, int offY = -1, const DCfont* font = LastFont, bool invert = false)
+template <typename T>
+void oledPrint(T value, int offX = -1, int offY = -1, const DCfont* font = LastFont, bool invert = false)
 {
     oledSetFont(font);
     if (invert)
         oled.invertOutput(invert);
     if (offX >= 0 && offY >= 0)
         oled.setCursor(offX, offY);
-    oled.print(text);
+
+    oled.print(value);
+
     if (invert)
         oled.invertOutput(false);
 }
-
-void oledPrint(uint16_t u, int offX = -1, int offY = -1, const DCfont* font = LastFont, bool invert = false)
-{
-    oledSetFont(font);
-    if (invert)
-        oled.invertOutput(invert);
-    if (offX >= 0 && offY >= 0)
-        oled.setCursor(offX, offY);
-    oled.print(u);
-    if (invert)
-        oled.invertOutput(false);
-}
-
-// Вспомогательная функция для печати PROGMEM строк
-void oledPrintP(const char* str, int16_t x, int16_t y, const DCfont* font = DEFAULT_FONT, bool invert = false)
-{
-    char buffer[17];
-    strcpy_P(buffer, str);
-    oledPrint(buffer, x, y, font, invert);
-}
-
-// Макрос для очистки строки
-#define OLED_CLEAR_LINE(y) oledPrintP(str_EmptyLine, 0, y, DEFAULT_FONT)
 
 //Faster alternative for convertToChar
 void utoa(char* out, uint16_t num)
@@ -65,7 +45,6 @@ void utoa(char* out, uint16_t num)
                 *p++ = '0';
         }
     }
-
     *p = '\0';
 }
 
@@ -101,7 +80,7 @@ void convertToChar(char* strValue, uint16_t value, uint8_t len, uint8_t dot = 0,
 }
 
 //Measure integer digit length
-int ilen(uint16_t n)
+uint8_t ilen(uint16_t n)
 {
     if (n < 10)
         return 1;
@@ -118,15 +97,15 @@ int ilen(uint16_t n)
 //Split KHz frequency + BFO to KHz and .00 tail
 void splitFreq(uint16_t& khz, uint16_t& tail)
 {
-    int32_t freq = (uint32_t(g_currentFrequency) * 1000) + g_currentBFO;
+    int32_t freq = (static_cast<int32_t>(g_currentFrequency) * 1000) + g_currentBFO;
     khz = freq / 1000;
     tail = abs(freq % 1000) / 10;
 }
 
-uint8_t strlen8(const char* str)
+uint8_t strlen8(const char* s)
 {
-    uint8_t n = 0;
-    while (str[n] != '\0')
-        n++;
-    return n;
+    const char* start = s;
+    while (*s)
+        s++;
+    return s - start;
 }
