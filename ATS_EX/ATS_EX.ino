@@ -9,7 +9,7 @@
 // 02.2024
 // http://github.com/goshante
 // ----------------------------------------------------------------------
-// MOD_NO_RDS_v3 by diqezit
+// MOD_NO_RDS_v3.1 by diqezit
 // More info you can get below
 // https://github.com/goshante/ats20_ats_ex/issues/42
 // ----------------------------------------------------------------------
@@ -80,10 +80,6 @@ void setup() {
     if (!(PINC & (1 << (ENCODER_BUTTON - 14))) || !(PINB & (1 << (AGC_BUTTON - 8)))) {
         // Invalidate version to trigger reset logic
         EEPROM.write(EEPROM_VERSION_ADDRESS, 0);
-
-        oled.setCursor(0, 2);
-        oled.print(F("  EEPROM RESET"));
-        delay(2000);
     }
     else {
         showSplashScreen();
@@ -273,8 +269,8 @@ void saveAllReceiverInformation(bool full_save = true) {
     EEPROM.update(addr++, g_currentBFO & 0xFF);
     EEPROM.update(addr++, g_prevMode);
 
-    // This optimized loop avoids code duplication to save flash space.
-    // It saves either all bands (on full_save) or only the current band.
+    // This loop avoids code duplication to save flash space
+    // It saves either all bands (on full_save) or only the current band
     uint8_t start_band = full_save ? 0 : g_bandIndex;
     uint8_t end_band = full_save ? g_lastBand : g_bandIndex;
     for (uint8_t i = start_band; i <= end_band; i++) {
@@ -1289,18 +1285,20 @@ void doStep(int8_t v) {
     }
 }
 
-// Calculates and sets the final BFO 
-// it combines user tuning, calibration, and an automatic offset for CW mode
-// final value is inverted as required by the IC
+// Corrected CW BFO offset logic to match standard radio behavior
+// The Si4735 IC requires an inverted BFO value, so the math is reversed here to compensate
+// To get a positive BFO offset for USB, the value must be negative before the final inversion
+// See: https://github.com/goshante/ats20_ats_ex/issues/42#issuecomment-3015265184
 void updateBFO() {
-    int16_t finalBfo = g_currentBFO + (g_Settings[BFO].param * 10);
+
+    int16_t finalBfo = g_currentBFO + (g_Settings[BFO].param * 100);
 
     if (g_currentMode == CW) {
         if (g_Settings[CWSwitch].param == 1) { // 1 = USB
-            finalBfo += CW_PITCH_OFFSET_HZ;
+            finalBfo -= CW_PITCH_OFFSET_HZ;
         }
         else { // 0 = LSB
-            finalBfo -= CW_PITCH_OFFSET_HZ;
+            finalBfo += CW_PITCH_OFFSET_HZ;
         }
     }
 
@@ -1430,9 +1428,11 @@ void doCPUSpeed(int8_t v = 0) {
     interrupts();
 }
 
-//Settings: BFO Offset calibration
+// Settings: BFO Offset calibration
 void doBFOCalibration(int8_t v) {
-    doSwitchLogic(g_Settings[BFO].param, -60, 60, v);
+    // Expanded range to -25..+25. With a x100 multiplier in updateBFO(),
+    // this provides a +/- 2.5kHz calibration range in 100Hz step
+    doSwitchLogic(g_Settings[BFO].param, -25, 25, v);
 
     if (isSSB()) {
         updateBFO();
@@ -1571,11 +1571,16 @@ void doFrequencyTune() {
     showFrequency();
 }
 
-//Special feature to make SSB feel like on expensive TECSUN receivers
-//BFO is now part of main frequency in SSB mode
+// Special feature to make SSB feel like on expensive TECSUN receivers
+// BFO is now part of main frequency in SSB mode
 void doFrequencyTuneSSB() {
-    const int BFOMax = 16000;
-    // This logic now correctly gets the step value in Hz, including the new kHz-equivalent steps
+
+    // Reduced BFOMax from 16000 to 13000 to create a safe buffer
+    // This prevents the total BFO offset (tuning + calibration + CW tone)
+    // from exceeding the Si4732's hardware limit of +/- 16383 Hz
+    // See: https://github.com/goshante/ats20_ats_ex/issues/42#issuecomment-3015265184
+    const int BFOMax = 13000;
+
     int step = g_tabStep[SSB_STEP_OFFSET + g_stepIndexSSB] * g_encoderCount;
     int newBFO = g_currentBFO + step;
     int redundant = 0;
@@ -1777,30 +1782,80 @@ void processButtonEvents() {
     }
 }
 
-// main loop program in process order
-void loop() {
-    bool skip = false;
-    bool recent = millis() - g_lastFreqChange < 70;
-
+// Safely reads the accumulated encoder value from the interrupt context.
+void updateEncoderState() {
     if (g_encoderCount) {
         noInterrupts();
         g_safeEncoderMovement += g_encoderCount;
         g_encoderCount = 0;
         interrupts();
     }
+}
 
-    // Handle favorites menu navigation with bounds checking
-    if (g_favoritesActive) {
-        if (g_safeEncoderMovement) {
-            if (g_totalFavorites > 0) {
-                g_favoriteSelected = (g_favoriteSelected + g_safeEncoderMovement + g_totalFavorites) % g_totalFavorites;
-                showFav();
-            }
-            g_safeEncoderMovement = 0;
+// Handles all user input and display updates when in the Favorites menu.
+void handleFavoritesMenu() {
+    if (g_safeEncoderMovement) {
+        if (g_totalFavorites > 0) {
+            g_favoriteSelected = (g_favoriteSelected + g_safeEncoderMovement + g_totalFavorites) % g_totalFavorites;
+            showFav();
         }
-        processButtonEvents();
-        return;
+        g_safeEncoderMovement = 0;
     }
+    processButtonEvents();
+}
+
+// Handles encoder actions for settings, commands, and frequency tuning.
+// Returns true if the action was a frequency tune, false otherwise.
+bool processEncoderActions() {
+    if (g_lastAdjustmentTime) g_lastAdjustmentTime = millis();
+
+    g_encoderCount = g_safeEncoderMovement;
+
+    if (g_settingsActive) {
+        if (!g_SettingEditing) {
+            int8_t prev = g_SettingSelected;
+            g_SettingSelected += g_safeEncoderMovement;
+            uint8_t page = g_SettingsPage - 1;
+            uint8_t max = min((page * 6) + 5, SettingsIndex::SETTINGS_MAX - 1);
+            if (g_SettingSelected < page * 6) g_SettingSelected = max;
+            else if (g_SettingSelected > max) g_SettingSelected = page * 6;
+            DrawSetting(prev, true);
+            DrawSetting(g_SettingSelected, true);
+        }
+        else {
+            (*g_Settings[g_SettingSelected].manipulateCallback)(g_safeEncoderMovement);
+            DrawSetting(g_SettingSelected, false);
+            delay(MIN_ELAPSED_TIME);
+        }
+    }
+    else if (g_cmdVolume) doVolume(g_safeEncoderMovement);
+    else if (g_cmdStep) doStep(g_safeEncoderMovement);
+    else if (g_cmdBw) doBandwidth(g_safeEncoderMovement);
+    else if (g_cmdBand) bandSwitch(g_safeEncoderMovement == 1);
+    else if (isSSB()) {
+        doFrequencyTuneSSB();
+        g_safeEncoderMovement = 0;
+        g_encoderCount = 0;
+        resetEepromDelay();
+        return true; // This replaces skip = true
+    }
+    else {
+        doFrequencyTune();
+        g_safeEncoderMovement = 0;
+        g_encoderCount = 0;
+        resetEepromDelay();
+        return true; // This replaces skip = true
+    }
+
+    g_safeEncoderMovement = 0;
+    g_encoderCount = 0;
+    resetEepromDelay();
+    return false;
+}
+
+// Handles the delayed frequency update for AM/FM to prevent flooding the chip.
+void handleDelayedFrequencyUpdate() {
+    bool recent = millis() - g_lastFreqChange < 70;
 
     if (g_processFreqChange && !isSSB()) {
         if (!recent && !g_safeEncoderMovement) {
@@ -1812,12 +1867,13 @@ void loop() {
             g_safeEncoderMovement = 0;
             doFrequencyTune();
             g_encoderCount = 0;
-            return;
         }
     }
+}
 
+// Runs all periodic, time-based tasks like RSSI updates and EEPROM saves.
+void handlePeriodicTasks() {
     if (millis() - g_lastFreqChange >= 500) {
-
         if (!g_settingsActive && millis() - g_lastRSSIUpdate >= 1000) {
             g_lastRSSIUpdate = millis();
             if (g_currentMode == FM) {
@@ -1841,42 +1897,6 @@ void loop() {
     if (g_lastAdjustmentTime && millis() - g_lastAdjustmentTime > ADJUSTMENT_ACTIVE_TIMEOUT)
         switchCommand(NULL, NULL);
 
-    if (g_safeEncoderMovement) {
-        if (g_lastAdjustmentTime) g_lastAdjustmentTime = millis();
-
-        g_encoderCount = g_safeEncoderMovement;
-
-        if (g_settingsActive) {
-            if (!g_SettingEditing) {
-                int8_t prev = g_SettingSelected;
-                g_SettingSelected += g_safeEncoderMovement;
-                uint8_t page = g_SettingsPage - 1;
-                uint8_t max = min((page * 6) + 5, SettingsIndex::SETTINGS_MAX - 1);
-                if (g_SettingSelected < page * 6) g_SettingSelected = max;
-                else if (g_SettingSelected > max) g_SettingSelected = page * 6;
-                DrawSetting(prev, true);
-                DrawSetting(g_SettingSelected, true);
-            }
-            else {
-                (*g_Settings[g_SettingSelected].manipulateCallback)(g_safeEncoderMovement);
-                DrawSetting(g_SettingSelected, false);
-                delay(MIN_ELAPSED_TIME);
-            }
-        }
-        else if (g_cmdVolume) doVolume(g_safeEncoderMovement);
-        else if (g_cmdStep) doStep(g_safeEncoderMovement);
-        else if (g_cmdBw) doBandwidth(g_safeEncoderMovement);
-        else if (g_cmdBand) bandSwitch(g_safeEncoderMovement == 1);
-        else if (isSSB()) { doFrequencyTuneSSB(); skip = true; }
-        else { doFrequencyTune(); skip = true; }
-
-        g_safeEncoderMovement = 0;
-        g_encoderCount = 0;
-        resetEepromDelay();
-    }
-
-    if (!skip) processButtonEvents();
-
     updateAndShowBattery(false);
 
     // Final, correct, and centralized save logic.
@@ -1888,6 +1908,33 @@ void loop() {
         }
         g_storeTime = millis();
     }
+}
+
+// main loop program in process order
+void loop() {
+    updateEncoderState();
+
+    if (g_favoritesActive) {
+        // Handle favorites menu navigation with bounds checking
+        handleFavoritesMenu();
+        return; // Exit loop early when in favorites menu
+    }
+
+    // --- Main operating mode ---
+
+    handleDelayedFrequencyUpdate();
+
+    bool frequencyTuned = false;
+    if (g_safeEncoderMovement) {
+        frequencyTuned = processEncoderActions();
+    }
+
+    // Process buttons only if the encoder was not used for frequency tuning in this cycle
+    if (!frequencyTuned) {
+        processButtonEvents();
+    }
+
+    handlePeriodicTasks();
 }
 
 //Overriding original main to save some space
