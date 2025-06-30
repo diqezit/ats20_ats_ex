@@ -32,27 +32,6 @@ bool isSSB() {
     return g_currentMode > AM && g_currentMode < FM;
 }
 
-int getSteps() {
-    if (isSSB()) {
-        if (g_stepIndex >= g_amTotalSteps)
-            return g_tabStep[g_stepIndex];
-
-        return g_tabStep[g_stepIndex] * 1000;
-    }
-
-    if (g_stepIndex >= g_amTotalSteps)
-        g_stepIndex = 0;
-
-    return g_tabStep[g_stepIndex];
-}
-
-int getLastStep() {
-    if (isSSB())
-        return g_amTotalSteps + g_ssbTotalSteps - 1;
-
-    return g_amTotalSteps - 1;
-}
-
 // --------------------------
 // ------- Main logic -------
 // --------------------------
@@ -86,13 +65,14 @@ void setup() {
     }
     else {
 
-        oled.setCursor(8, 2);
-        oled.print(F("ATS-20+ EX1.18"));
+        oled.setCursor(20, 2);
+        oled.print(F("ATS-EX 1.18"));
 
-        oled.setCursor(8, 4);
-        oled.print(F(" by Goshante  "));
+        oled.setCursor(32, 4);
+        oled.print(F("Goshante"));
 
         delay(1500);
+
     }
     oled.clear();
 
@@ -197,6 +177,7 @@ uint8_t modeEvent(uint8_t event, uint8_t pin) {
     return event;
 }
 
+// This function handles the button events for band switching.
 uint8_t bandEvent(uint8_t event, uint8_t pin) {
 #if (0 != BAND_DELAY)
     static uint8_t count;
@@ -205,20 +186,15 @@ uint8_t bandEvent(uint8_t event, uint8_t pin) {
             if (BUTTONEVENT_FIRSTLONGPRESS == event) {
                 count = 0;
             }
-            if (count++ == 0) {
-                if (BAND_BUTTON == pin) {
-                    if (g_bandIndex < g_lastBand)
-                        bandSwitch(true);
-                }
-                else {
-                    if (g_bandIndex)
-                        bandSwitch(false);
-                }
+            // Process only for the designated band buttons
+            if ((pin == BAND_BUTTON || pin == SOFTMUTE_BUTTON) && count++ == 0) {
+                bandSwitch(pin == BAND_BUTTON);
             }
             count = count % BAND_DELAY;
         }
     }
 #else
+    // This logic handles the case where long press is disabled in defs.h
     if (BUTTONEVENT_FIRSTLONGPRESS == event)
         event = BUTTONEVENT_SHORTPRESS;
 #endif
@@ -258,10 +234,19 @@ void saveAllReceiverInformation() {
     EEPROM.update(addr++, g_prevMode);
     EEPROM.update(addr++, g_bwIndexSSB);
 
+    // Synchronize the active state before writing to EEPROM
+    if (isSSB()) {
+        g_bandList[g_bandIndex].currentStepIdx = g_stepIndexSSB;
+    }
+    else if (g_currentMode == AM) {
+        g_bandList[g_bandIndex].currentStepIdx = g_stepIndexAM;
+    }
+
     for (uint8_t i = 0; i <= g_lastBand; i++) {
         EEPROM.update(addr++, (g_bandList[i].currentFreq >> 8));
         EEPROM.update(addr++, (g_bandList[i].currentFreq & 0xFF));
-        EEPROM.update(addr++, ((i != FM_BAND_TYPE && g_bandList[i].currentStepIdx >= g_amTotalSteps) ? 0 : g_bandList[i].currentStepIdx));
+        // Writing the step index is now simple, as it's always correct for its mode
+        EEPROM.update(addr++, g_bandList[i].currentStepIdx);
         EEPROM.update(addr++, g_bandList[i].bandwidthIdx);
     }
 
@@ -296,13 +281,19 @@ void readAllReceiverInformation() {
     oled.setContrast(uint8_t(g_Settings[SettingsIndex::Brightness].param) * 2);
 
     g_previousFrequency = g_currentFrequency = g_bandList[g_bandIndex].currentFreq;
-    if (g_bandIndex == FM_BAND_TYPE)
+
+    // Initialize global state variables from the loaded data
+    if (isSSB()) {
+        g_stepIndexSSB = g_bandList[g_bandIndex].currentStepIdx;
+    }
+    else if (g_currentMode == AM) {
+        g_stepIndexAM = g_bandList[g_bandIndex].currentStepIdx;
+    }
+    else { // FM
         g_FMStepIndex = g_bandList[g_bandIndex].currentStepIdx;
-    else
-        g_stepIndex = g_bandList[g_bandIndex].currentStepIdx;
+    }
+
     bwIdx = g_bandList[g_bandIndex].bandwidthIdx;
-    if (g_stepIndex >= g_amTotalSteps)
-        g_stepIndex = 0;
 
     if (isSSB()) {
         loadSSBPatch();
@@ -419,14 +410,12 @@ void delFav() {
 void showFav() {
     oled.setCursor(0, 0);
     oled.invertOutput(true);
-    oled.print(F("  FM FAVORITES  "));
+    oled.print(F(" FM FAVORITES "));
     oled.invertOutput(false);
 
     if (!g_totalFavorites) {
         oled.setCursor(30, 3);
         oled.print(F("NO SAVED"));
-        oled.setCursor(30, 5);
-        oled.print(F("STATIONS"));
         return;
     }
 
@@ -729,7 +718,34 @@ void showBandTag() {
     if (g_sMeterOn || g_displayRDS || g_settingsActive)
         return;
 
-    oledPrint((g_currentFrequency >= CB_LIMIT_LOW && g_currentFrequency < CB_LIMIT_HIGH) ? "CB" : bandTags[g_bandIndex], 0, 6, DEFAULT_FONT, g_cmdBand && g_currentMode != FM);
+    bool invert = g_cmdBand && g_currentMode != FM;
+
+    if (g_bandIndex == SW_BAND_TYPE) {
+        uint16_t freq = g_currentFrequency;
+        if (isSSB()) {
+            freq += (g_currentBFO / 1000);
+        }
+
+        for (int8_t i = g_SWSubBandCount - 1; i >= 0; i--) {
+            if (freq >= SWSubBands[i]) {
+                // Create a temporary buffer to build the string from PROGMEM
+                char sw_tag_buffer[5];
+                for (uint8_t j = 0; j < 4; j++) {
+                    sw_tag_buffer[j] = pgm_read_byte(&band_names_packed[i][j]);
+                }
+                sw_tag_buffer[4] = '\0'; // Null-terminate the string
+
+                // Use the oledPrint helper, which correctly handles inversion
+                oledPrint(sw_tag_buffer, 0, 6, DEFAULT_FONT, invert);
+                return;
+            }
+        }
+    }
+
+    // For LW/MW, the helper function handles inversion.
+    if (!isSSB()) {
+        oledPrint(bandTags[g_bandIndex], 0, 6, DEFAULT_FONT, invert);
+    }
 }
 
 //Draw volume level
@@ -768,93 +784,73 @@ void showRSSI() {
 //This feature requires hardware mod
 //Voltage divider made of two 10 KOhm resistors between + and GND of Li-Ion battery
 //Solder it to A2 analog pin
-void showCharge(bool forceShow) {
-    // Early exit if voltage pin not connected
+void showCharge(bool forceShow)
+{
+    // Early exit if the voltage pin is not connected
     if (!g_voltagePinConnnected)
         return;
 
     static uint32_t lastChargeShow = 0;
     static int16_t averageSamples = -1;
-    static uint8_t lastPercent = 255; // for smooth
 
-    // read sample and validate
     int sample = analogRead(BATTERY_VOLTAGE_PIN);
 
-    if (sample < 0)
-        sample = averageSamples;
+    if (averageSamples == -1 || sample < 0) {
+        averageSamples = sample > 0 ? sample : 550;
+    }
+    averageSamples = (averageSamples + sample) >> 1;
 
-    // check if display update is needed (10 second interval)
-    if ((millis() - lastChargeShow) > 10000 || forceShow) {
-        // Li-Ion discharge curve lookup table stored in PROGMEM
-        static const PROGMEM uint16_t voltages[] = {
-            643, 620, 604, 581, 573, 558, 542, 503, 496, 488
-        };
+    if ((millis() - lastChargeShow) > 10000 || forceShow)
+    {
+        constexpr const uint8_t rows = 10;
+        static const PROGMEM uint16_t voltages[rows] = { 643, 620, 604, 581, 573, 558, 542, 503, 496, 488 };
+        static const PROGMEM uint8_t percents[rows] = { 100, 95, 90, 80, 60, 40, 20, 15, 5, 0 };
 
-        static const PROGMEM uint8_t percents[] = {
-            100, 95, 90, 80, 60, 40, 20, 15, 5, 0
-        };
+        uint8_t batteryPercent;
+        uint16_t currentSamples = averageSamples;
 
-        constexpr uint8_t rows = 10;
+        if (currentSamples >= pgm_read_word(&voltages[0])) {
+            batteryPercent = 100;
+        }
+        else if (currentSamples <= pgm_read_word(&voltages[rows - 1])) {
+            batteryPercent = 0;
+        }
+        else {
+            batteryPercent = 0;
+            for (uint8_t i = 0; i < rows - 1; ++i)
+            {
+                uint16_t v_upper = pgm_read_word(&voltages[i]);
+                uint16_t v_lower = pgm_read_word(&voltages[i + 1]);
 
-        // Lambda function like in original
-        auto getBatteryPercentage = [&](uint16_t currentSamples) -> uint8_t {
-            if (currentSamples >= pgm_read_word(&voltages[0]))
-                return 100;
+                if (currentSamples >= v_lower && currentSamples <= v_upper)
+                {
+                    uint8_t p_upper = pgm_read_byte(&percents[i]);
+                    uint8_t p_lower = pgm_read_byte(&percents[i + 1]);
 
-            if (currentSamples <= pgm_read_word(&voltages[rows - 1]))
-                return 0;
+                    uint16_t voltageDiff = v_upper - v_lower;
+                    uint16_t percentageDiff = p_upper - p_lower;
+                    uint16_t voltageOffset = currentSamples - v_lower;
 
-            for (uint8_t i = 0; i < rows - 1; ++i) {
-                uint16_t v1 = pgm_read_word(&voltages[i]);
-                uint16_t v2 = pgm_read_word(&voltages[i + 1]);
-
-                if (currentSamples >= v2 && currentSamples <= v1) {
-                    //uint16_t voltageDiff = v1 - v2; // Эти переменные больше не нужны
-                    //uint8_t p1 = pgm_read_byte(&percents[i]);
-                    uint8_t p2 = pgm_read_byte(&percents[i + 1]);
-                    //uint16_t percentageDiff = p1 - p2;
-                    //uint16_t voltageOffset = currentSamples - v2;
-
-                    // ====================== ИЗМЕНЕНИЕ ЗДЕСЬ ======================
-                    // Вместо сложной интерполяции возвращаем ближайшее меньшее значение.
-                    // Это убирает из кода "дорогие" операции умножения и деления.
-                    return p2;
-                    // =============================================================
+                    batteryPercent = p_lower + (percentageDiff * voltageOffset + voltageDiff / 2) / voltageDiff;
+                    break;
                 }
             }
-            return 0;
-            };
-
-        int16_t batteryPercent = getBatteryPercentage(averageSamples);
-
-        // simple smoothing
-        // Логику сглаживания можно оставить, она не занимает много места и полезна.
-        if (lastPercent != 255 && abs(batteryPercent - lastPercent) > 10) {
-            batteryPercent = lastPercent + ((batteryPercent > lastPercent) ? 5 : -5);
         }
-        lastPercent = batteryPercent;
-
-        // ===== Display output ====
 
         if (!g_settingsActive && !g_sMeterOn && !g_displayRDS) {
             char buf[4];
-            buf[3] = 0;
-
-            uint8_t il = ilen(batteryPercent) < 3 ? 2 : 3;
-            convertToChar(buf, batteryPercent, il);
-
-            if (il < 3)
+            if (batteryPercent >= 100) {
+                buf[0] = '1'; buf[1] = '0'; buf[2] = '0'; buf[3] = '\0';
+            }
+            else {
+                convertToChar(buf, batteryPercent, 2);
                 buf[2] = '%';
-
+                buf[3] = '\0';
+            }
             oledPrint(buf, 102, 6, DEFAULT_FONT);
         }
-
         lastChargeShow = millis();
-        averageSamples = sample;
     }
-
-    // Update moving average
-    averageSamples = (averageSamples + sample) / 2;
 }
 
 #if USE_RDS
@@ -941,18 +937,29 @@ void showStep() {
             buf[4] = '\0';
         }
     }
-    else {
-        if (g_tabStep[g_stepIndex] == 1000) {
+    else if (isSSB()) {
+        int stepValue = g_tabStep[SSB_STEP_OFFSET + g_stepIndexSSB];
+        // If step is >= 1000 Hz, display it in kHz for better readability
+        if (stepValue >= 1000) {
+            convertToChar(buf, stepValue / 1000, 3);
+            buf[3] = 'k';
+            buf[4] = '\0';
+        }
+        else { // Otherwise, display in Hz
+            convertToChar(buf, stepValue, 4);
+        }
+    }
+    else { // AM
+        int stepValue = g_tabStep[g_stepIndexAM];
+        if (stepValue == 1000) {
             buf[0] = ' ';
             buf[1] = ' ';
             buf[2] = '1';
             buf[3] = 'M';
             buf[4] = 0x0;
         }
-        else if (isSSB() && g_stepIndex >= g_amTotalSteps)
-            convertToChar(buf, g_tabStep[g_stepIndex], 4);
         else {
-            convertToChar(buf, g_tabStep[g_stepIndex], 3);
+            convertToChar(buf, stepValue, 3);
             buf[3] = 'k';
             buf[4] = '\0';
         }
@@ -1040,36 +1047,35 @@ void bandSwitch(bool up) {
         uint8_t currentBand = g_bandIndex;
         g_bandList[g_bandIndex].currentFreq = g_currentFrequency;
 
-        if (g_currentMode == FM)
+        // Save the correct step index based on the current mode
+        if (g_currentMode == FM) {
             g_bandList[g_bandIndex].currentStepIdx = g_FMStepIndex;
-        else
-            g_bandList[g_bandIndex].currentStepIdx = g_stepIndex;
+        }
+        else if (isSSB()) {
+            g_bandList[g_bandIndex].currentStepIdx = g_stepIndexSSB;
+        }
+        else { // AM
+            g_bandList[g_bandIndex].currentStepIdx = g_stepIndexAM;
+        }
 
         // Calculate next band index
         if (up) {
-            if (g_bandIndex < g_lastBand)
-                g_bandIndex++;
-            else
-                g_bandIndex = 0;
+            if (g_bandIndex < g_lastBand) g_bandIndex++;
+            else g_bandIndex = 0;
         }
         else {
-            if (g_bandIndex > 0)
-                g_bandIndex--;
-            else
-                g_bandIndex = g_lastBand;
+            if (g_bandIndex > 0) g_bandIndex--;
+            else g_bandIndex = g_lastBand;
         }
 
         // Apply special frequency logic for band transitions
         if (g_bandIndex == SW_BAND_TYPE) {
             if (currentBand == FM_BAND_TYPE) {
-                // FM ? SW: up button = 1710 kHz, down button = 30000 kHz
                 g_bandList[g_bandIndex].currentFreq = up ? SW_LIMIT_LOW : SW_LIMIT_HIGH;
             }
             else if (currentBand == MW_BAND_TYPE && up) {
-                // MW ? SW (up only): set to 1710 kHz
                 g_bandList[g_bandIndex].currentFreq = SW_LIMIT_LOW;
             }
-            // For all other transitions: use saved frequency
         }
 
         // Clear UI elements if active
@@ -1099,16 +1105,10 @@ void bandSwitch(bool up) {
 // But we can patch internal RAM of Si473x with special patch to make it work in SSB mode.
 // Patch must be applied every time we enable SSB after AM or FM.
 void loadSSBPatch() {
-
     safeAmpOff();
 
-    // This works, but i am not sure it's safe
-    //g_si4735.setI2CFastModeCustom(700000);
     g_si4735.setI2CFastModeCustom(500000);
 
-    // It acts as a handshake, completing the power-on cycle and putting the Si4735's internal finite state machine 
-    // in a state ready to receive further, more complex commands. Without this step, the chip remains in
-    // a %suspended% state and an attempt to load a patch is doomed to failure.
     g_si4735.queryLibraryId();
 
     g_si4735.patchPowerUp();
@@ -1116,8 +1116,10 @@ void loadSSBPatch() {
     g_si4735.downloadCompressedPatch(ssb_patch_content, sizeof(ssb_patch_content), cmd_0x15, sizeof(cmd_0x15));
     g_si4735.setSSBConfig(g_bwSSBIdx[g_bwIndexSSB], 1, 0, 1, 0, 1);
     g_si4735.setI2CStandardMode();
+
     g_ssbLoaded = true;
-    g_stepIndex = 0;
+    // Reset the SSB step index to its default value
+    g_stepIndexSSB = 0;
 
     safeAmpOn();
 }
@@ -1142,7 +1144,7 @@ void configureFMMode() {
     g_si4735.setSeekFmLimits(
         g_bandList[g_bandIndex].minimumFreq,
         g_bandList[g_bandIndex].maximumFreq);
-    g_si4735.setSeekFmSpacing(10);  // Changed from 1 to 10
+    g_si4735.setSeekFmSpacing(10);
     g_ssbLoaded = false;
 #if USE_RDS
     setRDSConfig(g_Settings[SettingsIndex::RDSError].param);
@@ -1166,12 +1168,16 @@ void configureSSBMode(uint16_t minFreq, uint16_t maxFreq, bool extraSSBReset) {
         loadSSBPatch();
 
     g_si4735.setSSBAutomaticVolumeControl(g_Settings[SettingsIndex::SVC].param);
+
+    // A base step of 1kHz is passed for the chip's internal seek logic.
+    // Our encoder logic completely controls the actual tuning step.
     g_si4735.setSSB(
         minFreq,
         maxFreq,
         g_bandList[g_bandIndex].currentFreq,
-        (g_bandList[g_bandIndex].currentStepIdx >= g_amTotalSteps) ? 0 : g_tabStep[g_bandList[g_bandIndex].currentStepIdx],
+        1, // Base step for the chip (1 kHz)
         (g_currentMode == CW) ? (g_Settings[SettingsIndex::CWSwitch].param + 1) : g_currentMode);
+
     updateSSBCutoffFilter();
     g_si4735.setSSBDspAfc(
         (g_Settings[SettingsIndex::Sync].param == 1) ? 0 : 1);
@@ -1187,11 +1193,14 @@ void configureSSBMode(uint16_t minFreq, uint16_t maxFreq, bool extraSSBReset) {
 // Switch to AM mode and configure bandwidth, soft mute, and frequency parameters
 void configureAMMode(uint16_t minFreq, uint16_t maxFreq) {
     g_currentMode = AM;
+
+    // Directly use the correct step value from g_tabStep via the bandList index
     g_si4735.setAM(
         minFreq,
         maxFreq,
         g_bandList[g_bandIndex].currentFreq,
-        (g_bandList[g_bandIndex].currentStepIdx >= g_amTotalSteps) ? 0 : g_tabStep[g_bandList[g_bandIndex].currentStepIdx]);
+        g_tabStep[g_bandList[g_bandIndex].currentStepIdx]);
+
     g_si4735.setAmSoftMuteMaxAttenuation(g_Settings[SettingsIndex::SoftMute].param);
     g_bwIndexAM = g_bandList[g_bandIndex].bandwidthIdx;
     g_si4735.setBandwidth(g_bwAMIdx[g_bwIndexAM], 1);
@@ -1202,21 +1211,25 @@ void configureAMCommon(uint16_t minFreq, uint16_t maxFreq) {
     agcSetFunc();
     g_si4735.setAvcAmMaxGain(g_Settings[SettingsIndex::AutoVolControl].param);
     g_si4735.setSeekAmLimits(minFreq, maxFreq);
-    g_si4735.setSeekAmSpacing(
-        (g_bandList[g_bandIndex].currentStepIdx >= g_amTotalSteps) ? 1 : g_tabStep[g_bandList[g_bandIndex].currentStepIdx]);
+
+    // The seek spacing also uses the direct step value
+    g_si4735.setSeekAmSpacing(g_tabStep[g_bandList[g_bandIndex].currentStepIdx]);
 }
 
 // Synchronize global frequency variables and adjust step indices for band restrictions
 void updateFrequencyAndStepIndices() {
     g_currentFrequency = g_bandList[g_bandIndex].currentFreq;
-    if (g_currentMode == FM)
-        g_FMStepIndex = g_bandList[g_bandIndex].currentStepIdx;
-    else
-        g_stepIndex = g_bandList[g_bandIndex].currentStepIdx;
 
-    // Clamp AM step index for LW/MW
-    if ((g_bandIndex == LW_BAND_TYPE || g_bandIndex == MW_BAND_TYPE) && g_stepIndex > g_amTotalStepsSSB)
-        g_stepIndex = g_amTotalStepsSSB;
+    // Load the step index into the corresponding global state variable
+    if (isSSB()) {
+        g_stepIndexSSB = g_bandList[g_bandIndex].currentStepIdx;
+    }
+    else if (g_currentMode == AM) {
+        g_stepIndexAM = g_bandList[g_bandIndex].currentStepIdx;
+    }
+    else { // FM
+        g_FMStepIndex = g_bandList[g_bandIndex].currentStepIdx;
+    }
 }
 
 // Main band switching logic that coordinates mode transitions and amplifier control
@@ -1287,42 +1300,57 @@ void doStep(int8_t v) {
 
         g_si4735.setFrequencyStep(g_tabStepFM[g_FMStepIndex]);
         g_bandList[g_bandIndex].currentStepIdx = g_FMStepIndex;
-        g_si4735.setSeekFmSpacing(10);  // Changed from 1 to 10
+        g_si4735.setSeekFmSpacing(10);
         showStep();
     }
-    else {
-        g_stepIndex = (v == 1) ? g_stepIndex + 1 : g_stepIndex - 1;
-        if (g_stepIndex > getLastStep())
-            g_stepIndex = 0;
-        else if (g_stepIndex < 0)
-            g_stepIndex = getLastStep();
+    else if (isSSB()) {
+        // --- Isolated logic for SSB ---
+        // This part now works with the new SSB_STEPS_COUNT
+        g_stepIndexSSB = (v == 1) ? g_stepIndexSSB + 1 : g_stepIndexSSB - 1;
+        if (g_stepIndexSSB >= SSB_STEPS_COUNT)
+            g_stepIndexSSB = 0;
+        else if (g_stepIndexSSB < 0)
+            g_stepIndexSSB = SSB_STEPS_COUNT - 1;
 
-        //SSB Step limit
-        else if (isSSB() && g_stepIndex >= g_amTotalStepsSSB && g_stepIndex < g_amTotalSteps)
-            g_stepIndex = v == 1 ? g_amTotalSteps : g_amTotalStepsSSB - 1;
+        showStep();
+    }
+    else { // --- Isolated logic for AM ---
+        g_stepIndexAM = (v == 1) ? g_stepIndexAM + 1 : g_stepIndexAM - 1;
 
-        //LW/MW Step limit
-        else if ((g_bandIndex == LW_BAND_TYPE || g_bandIndex == MW_BAND_TYPE)
-            && v == 1 && g_stepIndex > g_amTotalStepsSSB && g_stepIndex < g_amTotalSteps)
-            g_stepIndex = g_amTotalSteps;
-        else if ((g_bandIndex == LW_BAND_TYPE || g_bandIndex == MW_BAND_TYPE)
-            && v != 1 && g_stepIndex > g_amTotalStepsSSB && g_stepIndex < g_amTotalSteps)
-            g_stepIndex = g_amTotalStepsSSB;
+        // Large steps are restricted ONLY for LW/MW bands.
+        // All steps are available for SW band.
+        const uint8_t max_am_idx = (g_bandIndex == LW_BAND_TYPE || g_bandIndex == MW_BAND_TYPE)
+            ? 3 // Max step is 10 kHz (index 3) for LW/MW
+            : (AM_STEPS_COUNT - 1); // All 7 steps are available for SW
 
-        if (!isSSB() || isSSB() && g_stepIndex < g_amTotalSteps) {
-            g_si4735.setFrequencyStep(g_tabStep[g_stepIndex]);
-            g_bandList[g_bandIndex].currentStepIdx = g_stepIndex;
-        }
+        if (g_stepIndexAM > max_am_idx)
+            g_stepIndexAM = 0;
+        else if (g_stepIndexAM < 0)
+            g_stepIndexAM = max_am_idx;
 
-        if (!isSSB())
-            g_si4735.setSeekAmSpacing((g_bandList[g_bandIndex].currentStepIdx >= g_amTotalSteps) ? 1 : g_tabStep[g_bandList[g_bandIndex].currentStepIdx]);
+        g_si4735.setFrequencyStep(g_tabStep[g_stepIndexAM]);
+        g_bandList[g_bandIndex].currentStepIdx = g_stepIndexAM;
+        g_si4735.setSeekAmSpacing(g_tabStep[g_stepIndexAM]);
         showStep();
     }
 }
 
+// Calculates and sets the final BFO 
+// it combines user tuning, calibration, and an automatic offset for CW mode
+// final value is inverted as required by the IC
 void updateBFO() {
-    //Actually to move frequency forward you need to move BFO backwards, so just * -1
-    g_si4735.setSSBBfo((g_currentBFO + (g_Settings[SettingsIndex::BFO].param * 10)) * -1);
+    int16_t finalBfo = g_currentBFO + (g_Settings[SettingsIndex::BFO].param * 10);
+
+    if (g_currentMode == CW) {
+        if (g_Settings[SettingsIndex::CWSwitch].param == 1) { // 1 = USB
+            finalBfo += CW_PITCH_OFFSET_HZ;
+        }
+        else { // 0 = LSB
+            finalBfo -= CW_PITCH_OFFSET_HZ;
+        }
+    }
+
+    g_si4735.setSSBBfo(finalBfo * -1);
 }
 
 //Volume control
@@ -1608,14 +1636,17 @@ void doFrequencyTune() {
     //Update frequency
     g_previousFrequency = g_currentFrequency;  //Force EEPROM update
     if (g_currentMode == FM) {
-        g_currentFrequency += g_tabStepFM[g_FMStepIndex] * g_encoderCount;  //g_si4735.getFrequency() is too slow
+        g_currentFrequency += g_tabStepFM[g_FMStepIndex] * g_encoderCount;
 #if USE_RDS
         if (g_displayRDS)
             oledPrint(_literal_EmptyLine, 0, 6, DEFAULT_FONT);
 #endif
     }
-    else
-        g_currentFrequency += g_tabStep[g_stepIndex] * g_encoderCount;
+    else {
+        // This correctly uses g_stepIndexAM to get the step in kHz
+        g_currentFrequency += g_tabStep[g_stepIndexAM] * g_encoderCount;
+    }
+
     uint16_t bMin = g_bandList[g_bandIndex].minimumFreq, bMax = g_bandList[g_bandIndex].maximumFreq;
 
     //Special logic for fast and responsive frequency surfing
@@ -1643,7 +1674,8 @@ void resetLowerLine() {
 //BFO is now part of main frequency in SSB mode
 void doFrequencyTuneSSB() {
     const int BFOMax = 16000;
-    int step = g_encoderCount == 1 ? getSteps() : getSteps() * -1;
+    // This logic now correctly gets the step value in Hz, including the new kHz-equivalent steps
+    int step = g_tabStep[SSB_STEP_OFFSET + g_stepIndexSSB] * g_encoderCount;
     int newBFO = g_currentBFO + step;
     int redundant = 0;
 
@@ -1821,7 +1853,14 @@ void processButtonEvents() {
             // This block handles modulation switching between AM, LSB, USB, CW
             uint8_t bw = (g_currentMode == AM) ? g_bwIndexAM : g_bwIndexSSB;
             g_bandList[g_bandIndex].currentFreq = g_currentFrequency;
-            g_bandList[g_bandIndex].currentStepIdx = g_stepIndex;
+
+            // Save the correct step index to the band structure BEFORE changing the mode
+            if (isSSB()) { // Includes LSB, USB, CW
+                g_bandList[g_bandIndex].currentStepIdx = g_stepIndexSSB;
+            }
+            else { // AM
+                g_bandList[g_bandIndex].currentStepIdx = g_stepIndexAM;
+            }
 
             if (g_currentMode == CW) safeAmpOff();
 

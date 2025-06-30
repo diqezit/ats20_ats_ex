@@ -50,7 +50,7 @@ enum SettingType
 
 struct SettingsItem
 {
-    char name[5];
+    char name[4];
     int8_t param;
     uint8_t type;
     void (*manipulateCallback)(int8_t);
@@ -84,26 +84,26 @@ const char PROGMEM paramTexts[][4] = {
 SettingsItem g_Settings[] =
 {
     //Page 1
-    { "ATT", 0,  SettingType::ZeroAuto,     doAttenuation     },  //Attenuation
-    { "SM ", 0,  SettingType::Num,          doSoftMute        },  //Soft Mute
-    { "SVC", 1,  SettingType::Switch,       doSSBAVC          },  //SSB AVC Switch
-    { "Syn", 0,  SettingType::Switch,       doSync            },  //SSB Sync
-    { "DeE", 1,  SettingType::Switch,       doDeEmp           },  //FM DeEmphasis (0 - 50, 1 - 75)
-    { "AVC", 46, SettingType::Num,          doAvc             },  //Automatic Volume Control
+    { "ATT", 0,  SettingType::ZeroAuto,     doAttenuation     },  // Attenuation
+    { "SM ", 0,  SettingType::Num,          doSoftMute        },  // Soft Mute ("SM" + пробел)
+    { "SVC", 1,  SettingType::Switch,       doSSBAVC          },  // SSB AVC Switch
+    { "SYN", 0,  SettingType::Switch,       doSync            },  // SSB Sync
+    { "DE",  1,  SettingType::Switch,       doDeEmp           },  // FM DeEmphasis ("DE" + пробел)
+    { "AVC", 46, SettingType::Num,          doAvc             },  // Automatic Volume Control
     //Page 2
-    { "Scr", 80, SettingType::Num,          doBrightness      },  //Screen Brightness
-    { "SW ", 0,  SettingType::Switch,       doSWUnits         },  //SW Units
-    { "SSM", 1,  SettingType::Switch,       doSSBSoftMuteMode },  //SSB Soft Mute Mode
-    { "COF", 0,  SettingType::SwitchAuto,   doCutoffFilter    },  //SSB Cutoff Filter
-    { "CPU", 0,  SettingType::Switch,       doCPUSpeed        },  //CPU Frequency
+    { "SCR", 80, SettingType::Num,          doBrightness      },  // Screen Brightness
+    { "SWU", 0,  SettingType::Switch,       doSWUnits         },  // SW Units
+    { "SSM", 1,  SettingType::Switch,       doSSBSoftMuteMode },  // SSB Soft Mute Mode
+    { "COF", 0,  SettingType::SwitchAuto,   doCutoffFilter    },  // SSB Cutoff Filter
+    { "CPU", 0,  SettingType::Switch,       doCPUSpeed        },  // CPU Frequency
 #if USE_RDS
-    { "RDS", 1,  SettingType::Num,          doRDSErrorLevel   },  //RDS ErrorLevel
+    { "RDS", 1,  SettingType::Num,          doRDSErrorLevel   },  // RDS ErrorLevel
 #endif
     //Page 3
-    { "BFO", 0,  SettingType::Num,          doBFOCalibration  },  //BFO Offset calibration
-    { "Uni", 1,  SettingType::Switch,       doUnitsSwitch     },  //Show/Hide frequency units
-    { "Sca", 1,  SettingType::Switch,       doScanSwitch      },  //AM Encoder scan switch
-    { "CW ", 0,  SettingType::Switch,       doCWSwitch        },  //CW is LSB or USB
+    { "BFO", 0,  SettingType::Num,          doBFOCalibration  },  // BFO Offset calibration
+    { "UNI", 1,  SettingType::Switch,       doUnitsSwitch     },  // Show/Hide frequency units
+    { "SCN", 1,  SettingType::Switch,       doScanSwitch      },  // AM Encoder scan switch
+    { "CW ", 0,  SettingType::Switch,       doCWSwitch        },  // CW is LSB or USB ("CW" + пробел)
 };
 
 enum SettingsIndex
@@ -133,6 +133,8 @@ const uint8_t g_SettingsMaxPages = 3;
 int8_t g_SettingSelected = 0;
 int8_t g_SettingsPage = 1;
 bool g_SettingEditing = false;
+
+const int16_t CW_PITCH_OFFSET_HZ = 500; // 500 Hz pitch for CW tone generation
 
 //For managing BW
 // Для SSB - используем PROGMEM для экономии RAM
@@ -180,9 +182,10 @@ const char* const bw_fm_table[] PROGMEM = {
     bw_fm_0, bw_fm_1, bw_fm_2, bw_fm_3, bw_fm_4
 };
 
+// Array with tuning steps. The structure is defined like - AM (in kHz), then SSB (in Hz).
 int g_tabStep[] =
 {
-    // AM steps in KHz
+    // AM steps in KHz (Indices 0-6)
     1,
     5,
     9,
@@ -191,17 +194,28 @@ int g_tabStep[] =
     50,
     100,
     1000,
-    // SSB steps in Hz
+    // SSB steps in Hz (Indices 7-15)
     10,
     25,
     50,
     100,
-    500
+    500,
+    // SSB steps converted to Hz for seamless integration (1k, 5k, 9k, 10k)
+    1000,
+    5000,
+    9000,
+    10000
 };
-uint8_t g_amTotalSteps = 7;
-uint8_t g_amTotalStepsSSB = 4; //Prevent large AM steps appear in SSB mode
-uint8_t g_ssbTotalSteps = 5;
-volatile int8_t g_stepIndex = 3;
+
+// Updated constants to manage step logic
+const uint8_t AM_STEPS_COUNT = 7;      // Total number of steps for AM
+// The number of SSB steps is now 9 (5 original + 4 new)
+const uint8_t SSB_STEPS_COUNT = 9;     // Total number of steps for SSB
+const uint8_t SSB_STEP_OFFSET = 7;     // Offset to the beginning of SSB steps in g_tabStep
+
+// Separated state variables for step index storage remain the same
+volatile int8_t g_stepIndexAM = 3;   // Stores the current step index ONLY for AM mode (range 0..6)
+volatile int8_t g_stepIndexSSB = 0;  // Stores the current step index ONLY for SSB mode (range 0..8)
 
 int8_t g_tabStepFM[] =
 {
@@ -248,8 +262,8 @@ const char bandTags[][3] =
 {
     "LW",
     "MW",
-    "SW",
-    "  "
+    "  ", // SW here
+    "  "  // FM emptry
 };
 
 // https://github.com/goshante/ats20_ats_ex/issues/44
@@ -283,7 +297,21 @@ uint16_t SWSubBands[] =
     CB_LIMIT_LOW, // CB Band (11 Meter)
     CB_LIMIT_HIGH  // 10 Meter
 };
+
 const uint8_t g_SWSubBandCount = sizeof(SWSubBands) / sizeof(uint16_t);
+
+// A macro to convert a 4-character string literal into a char array without a null terminator
+#define PACK_STR4(s) {s[0], s[1], s[2], s[3]}
+
+// Array of SW sub-band names, with broadcasting bands filled in
+const uint8_t band_names_packed[][4] PROGMEM = {
+    PACK_STR4("160m"), PACK_STR4("80m "), PACK_STR4("60m "), PACK_STR4("49m "),
+    PACK_STR4("40m "), PACK_STR4("41m "), PACK_STR4("31m "), PACK_STR4("30m "),
+    PACK_STR4("25m "), PACK_STR4("22m "), PACK_STR4("20m "), PACK_STR4("19m "),
+    PACK_STR4("16m "), PACK_STR4("17m "), PACK_STR4("15m "), PACK_STR4("13m "),
+    PACK_STR4("12m "), PACK_STR4("CB  "), PACK_STR4("10m ")
+};
+
 const uint8_t g_lastBand = (sizeof(g_bandList) / sizeof(Band)) - 1;
 int8_t g_bandIndex = 1;
 
