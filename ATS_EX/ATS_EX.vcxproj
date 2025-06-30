@@ -163,7 +163,7 @@
       <CLanguageStandard>gnu11</CLanguageStandard>
       <CAdditionalWarning />
       <CppAdditionalWarning />
-      <ForcedIncludeFiles>$(ProjectDir)..\..\..\..\..\..\program files\microsoft visual studio\2022\community\common7\ide\extensions\v1dmqjls.skd\Micro Platforms\default\vm-intelli-pre.h;$(ProjectDir)..\..\..\..\AppData\Local\Temp\VMBuilds\ATS_EX\nano_atmega328old\Release\.vmintelli\bb8feb3c1b6b18bfee338782d3bdae64\vm-intelli-gcc-defines.h;$(ProjectDir)..\..\..\..\..\..\program files\microsoft visual studio\2022\community\common7\ide\extensions\v1dmqjls.skd\Micro Platforms\default\vm-intelli-post.h;$(ProjectDir)__vm\.ATS_EX.vsarduino.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
+      <ForcedIncludeFiles>$(ProjectDir)..\..\..\..\..\..\program files\microsoft visual studio\2022\community\common7\ide\extensions\pohlmar0.020\Micro Platforms\default\vm-intelli-pre.h;$(ProjectDir)..\..\..\..\AppData\Local\Temp\VMBuilds\ATS_EX\nano_atmega328old\Release\.vmintelli\5157cdca5ae8e71ffa7eb901c813c965\vm-intelli-gcc-defines.h;$(ProjectDir)..\..\..\..\..\..\program files\microsoft visual studio\2022\community\common7\ide\extensions\pohlmar0.020\Micro Platforms\default\vm-intelli-post.h;$(ProjectDir)__vm\.ATS_EX.vsarduino.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
       <UndefineAllPreprocessorDefinitions>true</UndefineAllPreprocessorDefinitions>
       <IgnoreStandardIncludePath>true</IgnoreStandardIncludePath>
       <PreprocessorDefinitions>_VMICRO_INTELLISENSE;__AVR_atmega328p__;__AVR_ATmega328P__;__AVR_ATmega328p__;F_CPU=16000000L;ARDUINO=108010;ARDUINO_AVR_NANO;ARDUINO_ARCH_AVR;%(PreprocessorDefinitions)</PreprocessorDefinitions>

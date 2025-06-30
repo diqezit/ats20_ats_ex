@@ -171,13 +171,6 @@ bool g_favoritesActive = false;
 uint8_t g_favoriteSelected = 0;
 uint8_t g_totalFavorites = 0;
 
-// Sleep Timer Feature
-bool g_isEditingSleepMute = false;   // 0 = Display timer, 1 = Mute timer
-uint8_t g_sleepDisplayMinutes = 0;   // Minutes to turn off display (0=off)
-uint8_t g_sleepMuteMinutes = 0;      // Minutes to mute volume (0=off)
-uint32_t g_sleepDisplayEndTime = 0;  // 0 if timer is not active
-uint32_t g_sleepMuteEndTime = 0;     // 0 if timer is not active
-
 SimpleButton  btn_Bandwidth(BANDWIDTH_BUTTON);
 SimpleButton  btn_BandUp(BAND_BUTTON);
 SimpleButton  btn_BandDn(SOFTMUTE_BUTTON);
@@ -238,50 +231,64 @@ SettingsItem g_Settings[] =
 // Defines how a setting's parameter is converted into a text index
 struct SwitchMapEntry {
     uint8_t baseIndex;
-    bool inverted;     // if true, the parameter is subtracted from the base index
+    bool inverted;                  // if true, the parameter is subtracted from the base index
 };
 
 // defines the text conversion rules ONLY for settings of type 'Switch'
 // it  is indexed here by the SettingsIndex enum
 const PROGMEM SwitchMapEntry switch_setting_map[] = {
-    [ATT] = {0, false}, // Ignored, type is ZeroAuto
-    [SoftMute] = {0, false}, // Ignored, type is Num
+    [ATT] = {0, false},             // Ignored, type is ZeroAuto
+    [SoftMute] = {0, false},        // Ignored, type is Num
     [SVC] = {2, true},
     [Sync] = {2, true},
     [DeEmp] = {3, false},
-    [AutoVolControl] = {0, false}, // Ignored, type is Num
-    [Brightness] = {0, false}, // Ignored, type is Num
+    [AutoVolControl] = {0, false},  // Ignored, type is Num
+    [Brightness] = {0, false},      // Ignored, type is Num
     [SWUnits] = {5, false},
     [SSM] = {7, false},
-    [CutoffFilter] = {0, false}, // Ignored, type is SwitchAuto
+    [CutoffFilter] = {0, false},    // Ignored, type is SwitchAuto
     [CPUSpeed] = {11, false},
-    [BFO] = {0, false}, // Ignored, type is Num
+    [BFO] = {0, false},             // Ignored, type is Num
     [UnitsSwitch] = {2, true},
     [ScanSwitch] = {2, true},
     [CWSwitch] = {9, false},
     [AntennaCap] = {1, false}
 };
 
+// Common bandwidth strings are defined once to save flash space
+const char bw_common_1k0[] PROGMEM = "1.0k";
+const char bw_common_3k0[] PROGMEM = "3.0k";
+const char bw_common_4k0[] PROGMEM = "4.0k";
+
 // For SSB - using PROGMEM to save RAM
 const char bw_ssb_0[] PROGMEM = "0.5k";
-const char bw_ssb_1[] PROGMEM = "1.0k";
 const char bw_ssb_2[] PROGMEM = "1.2k";
 const char bw_ssb_3[] PROGMEM = "2.2k";
-const char bw_ssb_4[] PROGMEM = "3.0k";
-const char bw_ssb_5[] PROGMEM = "4.0k";
-const char* const bw_ssb_table[] PROGMEM = { bw_ssb_0, bw_ssb_1, bw_ssb_2, bw_ssb_3, bw_ssb_4, bw_ssb_5 };
+const char* const bw_ssb_table[] PROGMEM = {
+    bw_ssb_0,
+    bw_common_1k0, // Re-use
+    bw_ssb_2,
+    bw_ssb_3,
+    bw_common_3k0, // Re-use
+    bw_common_4k0  // Re-use
+};
 int8_t g_bwIndexSSB = 4;
 const uint8_t g_bwSSBIdx[] = { 4, 5, 0, 1, 2, 3 };
 const uint8_t g_bwSSBMaxIdx = 5;
 
-const char bw_am_0[] PROGMEM = "1.0k";
 const char bw_am_1[] PROGMEM = "1.8k";
 const char bw_am_2[] PROGMEM = "2.0k";
 const char bw_am_3[] PROGMEM = "2.5k";
-const char bw_am_4[] PROGMEM = "3.0k";
-const char bw_am_5[] PROGMEM = "4.0k";
 const char bw_am_6[] PROGMEM = "6.0k";
-const char* const bw_am_table[] PROGMEM = { bw_am_0, bw_am_1, bw_am_2, bw_am_3, bw_am_4, bw_am_5, bw_am_6 };
+const char* const bw_am_table[] PROGMEM = {
+    bw_common_1k0, // Re-use
+    bw_am_1,
+    bw_am_2,
+    bw_am_3,
+    bw_common_3k0, // Re-use
+    bw_common_4k0, // Re-use
+    bw_am_6
+};
 int8_t g_bwIndexAM = 4;
 const uint8_t g_maxFilterAM = 6;
 const uint8_t g_bwAMIdx[] = { 4, 5, 3, 6, 2, 1, 0 };
@@ -323,7 +330,7 @@ const char bandTags[][3] = { "LW", "MW", "  ", "  " };
 // https://github.com/goshante/ats20_ats_ex/issues/44
 Band g_bandList[] =
 {
-    // FreqMin,      FreqMax,  FreqCurrent,stepAM,stepSSB, stepFM,    bwAM, bwSSB,  bwFM
+    // FreqMin,                      FreqMax,  FreqCurrent,stepAM,stepSSB,  stepFM,  bwAM, bwSSB,   bwFM
     /* LW */ { LW_LIMIT_LOW,             520,          300,     2,      4,       1,      4,    4,     0 }, // Default: 9k,  500Hz, 100k | 3.0k, 3.0k, AUTO
     /* MW */ { 450,                     1710,         1080,     3,      4,       1,      4,    4,     0 }, // Default: 10k, 500Hz, 100k | 3.0k, 3.0k, AUTO
     /* SW */ { SW_LIMIT_LOW,   SW_LIMIT_HIGH, SW_LIMIT_LOW,     1,      4,       1,      4,    4,     0 }, // Default: 5k,  500Hz, 100k | 3.0k, 3.0k, AUTO
@@ -332,25 +339,25 @@ Band g_bandList[] =
 
 uint16_t SWSubBands[] =
 {
-    SW_LIMIT_LOW,  // 160 Meter
-    3500, // 80 Meter
+    SW_LIMIT_LOW,   // 160 Meter
+    3500,           // 80 Meter
     4500,
     5600,
-    6800, // 40 Meter
-    7200, // 41 Meter
+    6800,           // 40 Meter
+    7200,           // 41 Meter
     8500,
-    10000, // 30 Meter
+    10000,          // 30 Meter
     11200,
     13400,
-    14000, // 20 Meter
+    14000,          // 20 Meter
     15000,
     17200,
-    18000, // 17 Meter
-    21000, // 15 Meter
-    21400, // 13 Meter
-    24890, // 12 Meter
-    CB_LIMIT_LOW, // CB Band (11 Meter)
-    CB_LIMIT_HIGH  // 10 Meter
+    18000,          // 17 Meter
+    21000,          // 15 Meter
+    21400,          // 13 Meter
+    24890,          // 12 Meter
+    CB_LIMIT_LOW,   // CB Band (11 Meter)
+    CB_LIMIT_HIGH   // 10 Meter
 };
 const uint8_t g_SWSubBandCount = sizeof(SWSubBands) / sizeof(uint16_t);
 

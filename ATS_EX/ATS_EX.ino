@@ -9,9 +9,19 @@
 // 02.2024
 // http://github.com/goshante
 // ----------------------------------------------------------------------
-// MOD_NO_RDS_v3.3 by diqezit
-// More info you can get below
-// https://github.com/goshante/ats20_ats_ex/issues/42
+// MOD_NO_RDS_v3.4 by diqezit
+// More info for this mod you can get below
+// https://github.com/diqezit/ats20_ats_ex
+// ----------------------------------------------------------------------
+// Si4704/05/06/3x FM Receiver Programming:
+// – Hardware interface control (I2C signal mappings, GPIO functions)
+// – Software command set (register definitions, status reads/writes)
+// – Configuration workflows (tuning, volume, seek, power modes and more..)
+// Ref here https://www.skyworksinc.com/-/media/Skyworks/SL/documents/public/application-notes/AN332.pdf
+// ----------------------------------------------------------------------
+// Using the work of 
+// https://github.com/esp32-si4732/ats-mini
+// https://github.com/G8PTN/ATS_MINI
 // ----------------------------------------------------------------------
 
 #include <SI4735.h>
@@ -41,7 +51,7 @@ bool isSSB() {
 // ------- Main logic -------
 // --------------------------
 
-#define APP_VERSION 111
+#define APP_VERSION 34
 
 // Helper function to get the current context (AM or SSB/CW)
 ModeContext getModeContext() {
@@ -257,12 +267,12 @@ void loadActiveStateFromBand() {
     g_bwIndexFM = current_band.bwIdxFM;
 }
 
-//EEPROM Save
+// handles saving all receiver state to EEPROM
 void saveAllReceiverInformation(bool full_save = true) {
-    // Always sync active globals into the current band's RAM struct first
     syncActiveStateToBand();
 
     uint16_t addr = EEPROM_DATA_START_ADDRESS;
+    // save version first to validate data structure on next boot
     EEPROM.update(EEPROM_VERSION_ADDRESS, APP_VERSION);
     EEPROM.update(EEPROM_APP_ID_ADDRESS, EEPROM_APP_ID);
 
@@ -273,53 +283,38 @@ void saveAllReceiverInformation(bool full_save = true) {
     EEPROM.update(addr++, g_currentBFO & 0xFF);
     EEPROM.update(addr++, g_prevMode);
 
-    // This loop avoids code duplication to save flash space
-    // It saves either all bands (on full_save) or only the current band
     uint8_t start_band = full_save ? 0 : g_bandIndex;
     uint8_t end_band = full_save ? g_lastBand : g_bandIndex;
     for (uint8_t i = start_band; i <= end_band; i++) {
-        uint16_t band_addr = addr + (i * 8); // sizeof(Band) = 8 bytes
-        Band& band = g_bandList[i];
-        EEPROM.update(band_addr++, (band.currentFreq >> 8));
-        EEPROM.update(band_addr++, (band.currentFreq & 0xFF));
-        EEPROM.update(band_addr++, band.stepIdxAM);
-        EEPROM.update(band_addr++, band.stepIdxSSB);
-        EEPROM.update(band_addr++, band.stepIdxFM);
-        EEPROM.update(band_addr++, band.bwIdxAM);
-        EEPROM.update(band_addr++, band.bwIdxSSB);
-        EEPROM.update(band_addr, band.bwIdxFM);
+        EEPROM.put(addr + (i * sizeof(Band)), g_bandList[i]);
     }
 
-    addr += ((g_lastBand + 1) * 8);
+    addr += ((g_lastBand + 1) * sizeof(Band));
 
     for (uint8_t i = 0; i < SETTINGS_MAX; i++)
         EEPROM.update(addr++, g_Settings[i].param);
 
-    // Save mode-dependent settings
     for (uint8_t i = 0; i < MODE_SETTINGS_COUNT; i++) {
         for (uint8_t j = 0; j < MODE_CONTEXT_COUNT; j++) {
             EEPROM.update(addr++, g_modeSettings[i][j]);
         }
     }
 
-    // Save FM favorites
     saveFMFav();
 }
 
-//EEPROM Load
+// handles loading all receiver state from EEPROM
 void readAllReceiverInformation() {
+    // if stored app id or version mismatch, the eeprom data format is considered incompatible
+    // this triggers a reset to default settings to prevent data corruption
     if (EEPROM.read(EEPROM_APP_ID_ADDRESS) != EEPROM_APP_ID || EEPROM.read(EEPROM_VERSION_ADDRESS) != APP_VERSION) {
         oled.clear();
         oled.setFont(DEFAULT_FONT);
-
         oled.setCursor(0, 2);
         oled.print(F("  EEPROM RESET"));
-
         delay(2000);
-
         initializeDefaultModeSettings();
         g_totalFavorites = 0;
-
         saveAllReceiverInformation(true);
         return;
     }
@@ -331,21 +326,15 @@ void readAllReceiverInformation() {
     g_currentBFO = (EEPROM.read(addr++) << 8) | EEPROM.read(addr++);
     g_prevMode = EEPROM.read(addr++);
 
-    // This loop now correctly reads data sequentially for each band
     for (uint8_t i = 0; i <= g_lastBand; i++) {
-        g_bandList[i].currentFreq = (EEPROM.read(addr++) << 8) | EEPROM.read(addr++);
-        g_bandList[i].stepIdxAM = EEPROM.read(addr++);
-        g_bandList[i].stepIdxSSB = EEPROM.read(addr++);
-        g_bandList[i].stepIdxFM = EEPROM.read(addr++);
-        g_bandList[i].bwIdxAM = EEPROM.read(addr++);
-        g_bandList[i].bwIdxSSB = EEPROM.read(addr++);
-        g_bandList[i].bwIdxFM = EEPROM.read(addr++);
+        EEPROM.get(addr + (i * sizeof(Band)), g_bandList[i]);
     }
+
+    addr += ((g_lastBand + 1) * sizeof(Band));
 
     for (uint8_t i = 0; i < SETTINGS_MAX; i++)
         g_Settings[i].param = EEPROM.read(addr++);
 
-    // Read mode-dependent settings
     for (uint8_t i = 0; i < MODE_SETTINGS_COUNT; i++) {
         for (uint8_t j = 0; j < MODE_CONTEXT_COUNT; j++) {
             g_modeSettings[i][j] = EEPROM.read(addr++);
@@ -353,14 +342,11 @@ void readAllReceiverInformation() {
     }
 
     applyBrightness();
-
     loadActiveStateFromBand();
     g_previousFrequency = g_currentFrequency;
-
     if (isSSB()) {
         loadSSBPatch();
     }
-
     applyBandConfiguration();
 }
 
@@ -530,7 +516,7 @@ void showFrequency(bool cleanDisplay = false) {
     uint8_t len = ssbMode ? ilen(khzBFO) : ilen(g_currentFrequency);
 
     if (cleanDisplay) {
-        oled.setCursor(0, 3);
+        // oled.setcursor is not needed as oledprint handles cursor placement
         oledPrint("/////////", 0, 3, FONT14X24SEVENSEG);
     }
     else if (ssbMode && len > prevLen && len == 5)
@@ -706,31 +692,37 @@ void switchSettingsPage() {
     showSettings();
 }
 
-//Switch between main screen and settings mode
-void switchSettings() {
-    oled.clear();
-    if (g_settingsActive) { // Entering settings menu
-        ModeContext modeCtx = getModeContext();
-
-        // Load current values from storage into the settings buffer (g_Settings)
+// Helper to sync settings between the g_Settings buffer and g_modeSettings storage.
+static inline void syncModeDependentSettings(bool load) {
+    ModeContext modeCtx = getModeContext();
+    if (load) {
         g_Settings[ATT].param = g_modeSettings[MODE_SETTING_AGC][modeCtx];
         g_Settings[SoftMute].param = g_modeSettings[MODE_SETTING_SOFT_MUTE][modeCtx];
         g_Settings[AutoVolControl].param = g_modeSettings[MODE_SETTING_AVC][modeCtx];
+    }
+    else {
+        g_modeSettings[MODE_SETTING_AGC][modeCtx] = g_Settings[ATT].param;
+        g_modeSettings[MODE_SETTING_SOFT_MUTE][modeCtx] = g_Settings[SoftMute].param;
+        g_modeSettings[MODE_SETTING_AVC][modeCtx] = g_Settings[AutoVolControl].param;
+    }
+}
 
-        // Display the settings UI
+//Switch between main screen and settings mode
+void switchSettings() {
+    oled.clear();
+    if (g_settingsActive) {
+        // Entering settings menu
+        syncModeDependentSettings(true);
+
         g_SettingsPage = 1;
         showSettingsTitle();
         g_SettingSelected = 0;
         g_SettingEditing = false;
         showSettings();
     }
-    else { // Exiting settings menu
-        ModeContext modeCtx = getModeContext();
-
-        // Save modified values from the settings buffer back to persistent storage
-        g_modeSettings[MODE_SETTING_AGC][modeCtx] = g_Settings[ATT].param;
-        g_modeSettings[MODE_SETTING_SOFT_MUTE][modeCtx] = g_Settings[SoftMute].param;
-        g_modeSettings[MODE_SETTING_AVC][modeCtx] = g_Settings[AutoVolControl].param;
+    else {
+        // Exiting settings menu
+        syncModeDependentSettings(false);
 
         g_settingsDirty = true;
 
@@ -749,11 +741,8 @@ void showModulation() {
 }
 
 void updateStereoIndicator() {
-    char c = ' ';
-    if (isSSB() && g_Settings[SettingsIndex::Sync].param == 1)
-        c = 'S';
-    else if (g_currentMode == FM && g_stereoStatus)
-        c = '*';
+    char c = (isSSB() && g_Settings[SettingsIndex::Sync].param == 1) ? 'S' :
+        ((g_currentMode == FM && g_stereoStatus) ? '*' : ' ');
 
     oled.setCursor(24, 0);
     oled.print(c);
@@ -927,51 +916,48 @@ void updateAndShowBattery(bool forceShow) {
 
 // ====== Battery Monitoring Subsystem END ========
 
-//Draw steps (with units)
-void showStep() {
-    //-- if (g_sMeterOn || g_displayRDS) // S-Meter check removed
-    char buf[5];
-    if (g_currentMode == FM) {
-        if (g_tabStepFM[g_FMStepIndex] == 100) {
-            buf[0] = ' ';
-            buf[1] = ' ';
-            buf[2] = '1';
-            buf[3] = 'M';
-            buf[4] = 0x0;
-        }
-        else {
-            convertToChar(buf, g_tabStepFM[g_FMStepIndex] * 10, 3);
-            buf[3] = 'k';
-            buf[4] = '\0';
-        }
+// formats a raw step value into a human-readable string for the display
+// conversions to "kHz", "Hz", and a special "1M" case for 1000 kHz
+static void formatStepValue(char* buf, int stepValue, bool isKhz) {
+    if (isKhz && stepValue == 1000) {
+        strcpy_P(buf, PSTR("  1M"));
     }
-    else if (isSSB()) {
-        int stepValue = g_tabStep[SSB_STEP_OFFSET + g_stepIndexSSB];
-        // If step is >= 1000 Hz, display it in kHz for better readability
+    else if (isKhz) {
+        convertToChar(buf, stepValue, 3);
+        buf[3] = 'k';
+        buf[4] = '\0';
+    }
+    else { // Hz for SSB
         if (stepValue >= 1000) {
             convertToChar(buf, stepValue / 1000, 3);
             buf[3] = 'k';
             buf[4] = '\0';
         }
-        else { // Otherwise, display in Hz
+        else {
             convertToChar(buf, stepValue, 4);
         }
     }
-    else { // AM
-        int stepValue = g_tabStep[g_stepIndexAM];
-        if (stepValue == 1000) {
-            buf[0] = ' ';
-            buf[1] = ' ';
-            buf[2] = '1';
-            buf[3] = 'M';
-            buf[4] = 0x0;
-        }
-        else {
-            convertToChar(buf, stepValue, 3);
-            buf[3] = 'k';
-            buf[4] = '\0';
-        }
+}
+
+// determines the active tuning step based on 
+// the current modulation mode (AM, FM, SSB)
+void showStep() {
+    char buf[5];
+    int stepValue;
+    bool isKhz = true;
+
+    if (g_currentMode == FM) {
+        stepValue = (g_tabStepFM[g_FMStepIndex] == 100) ? 1000 : g_tabStepFM[g_FMStepIndex] * 10;
     }
+    else if (isSSB()) {
+        stepValue = g_tabStep[SSB_STEP_OFFSET + g_stepIndexSSB];
+        isKhz = false;
+    }
+    else { // AM
+        stepValue = g_tabStep[g_stepIndexAM];
+    }
+
+    formatStepValue(buf, stepValue, isKhz);
 
     uint8_t off = 50;
     oledPrint("St:", off - 16, 6, DEFAULT_FONT, g_activeCommand == CMD_STEP);
@@ -1188,20 +1174,21 @@ void configureAMCommon(uint16_t minFreq, uint16_t maxFreq) {
     g_si4735.setSeekAmSpacing(g_tabStep[g_stepIndexAM]);
 }
 
+// AGC hardware control
+static inline void setAgcHardware(int8_t att_val) {
+    bool disableAgc = att_val > 0;
+    // attenuation index for the chip is one less than the parameter valu
+    // if att_val is 0 (auto) or 1 (manual, 0dB), the index sent to the chip is 0
+    uint8_t agcNdx = (att_val > 1) ? (att_val - 1) : 0;
+    g_si4735.setAutomaticGainControl(disableAgc, agcNdx);
+}
+
 // Applies AGC settings based on current mode and stored values
 void applyAgcSettings() {
     ModeContext modeCtx = getModeContext();
     int8_t att_val = g_modeSettings[MODE_SETTING_AGC][modeCtx];
 
-    // ñcorrectly handles the AUTO mode (att_val = 0)
-    bool disableAgc = att_val > 0;
-    uint8_t agcNdx = 0;
-
-    if (att_val > 1) {
-        agcNdx = att_val - 1;
-    }
-
-    g_si4735.setAutomaticGainControl(disableAgc, agcNdx);
+    setAgcHardware(att_val);
 }
 
 // Main band switching logic that coordinates mode transitions and amplifier control
@@ -1335,13 +1322,7 @@ void doAttenuation(int8_t v) {
     uint8_t max_att_value = (g_currentMode == FM) ? 26 : 37;
     doSwitchLogic(g_Settings[ATT].param, 0, max_att_value, v);
 
-    // Apply the change immediately for real-time feedback in the menu
-    int8_t att_val = g_Settings[ATT].param;
-
-    bool disableAgc = (att_val > 0);
-    uint8_t agcNdx = (att_val > 1) ? (att_val - 1) : 0;
-
-    g_si4735.setAutomaticGainControl(disableAgc, agcNdx);
+    setAgcHardware(g_Settings[ATT].param);
 }
 
 //Settings: Soft Mute
@@ -1472,10 +1453,11 @@ void doScanSwitch(int8_t v = 0) {
 
 //Settings: CW mode switch
 void doCWSwitch(int8_t v = 0) {
+    syncActiveStateToBand();
     doSwitchLogic(g_Settings[CWSwitch].param, 0, 1, v);
 
-    if (g_currentMode == CW)
-        applyBandConfiguration(true);
+    if (g_currentMode == CW) 
+        applyBandConfiguration(false);
 }
 
 //Settings: Auto Antenna Capacitor
@@ -1564,45 +1546,43 @@ bool clampSSBBand() {
 // Handles frequency tuning for AM/FM with step alignment.
 void doFrequencyTune() {
     g_seekDirection = g_encoderCount == 1 ? 1 : 0;
-    g_previousFrequency = g_currentFrequency; // Force EEPROM update
+    g_previousFrequency = g_currentFrequency;
 
     uint16_t step;
-
-    // correct step for the current mode (AM or FM)
     if (g_currentMode == FM) {
         step = g_tabStepFM[g_FMStepIndex];
     }
-    else { // AM
+    else { // am
         step = g_tabStep[g_stepIndexAM];
     }
-    // If the current frequency is not on the grid, the first encoder turn
-    // will snap it to the nearest grid point
+
+    // handle snap-to-grid and regular step as mutually exclusive actions
+    // this structure fixes a bug in the boundary wrap-around logic
     uint16_t remainder = g_currentFrequency % step;
-    if (remainder != 0) {
-        if (g_encoderCount > 0) { // Going UP
+    if (remainder != 0 && g_encoderCount != 0) {
+        // snap to grid
+        if (g_encoderCount > 0) {
             g_currentFrequency += (step - remainder);
         }
-        else { // Going DOWN
+        else { // g_encoderCount < 0
             g_currentFrequency -= remainder;
         }
-        // after alignment, reset encoderCount to 0 to prevent a double step
-        g_encoderCount = 0;
-    }
-
-    // Apply the regular step now that the frequency is aligned
-    if (g_currentMode == FM) {
-        g_currentFrequency += g_tabStepFM[g_FMStepIndex] * g_encoderCount;
     }
     else {
-        g_currentFrequency += g_tabStep[g_stepIndexAM] * g_encoderCount;
+        // regular step
+        g_currentFrequency += (int16_t)step * g_encoderCount;
     }
+
+    // reset encoder delta for the next loop cycle
+    g_encoderCount = 0;
 
     uint16_t bMin = g_bandList[g_bandIndex].minimumFreq, bMax = g_bandList[g_bandIndex].maximumFreq;
 
-    // logic for fast frequency surfing
-    if (g_currentFrequency >= bMax && g_encoderCount > 0)
+    // use seek direction instead of encoder count for boundary checks
+    // this is more reliable with large deltas from fast spins
+    if (g_currentFrequency >= bMax && g_seekDirection == 1)
         g_currentFrequency = bMin;
-    else if (g_currentFrequency < bMin && g_encoderCount < 0)
+    else if (g_currentFrequency < bMin && g_seekDirection == 0)
         g_currentFrequency = bMax;
     else if (g_currentFrequency >= bMax)
         g_currentFrequency = bMax;
@@ -1685,9 +1665,7 @@ static inline void handleEncoderButton() {
             g_si4735.setFrequency(g_currentFrequency);
         }
         // original lambda 'exitFavorites' inlined here to save flash
-        g_favoritesActive = false;
-        oled.clear();
-        showStatus();
+        exitFavoritesMenu();
     }
     else if (isSSB() || !g_Settings[ScanSwitch].param) {
         // default action: enter step adjustment mode, seek is disabled in ssb
@@ -1723,9 +1701,7 @@ static inline void handleBandUpButton() {
 
     if (g_favoritesActive) {
         // any navigation button exits the favorites menu
-        g_favoritesActive = false;
-        oled.clear();
-        showStatus();
+        exitFavoritesMenu();
     }
     else if (g_settingsActive) {
         // in settings menu, it switches to the next page
@@ -1744,9 +1720,7 @@ static inline void handleBandDownButton() {
 
     if (g_favoritesActive) {
         // any navigation button exits the favorites menu
-        g_favoritesActive = false;
-        oled.clear();
-        showStatus();
+        exitFavoritesMenu();
     }
     else {
         // this button's primary role is to toggle the main settings menu
@@ -1859,6 +1833,13 @@ static inline void handleModeButton() {
     }
 }
 
+// exit the favorites menu and return to the main status screen
+static inline void exitFavoritesMenu() {
+    g_favoritesActive = false;
+    oled.clear();
+    showStatus();
+}
+
 // key process for all keys
 void processButtonEvents() {
     handleEncoderButton();
@@ -1954,19 +1935,23 @@ bool processEncoderActions() {
 
 // Handles the delayed frequency update for AM/FM to prevent flooding the chip.
 void handleDelayedFrequencyUpdate() {
-    bool recent = millis() - g_lastFreqChange < 70;
+    if (!g_processFreqChange || isSSB()) {
+        return;
+    }
 
-    if (g_processFreqChange && !isSSB()) {
-        if (!recent && !g_safeEncoderMovement) {
-            g_si4735.setFrequency(g_currentFrequency);
-            g_processFreqChange = false;
-        }
-        else if (recent && g_safeEncoderMovement) {
-            g_encoderCount = g_safeEncoderMovement;
-            g_safeEncoderMovement = 0;
-            doFrequencyTune();
-            g_encoderCount = 0;
-        }
+    // if there new encoder movement, process it immediately to stay responsive
+    if (g_safeEncoderMovement) {
+        g_encoderCount = g_safeEncoderMovement;
+        g_safeEncoderMovement = 0;
+        doFrequencyTune();
+        return;
+    }
+
+    // if there no new movement and enough time has passed, send the last frequency to the chip
+    bool recent = millis() - g_lastFreqChange < 70;
+    if (!recent) {
+        g_si4735.setFrequency(g_currentFrequency);
+        g_processFreqChange = false;
     }
 }
 
