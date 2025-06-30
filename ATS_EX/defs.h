@@ -2,12 +2,15 @@
 
 //If you set this def to 0 project will be compiled without RDS 
 //and everything related to RDS will be excluded from build
-#define USE_RDS 1
+#define USE_RDS 0
 
 #define EEPROM_APP_ID				235
 #define EEPROM_DATA_START_ADDRESS	1
 #define EEPROM_VERSION_ADDRESS      1000
 #define EEPROM_APP_ID_ADDRESS       0
+
+#define EEPROM_FM_FAVORITES_COUNT 198  
+#define EEPROM_FM_FAVORITES_START 200
 
 //EEPROM Settings
 #define STORE_TIME 10000 // Inactive time to save our settings
@@ -19,6 +22,15 @@
 
 //Battery charge monitoring analog pin (Voltage divider 10-10 KOhm directly from battery)
 #define BATTERY_VOLTAGE_PIN A2
+
+// Amplifier MD8002A disable pin original 
+#define MD8002A_SHUTDOWN_PIN A3
+// Direct operation with ports for controlling the MD8002A amplifier
+#define AMP_DDR   DDRC
+#define AMP_PORT  PORTC
+#define AMP_BIT   3
+
+#define STEREO_STATUS_BIT 0
 
 // Encoder
 #define ENCODER_PIN_A 2

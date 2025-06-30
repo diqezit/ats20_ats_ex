@@ -4,8 +4,7 @@ long g_storeTime = millis();
 
 bool g_voltagePinConnnected = false;
 bool g_ssbLoaded = false;
-bool g_fmStereo = true;
-
+bool g_stereoStatus = false;
 bool g_cmdVolume = false;
 bool g_cmdStep = false;
 bool g_cmdBw = false;
@@ -17,6 +16,9 @@ bool g_displayRDS = false;
 bool g_rdsSwitchPressed = false;
 bool g_seekStop = false;
 uint32_t g_lastAdjustmentTime = 0;
+
+uint8_t g_currentRSSI = 0;
+uint32_t g_lastRSSIUpdate = 0;
 
 uint8_t g_muteVolume = 0;
 int g_currentBFO = 0;
@@ -73,6 +75,12 @@ void doUnitsSwitch(int8_t v = 0);
 void doScanSwitch(int8_t v = 0);
 void doCWSwitch(int8_t v = 0);
 
+// used by SettingParamToUI function to convert parameter values to display strings
+const char PROGMEM paramTexts[][4] = {
+  "AUT", "On ", "Off", "50u", "75u", "kHz", "MHz",
+  "RSS", "SNR", "LSB", "USB", "100", "50%"
+};
+
 SettingsItem g_Settings[] =
 {
     //Page 1
@@ -127,45 +135,49 @@ int8_t g_SettingsPage = 1;
 bool g_SettingEditing = false;
 
 //For managing BW
-struct Bandwidth
-{
-    uint8_t idx;      //Internal SI473X index
-    const char* desc;
+// Для SSB - используем PROGMEM для экономии RAM
+const char bw_ssb_0[] PROGMEM = "0.5k";
+const char bw_ssb_1[] PROGMEM = "1.0k";
+const char bw_ssb_2[] PROGMEM = "1.2k";
+const char bw_ssb_3[] PROGMEM = "2.2k";
+const char bw_ssb_4[] PROGMEM = "3.0k";
+const char bw_ssb_5[] PROGMEM = "4.0k";
+
+const char* const bw_ssb_table[] PROGMEM = {
+    bw_ssb_0, bw_ssb_1, bw_ssb_2, bw_ssb_3, bw_ssb_4, bw_ssb_5
 };
 
 int8_t g_bwIndexSSB = 4;
-Bandwidth g_bandwidthSSB[] =
-{
-    { 4, "0.5k" },
-    { 5, "1.0k" },
-    { 0, "1.2k" },
-    { 1, "2.2k" },
-    { 2, "3.0k" },
-    { 3, "4.0k" }
-};
+const uint8_t g_bwSSBIdx[] = { 4, 5, 0, 1, 2, 3 };
 const uint8_t g_bwSSBMaxIdx = 5;
+
+// Для AM
+const char bw_am_0[] PROGMEM = "1.0k";
+const char bw_am_1[] PROGMEM = "1.8k";
+const char bw_am_2[] PROGMEM = "2.0k";
+const char bw_am_3[] PROGMEM = "2.5k";
+const char bw_am_4[] PROGMEM = "3.0k";
+const char bw_am_5[] PROGMEM = "4.0k";
+const char bw_am_6[] PROGMEM = "6.0k";
+
+const char* const bw_am_table[] PROGMEM = {
+    bw_am_0, bw_am_1, bw_am_2, bw_am_3, bw_am_4, bw_am_5, bw_am_6
+};
 
 int8_t g_bwIndexAM = 4;
 const uint8_t g_maxFilterAM = 6;
-Bandwidth g_bandwidthAM[] =
-{
-    { 4, "1.0k" }, // 0
-    { 5, "1.8k" }, // 1
-    { 3, "2.0k" }, // 2
-    { 6, "2.5k" }, // 3
-    { 2, "3.0k" }, // 4 - Default
-    { 1, "4.0k" }, // 5
-    { 0, "6.0k" }  // 6
-};
+const uint8_t g_bwAMIdx[] = { 4, 5, 3, 6, 2, 1, 0 };
 
+// Для FM
 int8_t g_bwIndexFM = 0;
-char* g_bandwidthFM[] =
-{
-    "AUTO",
-    "110k",
-    " 84k",
-    " 60k",
-    " 40k"
+const char bw_fm_0[] PROGMEM = "AUTO";
+const char bw_fm_1[] PROGMEM = "110k";
+const char bw_fm_2[] PROGMEM = " 84k";
+const char bw_fm_3[] PROGMEM = " 60k";
+const char bw_fm_4[] PROGMEM = " 40k";
+
+const char* const bw_fm_table[] PROGMEM = {
+    bw_fm_0, bw_fm_1, bw_fm_2, bw_fm_3, bw_fm_4
 };
 
 int g_tabStep[] =
@@ -232,18 +244,19 @@ char* g_RDSCells[3];
 
 char _literal_EmptyLine[17] = "                ";
 
-char* bandTags[] =
+const char bandTags[][3] =
 {
     "LW",
     "MW",
     "SW",
-    "  ",    //It looks better
+    "  "
 };
 
+// https://github.com/goshante/ats20_ats_ex/issues/44
 Band g_bandList[] =
 {
     /* LW */ { LW_LIMIT_LOW, 520, 300, 0, 4 },
-    /* MW */ { 520, 1710, 1476, 3, 4 },
+    /* MW */ { 450, 1710, 1080, 3, 4 },
     /* SW */ { SW_LIMIT_LOW, SW_LIMIT_HIGH, SW_LIMIT_LOW, 0, 4 },
     /* FM */ { 6400, 10800, 8400, 1, 0 },
 };
@@ -252,17 +265,17 @@ uint16_t SWSubBands[] =
 {
     SW_LIMIT_LOW,  // 160 Meter
     3500, // 80 Meter
-    4500, 
+    4500,
     5600,
     6800, // 40 Meter
     7200, // 41 Meter
-    8500, 
+    8500,
     10000, // 30 Meter
     11200,
-    13400, 
+    13400,
     14000, // 20 Meter
     15000,
-    17200, 
+    17200,
     18000, // 17 Meter
     21000, // 15 Meter
     21400, // 13 Meter
@@ -284,8 +297,8 @@ enum Modulations : uint8_t
     FM
 };
 volatile uint8_t g_currentMode = FM;
-const char* g_bandModeDesc[] = 
-{ 
+const char g_bandModeDesc[][4] =
+{
     "AM ",
     "LSB",
     "USB",
@@ -294,6 +307,16 @@ const char* g_bandModeDesc[] =
 };
 volatile uint8_t g_prevMode = FM;
 uint8_t g_seekDirection = 1;
+
+struct FMFavorite {
+    uint16_t frequency;
+};
+
+const uint8_t MAX_FM_FAVORITES = 10;
+FMFavorite g_fmFavorites[MAX_FM_FAVORITES];
+uint8_t g_totalFavorites = 0;
+uint8_t g_favoriteSelected = 0;
+bool g_favoritesActive = false;
 
 //Special logic for fast and responsive frequency surfing
 uint32_t g_lastFreqChange = 0;

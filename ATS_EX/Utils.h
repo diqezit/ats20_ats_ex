@@ -35,6 +35,17 @@ void oledPrint(uint16_t u, int offX = -1, int offY = -1, const DCfont* font = La
         oled.invertOutput(false);
 }
 
+// Вспомогательная функция для печати PROGMEM строк
+void oledPrintP(const char* str, int16_t x, int16_t y, const DCfont* font = DEFAULT_FONT, bool invert = false)
+{
+    char buffer[17];
+    strcpy_P(buffer, str);
+    oledPrint(buffer, x, y, font, invert);
+}
+
+// Макрос для очистки строки
+#define OLED_CLEAR_LINE(y) oledPrintP(str_EmptyLine, 0, y, DEFAULT_FONT)
+
 //Faster alternative for convertToChar
 void utoa(char* out, uint16_t num)
 {
