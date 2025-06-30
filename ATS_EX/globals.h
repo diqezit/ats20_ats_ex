@@ -10,7 +10,8 @@ bool g_cmdStep = false;
 bool g_cmdBw = false;
 bool g_cmdBand = false;
 bool g_settingsActive = false;
-bool g_sMeterOn = false;
+bool g_settingsDirty = false;
+// bool g_sMeterOn = false;
 bool g_displayOn = true;
 bool g_displayRDS = false;
 bool g_rdsSwitchPressed = false;
@@ -19,6 +20,8 @@ uint32_t g_lastAdjustmentTime = 0;
 
 uint8_t g_currentRSSI = 0;
 uint32_t g_lastRSSIUpdate = 0;
+
+extern uint8_t g_stableBatteryPercent; // store table percentage for display
 
 uint8_t g_muteVolume = 0;
 int g_currentBFO = 0;
@@ -35,10 +38,46 @@ SimpleButton  btn_Step(STEP_BUTTON);
 SimpleButton  btn_Mode(MODE_SWITCH);
 
 volatile int g_encoderCount = 0;
+int g_safeEncoderMovement = 0;
 
 //Frequency tracking
 uint16_t g_currentFrequency;
 uint16_t g_previousFrequency;
+
+// Enum for convenient access to mode-dependent settings
+enum ModeSettingType {
+    MODE_SETTING_AGC,
+    MODE_SETTING_SOFT_MUTE,
+    MODE_SETTING_AVC,
+    MODE_SETTINGS_COUNT // Counter for use in loops
+};
+
+// Enum for mode context indexing
+enum ModeContext {
+    MODE_CONTEXT_AM,
+    MODE_CONTEXT_SSB,
+    MODE_CONTEXT_COUNT
+};
+
+// "Source of Truth" for default values.
+// This is an immutable template for resetting settings.
+struct ModeDefaults {
+    const int8_t agc;       // Default for Attenuation/AGC
+    const int8_t soft_mute; // Default for Soft Mute
+    const int8_t avc;       // Default for AVC Max Gain
+};
+
+// Array with default settings for AM and SSB modes.
+const ModeDefaults defaultModeSettings[MODE_CONTEXT_COUNT] = {
+    // [MODE_CONTEXT_AM]
+    {.agc = 0, .soft_mute = 0, .avc = 90 },
+    // [MODE_CONTEXT_SSB]
+    {.agc = 0, .soft_mute = 0, .avc = 90 }
+};
+
+// "Live State" storage for mode-dependent settings.
+// This array is loaded from and saved to EEPROM.
+int8_t g_modeSettings[MODE_SETTINGS_COUNT][MODE_CONTEXT_COUNT];
 
 enum SettingType
 {
@@ -74,6 +113,7 @@ void doBFOCalibration(int8_t v);
 void doUnitsSwitch(int8_t v = 0);
 void doScanSwitch(int8_t v = 0);
 void doCWSwitch(int8_t v = 0);
+void updateAndShowBattery(bool forceShow);
 
 // used by SettingParamToUI function to convert parameter values to display strings
 const char PROGMEM paramTexts[][4] = {
@@ -81,17 +121,19 @@ const char PROGMEM paramTexts[][4] = {
   "RSS", "SNR", "LSB", "USB", "100", "50%"
 };
 
+// "UI Buffer" - a temporary buffer for the settings UI.
+// It is populated from g_modeSettings upon entering the menu.
 SettingsItem g_Settings[] =
 {
     //Page 1
     { "ATT", 0,  SettingType::ZeroAuto,     doAttenuation     },  // Attenuation
-    { "SM ", 0,  SettingType::Num,          doSoftMute        },  // Soft Mute ("SM" + пробел)
+    { "SM ", 0,  SettingType::Num,          doSoftMute        },  // Soft Mute
     { "SVC", 1,  SettingType::Switch,       doSSBAVC          },  // SSB AVC Switch
     { "SYN", 0,  SettingType::Switch,       doSync            },  // SSB Sync
-    { "DE",  1,  SettingType::Switch,       doDeEmp           },  // FM DeEmphasis ("DE" + пробел)
-    { "AVC", 46, SettingType::Num,          doAvc             },  // Automatic Volume Control
+    { "DE",  1,  SettingType::Switch,       doDeEmp           },  // FM DeEmphasis
+    { "AVC", 0,  SettingType::Num,          doAvc             },  // Automatic Volume Control
     //Page 2
-    { "SCR", 80, SettingType::Num,          doBrightness      },  // Screen Brightness
+    { "SCR", 10, SettingType::Num,          doBrightness      },  // Screen Brightness
     { "SWU", 0,  SettingType::Switch,       doSWUnits         },  // SW Units
     { "SSM", 1,  SettingType::Switch,       doSSBSoftMuteMode },  // SSB Soft Mute Mode
     { "COF", 0,  SettingType::SwitchAuto,   doCutoffFilter    },  // SSB Cutoff Filter
@@ -103,7 +145,7 @@ SettingsItem g_Settings[] =
     { "BFO", 0,  SettingType::Num,          doBFOCalibration  },  // BFO Offset calibration
     { "UNI", 1,  SettingType::Switch,       doUnitsSwitch     },  // Show/Hide frequency units
     { "SCN", 1,  SettingType::Switch,       doScanSwitch      },  // AM Encoder scan switch
-    { "CW ", 0,  SettingType::Switch,       doCWSwitch        },  // CW is LSB or USB ("CW" + пробел)
+    { "CW ", 0,  SettingType::Switch,       doCWSwitch        },  // CW is LSB or USB
 };
 
 enum SettingsIndex
@@ -137,7 +179,7 @@ bool g_SettingEditing = false;
 const int16_t CW_PITCH_OFFSET_HZ = 500; // 500 Hz pitch for CW tone generation
 
 //For managing BW
-// Для SSB - используем PROGMEM для экономии RAM
+// For SSB - using PROGMEM to save RAM
 const char bw_ssb_0[] PROGMEM = "0.5k";
 const char bw_ssb_1[] PROGMEM = "1.0k";
 const char bw_ssb_2[] PROGMEM = "1.2k";
@@ -153,7 +195,7 @@ int8_t g_bwIndexSSB = 4;
 const uint8_t g_bwSSBIdx[] = { 4, 5, 0, 1, 2, 3 };
 const uint8_t g_bwSSBMaxIdx = 5;
 
-// Для AM
+// For AM
 const char bw_am_0[] PROGMEM = "1.0k";
 const char bw_am_1[] PROGMEM = "1.8k";
 const char bw_am_2[] PROGMEM = "2.0k";
@@ -170,7 +212,7 @@ int8_t g_bwIndexAM = 4;
 const uint8_t g_maxFilterAM = 6;
 const uint8_t g_bwAMIdx[] = { 4, 5, 3, 6, 2, 1, 0 };
 
-// Для FM
+// For FM
 int8_t g_bwIndexFM = 0;
 const char bw_fm_0[] PROGMEM = "AUTO";
 const char bw_fm_1[] PROGMEM = "110k";
@@ -207,15 +249,14 @@ int g_tabStep[] =
     10000
 };
 
-// Updated constants to manage step logic
 const uint8_t AM_STEPS_COUNT = 7;      // Total number of steps for AM
 // The number of SSB steps is now 9 (5 original + 4 new)
 const uint8_t SSB_STEPS_COUNT = 9;     // Total number of steps for SSB
 const uint8_t SSB_STEP_OFFSET = 7;     // Offset to the beginning of SSB steps in g_tabStep
 
-// Separated state variables for step index storage remain the same
-volatile int8_t g_stepIndexAM = 3;   // Stores the current step index ONLY for AM mode (range 0..6)
-volatile int8_t g_stepIndexSSB = 0;  // Stores the current step index ONLY for SSB mode (range 0..8)
+// Separated state variables for step index storage 
+int8_t g_stepIndexAM = 3;   // Stores the current step index ONLY for AM mode (range 0..6)
+int8_t g_stepIndexSSB = 0;  // Stores the current step index ONLY for SSB mode (range 0..8)
 
 int8_t g_tabStepFM[] =
 {
@@ -240,8 +281,13 @@ struct Band
     uint16_t minimumFreq;
     uint16_t maximumFreq;
     uint16_t currentFreq;
-    int8_t currentStepIdx;
-    int8_t bandwidthIdx;     // Bandwidth table index (internal table in Si473x controller)
+    // -- New fields to store per-mode settings
+    int8_t stepIdxAM;
+    int8_t stepIdxSSB;
+    int8_t stepIdxFM;
+    int8_t bwIdxAM;
+    int8_t bwIdxSSB;
+    int8_t bwIdxFM;
 };
 
 #if USE_RDS
@@ -263,16 +309,17 @@ const char bandTags[][3] =
     "LW",
     "MW",
     "  ", // SW here
-    "  "  // FM emptry
+    "  "  // FM empty
 };
 
 // https://github.com/goshante/ats20_ats_ex/issues/44
 Band g_bandList[] =
 {
-    /* LW */ { LW_LIMIT_LOW, 520, 300, 0, 4 },
-    /* MW */ { 450, 1710, 1080, 3, 4 },
-    /* SW */ { SW_LIMIT_LOW, SW_LIMIT_HIGH, SW_LIMIT_LOW, 0, 4 },
-    /* FM */ { 6400, 10800, 8400, 1, 0 },
+    // FreqMin,      FreqMax,  FreqCurrent,stepAM,stepSSB, stepFM,    bwAM, bwSSB,  bwFM
+    /* LW */ { LW_LIMIT_LOW,             520,          300,     2,      4,       1,      4,    4,     0 }, // Default: 9k,  500Hz, 100k | 3.0k, 3.0k, AUTO
+    /* MW */ { 450,                     1710,         1080,     3,      4,       1,      4,    4,     0 }, // Default: 10k, 500Hz, 100k | 3.0k, 3.0k, AUTO
+    /* SW */ { SW_LIMIT_LOW,   SW_LIMIT_HIGH, SW_LIMIT_LOW,     1,      4,       1,      4,    4,     0 }, // Default: 5k,  500Hz, 100k | 3.0k, 3.0k, AUTO
+    /* FM */ { 6400,                   10800,         8400,     1,      4,       1,      4,    4,     0 }  // Default: --,     --, 100k |   --,   --, AUTO
 };
 
 uint16_t SWSubBands[] =
