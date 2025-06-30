@@ -9,7 +9,7 @@
 // 02.2024
 // http://github.com/goshante
 // ----------------------------------------------------------------------
-// MOD_NO_RDS_v3.1 by diqezit
+// MOD_NO_RDS_v3.2 by diqezit
 // More info you can get below
 // https://github.com/goshante/ats20_ats_ex/issues/42
 // ----------------------------------------------------------------------
@@ -53,12 +53,11 @@ ModeContext getModeContext() {
 
 // Initializes mode-dependent settings to their default values
 void initializeDefaultModeSettings() {
-    g_modeSettings[MODE_SETTING_AGC][MODE_CONTEXT_AM] = 0;        // AM AGC ON
-    g_modeSettings[MODE_SETTING_AGC][MODE_CONTEXT_SSB] = 0;       // SSB AGC ON
-    g_modeSettings[MODE_SETTING_SOFT_MUTE][MODE_CONTEXT_AM] = 0;  // AM SoftMute 
-    g_modeSettings[MODE_SETTING_SOFT_MUTE][MODE_CONTEXT_SSB] = 0; // SSB SoftMute
-    g_modeSettings[MODE_SETTING_AVC][MODE_CONTEXT_AM] = 90;       // AM AVC 
-    g_modeSettings[MODE_SETTING_AVC][MODE_CONTEXT_SSB] = 90;      // SSB AVC
+    for (uint8_t i = 0; i < MODE_CONTEXT_COUNT; i++) {
+        g_modeSettings[MODE_SETTING_AGC][i] = defaultModeSettings[i].agc;
+        g_modeSettings[MODE_SETTING_SOFT_MUTE][i] = defaultModeSettings[i].soft_mute;
+        g_modeSettings[MODE_SETTING_AVC][i] = defaultModeSettings[i].avc;
+    }
 }
 
 //Initialize controller
@@ -184,6 +183,11 @@ uint8_t volumeEvent(uint8_t event, uint8_t pin) {
 }
 
 uint8_t simpleEvent(uint8_t event, uint8_t pin) {
+    // If the event is from the Mode button in FM mode, pass it through unmodified.
+    if (pin == MODE_SWITCH && g_currentMode == FM) {
+        return event;
+    }
+
     if (BUTTONEVENT_FIRSTLONGPRESS == event)
         event = BUTTONEVENT_SHORTPRESS;
     return event;
@@ -348,7 +352,7 @@ void readAllReceiverInformation() {
         }
     }
 
-    oled.setContrast(uint8_t(g_Settings[Brightness].param) * 2);
+    applyBrightness();
 
     loadActiveStateFromBand();
     g_previousFrequency = g_currentFrequency;
@@ -645,6 +649,9 @@ void SettingParamToUI(char* buf, uint8_t idx) {
 
     switch (g_Settings[idx].type) {
     case SettingType::Num:
+        // For Brightness, display the internal value (0-9) as (1-10) to the user
+        if (idx == SettingsIndex::Brightness) param += 1;
+
         // For numeric type, convert number to string
         convertToChar(buf, abs(param), 3);
         if (param < 0) buf[0] = '-';
@@ -678,6 +685,8 @@ void SettingParamToUI(char* buf, uint8_t idx) {
             textIdx = 9 + param; // 0="LSB", 1="USB"
         else if (idx == SettingsIndex::CPUSpeed)
             textIdx = 11 + param; // 0="100", 1="50%"
+        else if (idx == SettingsIndex::AntennaCap)
+            textIdx = (param == 0) ? 1 : 2; // 0="On ", 1="Off"
         else
             textIdx = 2 - param; // Generic: 0="Off", 1="On "
         break;
@@ -835,7 +844,7 @@ void showVolume() {
 
 // RSSI drawings
 void showRSSI() {
-    if (g_settingsActive || g_currentMode != FM)
+    if (g_settingsActive || g_favoritesActive || g_currentMode != FM)
         return;
 
     oled.setCursor(84, 0);
@@ -1192,12 +1201,6 @@ void configureAMMode(uint16_t minFreq, uint16_t maxFreq) {
 void configureAMCommon(uint16_t minFreq, uint16_t maxFreq) {
     ModeContext modeCtx = getModeContext();
 
-    // Apply AGC/ATTENUATION from storage for the current mode
-    uint8_t att_val = g_modeSettings[MODE_SETTING_AGC][modeCtx];
-    uint8_t disableAgc = (att_val > 0);
-    uint8_t agcNdx = (att_val > 1) ? (att_val - 1) : 0;
-    g_si4735.setAutomaticGainControl(disableAgc, agcNdx);
-
     // Apply AVC MAX GAIN from storage for the current mode
     g_si4735.setAvcAmMaxGain(g_modeSettings[MODE_SETTING_AVC][modeCtx]);
 
@@ -1221,7 +1224,8 @@ void applyBandConfiguration(bool extraSSBReset) {
     loadActiveStateFromBand();
 
     // Tune antenna capacitor
-    g_si4735.setTuneFrequencyAntennaCapacitor(static_cast<uint16_t>(nextIsFM));
+    uint8_t cap_value = (g_bandIndex == FM_BAND_TYPE) ? 1 : g_Settings[AntennaCap].param;
+    g_si4735.setTuneFrequencyAntennaCapacitor(cap_value);
 
     if (nextIsFM) {
         configureFMMode();
@@ -1245,6 +1249,16 @@ void applyBandConfiguration(bool extraSSBReset) {
         // Common AM/SSB post-processing
         configureAMCommon(minFreq, maxFreq);
     }
+
+    ModeContext modeCtx = getModeContext();
+    uint8_t att_val = g_modeSettings[MODE_SETTING_AGC][modeCtx];
+    uint8_t max_att = (g_currentMode == FM) ? 26 : 37;
+
+    if (att_val > max_att || att_val == 0) {
+        att_val = max_att;
+        g_modeSettings[MODE_SETTING_AGC][modeCtx] = att_val;
+    }
+    g_si4735.setAutomaticGainControl(true, att_val - 1);
 
     if (!g_settingsActive) {
         // Clear OLED buffer
@@ -1331,7 +1345,8 @@ void doSwitchLogic(int8_t& param, int8_t low, int8_t high, int8_t step) {
 
 //Settings: Attenuation
 void doAttenuation(int8_t v) {
-    doSwitchLogic(g_Settings[ATT].param, 0, 37, v);
+    uint8_t max_att_value = (g_currentMode == FM) ? 26 : 37;
+    doSwitchLogic(g_Settings[ATT].param, 1, max_att_value, v);
 
     // Apply the change immediately for real-time feedback in the menu
     uint8_t att_val = g_Settings[ATT].param;
@@ -1348,10 +1363,27 @@ void doSoftMute(int8_t v) {
         g_si4735.setAmSoftMuteMaxAttenuation(g_Settings[SoftMute].param);
 }
 
+// Applies the brightness setting to the OLED display using the stored value
+void applyBrightness() {
+    // cheap non-linear mapping
+    int16_t s = g_Settings[Brightness].param;
+    uint8_t contrast_value = 5 + (s * s * 3);
+    oled.setContrast(contrast_value);
+}
+
 //Settings: Brightness
 void doBrightness(int8_t v) {
-    doSwitchLogic(g_Settings[Brightness].param, 1, 125, v);
-    oled.setContrast(uint8_t(g_Settings[Brightness].param) * 2);
+    // Manage 10 steps, from 0 to 9 internally
+    int8_t new_setting = g_Settings[Brightness].param + v;
+
+    // Clamp to the 10 steps range [0, 9]
+    if (new_setting > 9) new_setting = 9;
+    if (new_setting < 0) new_setting = 0;
+
+    g_Settings[Brightness].param = new_setting;
+
+    // Ask the system to apply the new brightness value
+    applyBrightness();
 }
 
 //Settings: SSB AVC Switch
@@ -1457,6 +1489,11 @@ void doCWSwitch(int8_t v = 0) {
         applyBandConfiguration(true);
 }
 
+//Settings: Auto Antenna Capacitor
+void doAntennaCapacitor(int8_t v) {
+    doSwitchLogic(g_Settings[AntennaCap].param, 0, 1, v);
+}
+
 //Bandwidth regulation logic
 void doBandwidth(uint8_t v) {
     if (isSSB()) {
@@ -1543,26 +1580,53 @@ bool clampSSBBand() {
     return false;
 }
 
+// Handles frequency tuning for AM/FM with step alignment.
 void doFrequencyTune() {
     g_seekDirection = g_encoderCount == 1 ? 1 : 0;
+    g_previousFrequency = g_currentFrequency; // Force EEPROM update
 
-    //Update frequency
-    g_previousFrequency = g_currentFrequency;  //Force EEPROM update
+    uint16_t step;
+
+    // correct step for the current mode (AM or FM)
+    if (g_currentMode == FM) {
+        step = g_tabStepFM[g_FMStepIndex];
+    }
+    else { // AM
+        step = g_tabStep[g_stepIndexAM];
+    }
+    // If the current frequency is not on the grid, the first encoder turn
+    // will snap it to the nearest grid point
+    uint16_t remainder = g_currentFrequency % step;
+    if (remainder != 0) {
+        if (g_encoderCount > 0) { // Going UP
+            g_currentFrequency += (step - remainder);
+        }
+        else { // Going DOWN
+            g_currentFrequency -= remainder;
+        }
+        // after alignment, reset encoderCount to 0 to prevent a double step
+        g_encoderCount = 0;
+    }
+
+    // Apply the regular step now that the frequency is aligned
     if (g_currentMode == FM) {
         g_currentFrequency += g_tabStepFM[g_FMStepIndex] * g_encoderCount;
     }
     else {
-        // This correctly uses g_stepIndexAM to get the step in kHz
         g_currentFrequency += g_tabStep[g_stepIndexAM] * g_encoderCount;
     }
 
     uint16_t bMin = g_bandList[g_bandIndex].minimumFreq, bMax = g_bandList[g_bandIndex].maximumFreq;
 
-    //Special logic for fast and responsive frequency surfing
-    if (g_currentFrequency > bMax)
+    // logic for fast frequency surfing
+    if (g_currentFrequency >= bMax && g_encoderCount > 0)
         g_currentFrequency = bMin;
-    else if (g_currentFrequency < bMin)
+    else if (g_currentFrequency < bMin && g_encoderCount < 0)
         g_currentFrequency = bMax;
+    else if (g_currentFrequency >= bMax)
+        g_currentFrequency = bMax;
+    else if (g_currentFrequency < bMin)
+        g_currentFrequency = bMin;
 
     g_bandList[g_bandIndex].currentFreq = g_currentFrequency;
     g_processFreqChange = true;

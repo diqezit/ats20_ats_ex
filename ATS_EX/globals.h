@@ -15,8 +15,8 @@ void doBFOCalibration(int8_t v);
 void doUnitsSwitch(int8_t v = 0);
 void doScanSwitch(int8_t v = 0);
 void doCWSwitch(int8_t v = 0);
+void doAntennaCapacitor(int8_t v = 0);
 void updateAndShowBattery(bool forceShow);
-
 
 // A macro to convert a 4-character string literal into a char array without a null terminator
 #define PACK_STR4(s) {s[0], s[1], s[2], s[3]}
@@ -81,6 +81,7 @@ enum SettingsIndex
     UnitsSwitch,
     ScanSwitch,
     CWSwitch,
+    AntennaCap,
     SETTINGS_MAX
 };
 
@@ -184,11 +185,12 @@ SI4735 g_si4735;
 // This array is loaded from and saved to EEPROM
 int8_t g_modeSettings[MODE_SETTINGS_COUNT][MODE_CONTEXT_COUNT];
 
+// Source for default values, centralized here
 const ModeDefaults defaultModeSettings[MODE_CONTEXT_COUNT] = {
     // [MODE_CONTEXT_AM]
-    {.agc = 0, .soft_mute = 0, .avc = 90 },
+    {.agc = 1, .soft_mute = 0, .avc = 90 },
     // [MODE_CONTEXT_SSB]
-    {.agc = 0, .soft_mute = 0, .avc = 90 }
+    {.agc = 1, .soft_mute = 0, .avc = 90 }
 };
 
 // used by SettingParamToUI function to convert parameter values to display strings
@@ -199,15 +201,16 @@ const char PROGMEM paramTexts[][4] = {
 
 // "UI Buffer" - a temporary buffer for the settings UI
 // It is populated from g_modeSettings upon entering the menu
+// Initial values now correspond to the AM context defaults
 SettingsItem g_Settings[] =
 {
-    { "ATT", 0,  SettingType::ZeroAuto,     doAttenuation     },
+    { "ATT", 1,  SettingType::ZeroAuto,     doAttenuation     },
     { "SM ", 0,  SettingType::Num,          doSoftMute        },
     { "SVC", 1,  SettingType::Switch,       doSSBAVC          },
     { "SYN", 0,  SettingType::Switch,       doSync            },
     { "DE",  1,  SettingType::Switch,       doDeEmp           },
-    { "AVC", 0,  SettingType::Num,          doAvc             },
-    { "SCR", 10, SettingType::Num,          doBrightness      },
+    { "AVC", 90, SettingType::Num,          doAvc             },
+    { "SCR", 9,  SettingType::Num,          doBrightness      },
     { "SWU", 0,  SettingType::Switch,       doSWUnits         },
     { "SSM", 1,  SettingType::Switch,       doSSBSoftMuteMode },
     { "COF", 0,  SettingType::SwitchAuto,   doCutoffFilter    },
@@ -216,6 +219,7 @@ SettingsItem g_Settings[] =
     { "UNI", 1,  SettingType::Switch,       doUnitsSwitch     },
     { "SCN", 1,  SettingType::Switch,       doScanSwitch      },
     { "CW ", 0,  SettingType::Switch,       doCWSwitch        },
+    { "CAP", 1,  SettingType::Switch,       doAntennaCapacitor},
 };
 
 
