@@ -94,7 +94,7 @@ This version introduces the ability to save your favorite FM stations.
 *   **[Changed]** The default ATT mode is now **AUTO** again.
 *   **[Improved]** Code structure: Button processing logic was reworked into smaller, more organized functions to simplify debugging. The user-facing functionality remains identical.
 
-### **MOD_NO_RDS v3.4**
+#### `MOD_NO_RDS v3.4`
 
 *   **[Fixed] Runaway Encoder Bug in Command Mode:** Solved a critical issue where turning the encoder while in `CMD_BAND` (or other command modes) could cause a continuous, unstoppable loop of band/step/bw     changes. The main loop and encoder processing logic have been reworked to correctly handle state and prevent this bug.
 *   **[Fixed] FM Band Stability:** Resolved a major bug that caused the receiver to freeze or display invalid data (`655.35 MHz`, incorrect step/bw) when switching to or using the FM band. This was traced to an incorrect EEPROM reset procedure.
