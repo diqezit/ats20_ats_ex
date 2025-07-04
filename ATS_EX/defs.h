@@ -1,42 +1,62 @@
-#pragma once
+﻿#pragma once
 
-//If you set this def to 0 project will be compiled without RDS 
-//and everything related to RDS will be excluded from build
-#define USE_RDS 0
+// EEPROM Memory Map
+// This map describes how data is organized in the receiver's non-volatile memory
+//
+// Address(es) | Size | Symbol(s)                  | Description
+//-------------|------|----------------------------|----------------------------------------------------
+// 0           | 1 B  | EEPROM_APP_ID_ADDRESS      | Custom ID to validate firmware data structure
+// 1-6         | 6 B  | EEPROM_DATA_START_ADDRESS  | Global state header (volume, mode, BFO, etc.)
+// 7-230       | 224B | -                          | State for all 28 bands (28 bands * 8 bytes each)
+// 231-246     | 16 B | -                          | Global settings array `g_Settings`
+// 247-252     | 6 B  | -                          | Mode-dependent settings `g_modeSettings`
+//
+// 260-279     | 20 B | EEPROM_FM_FAVORITES_START  | FM favorite station data (10 slots * 2 bytes/slot)
+// 280         | 1 B  | EEPROM_FM_FAVORITES_COUNT  | Address storing the number of saved FM favorites (0-10)
+//
+// 1000        | 1 B  | EEPROM_VERSION_ADDRESS     | Firmware version for compatibility checks
+// -----------------------------------------------------------------------------------------------------
 
-#define EEPROM_APP_ID				235
-#define EEPROM_DATA_START_ADDRESS	1
-#define EEPROM_VERSION_ADDRESS      1000
-#define EEPROM_APP_ID_ADDRESS       0
+// Core EEPROM
+constexpr auto EEPROM_APP_ID = 235;
+constexpr auto EEPROM_APP_ID_ADDRESS = 0;
+constexpr auto EEPROM_VERSION_ADDRESS = 1000;
+constexpr auto EEPROM_DATA_START_ADDRESS = 1;
 
-#define EEPROM_FM_FAVORITES_COUNT 198  
-#define EEPROM_FM_FAVORITES_START 200
+// FM Favorites Storage
+constexpr auto EEPROM_FM_FAVORITES_START = 260;
+constexpr auto EEPROM_FM_FAVORITES_COUNT = 280;
 
-//EEPROM Settings
-#define STORE_TIME 10000 // Inactive time to save our settings
+// Behavior
+constexpr auto SAVE_ON_IDLE_TIMEOUT = 30000UL;
+constexpr auto DEFAULT_VOLUME = 25;
+constexpr auto ADJUSTMENT_ACTIVE_TIMEOUT = 3000;
+#define BAND_DELAY                2
+#define VOLUME_DELAY              1 
+constexpr auto MIN_ELAPSED_TIME = 100;
+constexpr auto MIN_ELAPSED_RSSI_TIME = 150;
 
-// OLED Const values
+// Display
 #define DEFAULT_FONT FONT8X16POB
 #define RST_PIN -1
 #define RESET_PIN 12
 
-//Battery charge monitoring analog pin (Voltage divider 10-10 KOhm directly from battery)
+// Hardware
 #define BATTERY_VOLTAGE_PIN A2
 
-// Amplifier MD8002A disable pin original 
+// Amplifier MD8002A control
 #define MD8002A_SHUTDOWN_PIN A3
-// Direct operation with ports for controlling the MD8002A amplifier
 #define AMP_DDR   DDRC
 #define AMP_PORT  PORTC
 #define AMP_BIT   3
 
-#define STEREO_STATUS_BIT 0
+constexpr auto STEREO_STATUS_BIT = 0;
 
-// Encoder
+// Encoder Pins
 #define ENCODER_PIN_A 2
 #define ENCODER_PIN_B 3
 
-// Buttons
+// Button Pins
 #define MODE_SWITCH       4 
 #define BANDWIDTH_BUTTON  5
 #define VOLUME_BUTTON     6
@@ -45,23 +65,9 @@
 #define SOFTMUTE_BUTTON   9
 #define AGC_BUTTON       11
 #define STEP_BUTTON      10
-
 #define ENCODER_BUTTON   14
 
-// Default values
-#define MIN_ELAPSED_TIME 100
-#define MIN_ELAPSED_RSSI_TIME 150
-#define DEFAULT_VOLUME 25
-#define ADJUSTMENT_ACTIVE_TIMEOUT 3000
-
-// Band settings
-#define SW_LIMIT_LOW		1710
-#define SW_LIMIT_HIGH		30000
-#define LW_LIMIT_LOW		153
-#define CB_LIMIT_LOW		26200
-#define CB_LIMIT_HIGH		28000
-
-#define BAND_DELAY                 2
-#define VOLUME_DELAY               1 
+// For test only (don`t edit)
+#define ENABLE_SPLASH_SCREEN 1
 
 #define buttonEvent                NULL

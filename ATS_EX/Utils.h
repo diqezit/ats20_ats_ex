@@ -27,7 +27,8 @@ void oledPrint(T value, int offX = -1, int offY = -1, const DCfont* font = LastF
 }
 
 //Faster alternative for convertToChar
-void utoa(char* out, uint16_t num)
+// not used in the code
+/* void utoa(char* out, uint16_t num)
 {
     char* p = out;
     if (num == 0)
@@ -47,6 +48,7 @@ void utoa(char* out, uint16_t num)
     }
     *p = '\0';
 }
+*/
 
 //Better than sprintf which has overwhelmingly large overhead, it helps to reduce binary size
 void convertToChar(char* strValue, uint16_t value, uint8_t len, uint8_t dot = 0, uint8_t separator = 0, uint8_t space = ' ')
@@ -108,4 +110,14 @@ uint8_t strlen8(const char* s)
     while (*s)
         s++;
     return s - start;
+}
+
+// division via subtraction loop to save flash space
+static inline uint8_t sw_div(uint16_t& dividend, const uint16_t divisor) {
+    uint8_t quotient = 0;
+    while (dividend >= divisor) {
+        quotient++;
+        dividend -= divisor;
+    }
+    return quotient;
 }
