@@ -1,5 +1,10 @@
-#pragma once
+﻿#pragma once
 
+// =================================================================================================
+// Function Prototypes
+// =================================================================================================
+
+void applyBandConfiguration(bool extraSSBReset = false);
 void doAttenuation(int8_t v);
 void doSoftMute(int8_t v);
 void doBrightness(int8_t v);
@@ -16,17 +21,31 @@ void doUnitsSwitch(int8_t v = 0);
 void doScanSwitch(int8_t v = 0);
 void doCWSwitch(int8_t v = 0);
 void doAntennaCapacitor(int8_t v = 0);
+void showSplashScreen();
+void showStatus(bool cleanFreq = false);
 void updateAndShowBattery(bool forceShow);
+void updateStereoIndicator();
+
+// =================================================================================================
+// Macros & Constants
+// =================================================================================================
 
 // A macro to convert a 4-character string literal into a char array without a null terminator
 #define PACK_STR4(s) {s[0], s[1], s[2], s[3]}
 
 const uint8_t g_SettingsMaxPages = 3;
-const int16_t CW_PITCH_OFFSET_HZ = 500; // 500 Hz pitch for CW tone generation
+const int16_t CW_PITCH_OFFSET_HZ = 500;     // 500 Hz pitch for CW tone generation
 const uint8_t MAX_FM_FAVORITES = 10;
+const uint8_t g_bandCount = 28;             // Number of bands for seamless coverage
+const uint8_t g_lastBand = g_bandCount - 1;
+
+// =================================================================================================
+// Enumerations
+// =================================================================================================
 
 // NEW ENUM for Command Mode
-enum CommandMode : uint8_t {
+enum CommandMode : uint8_t
+{
     CMD_NONE,
     CMD_VOLUME,
     CMD_STEP,
@@ -36,25 +55,19 @@ enum CommandMode : uint8_t {
 };
 
 // Enum for convenient access to mode-dependent settings
-enum ModeSettingType {
+enum ModeSettingType
+{
     MODE_SETTING_AGC,
     MODE_SETTING_SOFT_MUTE,
     MODE_SETTING_AVC,
     MODE_SETTINGS_COUNT // Counter for use in loops
 };
 
-enum ModeContext {
+enum ModeContext
+{
     MODE_CONTEXT_AM,
     MODE_CONTEXT_SSB,
     MODE_CONTEXT_COUNT
-};
-
-// "Source of Truth" for default values
-// This is an immutable template for resetting settings
-struct ModeDefaults {
-    const int8_t agc;       // Default for Attenuation/AGC
-    const int8_t soft_mute; // Default for Soft Mute
-    const int8_t avc;       // Default for AVC Max Gain
 };
 
 enum SettingType
@@ -63,14 +76,6 @@ enum SettingType
     Num,
     Switch,
     SwitchAuto
-};
-
-struct SettingsItem
-{
-    char name[4];
-    int8_t param;
-    uint8_t type;
-    void (*manipulateCallback)(int8_t);
 };
 
 enum SettingsIndex
@@ -102,20 +107,6 @@ enum BandType : uint8_t
     FM_BAND_TYPE
 };
 
-struct Band
-{
-    uint16_t minimumFreq;
-    uint16_t maximumFreq;
-    uint16_t currentFreq;
-    // -- New fields to store per-mode settings
-    int8_t stepIdxAM;
-    int8_t stepIdxSSB;
-    int8_t stepIdxFM;
-    int8_t bwIdxAM;
-    int8_t bwIdxSSB;
-    int8_t bwIdxFM;
-};
-
 enum Modulations : uint8_t
 {
     AM,
@@ -125,11 +116,66 @@ enum Modulations : uint8_t
     FM
 };
 
-struct FMFavorite {
+// =================================================================================================
+// Data Structures
+// =================================================================================================
+
+// "Source of Truth" for default values
+// This is an immutable template for resetting settings
+struct ModeDefaults
+{
+    const int8_t agc;       // Default for Attenuation/AGC
+    const int8_t soft_mute; // Default for Soft Mute
+    const int8_t avc;       // Default for AVC Max Gain
+};
+
+struct SettingsItem
+{
+    char name[4];
+    int8_t param;
+    uint8_t type;
+    void (*manipulateCallback)(int8_t);
+};
+
+// defines all properties of a frequency band
+// this unified structure is the core of the new elegant architecture
+struct Band
+{
+    // --- constant data, defined at compile time ---
+    char name[4];
+    uint16_t minimumFreq;
+    uint16_t maximumFreq;
+    BandType bandType;
+
+    // --- variable state, loaded/saved to eeprom ---
+    uint16_t currentFreq;
+    int8_t stepIdxAM;
+    int8_t stepIdxSSB;
+    int8_t stepIdxFM;
+    int8_t bwIdxAM;
+    int8_t bwIdxSSB;
+    int8_t bwIdxFM;
+};
+
+struct FMFavorite
+{
     uint16_t frequency;
 };
 
+// Defines how a setting's parameter is converted into a text index
+struct SwitchMapEntry
+{
+    uint8_t baseIndex;
+    bool inverted;                  // if true, the parameter is subtracted from the base index
+};
 
+// =================================================================================================
+// Global Variables & Data Tables
+// =================================================================================================
+
+// -------------------------------------------------------------------------------------------------
+// System State & Flags
+// -------------------------------------------------------------------------------------------------
 long g_storeTime = millis();
 bool g_voltagePinConnnected = false;
 bool g_ssbLoaded = false;
@@ -137,39 +183,50 @@ bool g_stereoStatus = false;
 bool g_displayOn = true;
 bool g_seekStop = false;
 uint32_t g_lastAdjustmentTime = 0;
+uint32_t g_lastUserActivityTime = 0; // time of the last user frequency change
+bool g_stateIsDirty = false;         // indicate if the state needs saving on idle
 
+// -------------------------------------------------------------------------------------------------
+// UI & Command State
+// -------------------------------------------------------------------------------------------------
 volatile CommandMode g_activeCommand = CMD_NONE;
 bool g_settingsActive = false;
 bool g_settingsDirty = false;
 int8_t g_SettingSelected = 0;
 int8_t g_SettingsPage = 1;
 bool g_SettingEditing = false;
+bool g_favoritesActive = false;
+bool g_favoritesDirty = false;
+uint8_t g_favoriteSelected = 0;
+uint8_t g_totalFavorites = 0;
 
+// -------------------------------------------------------------------------------------------------
+// Radio State
+// -------------------------------------------------------------------------------------------------
 uint8_t g_currentRSSI = 0;
 uint32_t g_lastRSSIUpdate = 0;
-extern uint8_t g_stableBatteryPercent; // store table percentage for display
-
 uint8_t g_muteVolume = 0;
 uint8_t g_volume = DEFAULT_VOLUME;
-
 volatile uint8_t g_currentMode = FM;
 volatile uint8_t g_prevMode = FM;
 int g_currentBFO = 0;
+extern uint8_t g_stableBatteryPercent; // store table percentage for display
 
 //Frequency tracking
 uint16_t g_currentFrequency;
 uint16_t g_previousFrequency;
+uint16_t g_lastSavedFrequency = 0;
 uint8_t g_seekDirection = 1;
+
 //Special logic for fast and responsive frequency surfing
 uint32_t g_lastFreqChange = 0;
 bool g_processFreqChange = 0;
 
+// -------------------------------------------------------------------------------------------------
+// Encoder & Buttons
+// -------------------------------------------------------------------------------------------------
 volatile int g_encoderCount = 0;
 int g_safeEncoderMovement = 0;
-
-bool g_favoritesActive = false;
-uint8_t g_favoriteSelected = 0;
-uint8_t g_totalFavorites = 0;
 
 SimpleButton  btn_Bandwidth(BANDWIDTH_BUTTON);
 SimpleButton  btn_BandUp(BAND_BUTTON);
@@ -184,11 +241,9 @@ SimpleButton  btn_Mode(MODE_SWITCH);
 Rotary g_encoder = Rotary(ENCODER_PIN_A, ENCODER_PIN_B);
 SI4735 g_si4735;
 
-
-// "Live State" storage for mode-dependent settings
-// This array is loaded from and saved to EEPROM
-int8_t g_modeSettings[MODE_SETTINGS_COUNT][MODE_CONTEXT_COUNT];
-
+// -------------------------------------------------------------------------------------------------
+// Mode-Dependent Settings
+// -------------------------------------------------------------------------------------------------
 // Source for default values, centralized here
 const ModeDefaults defaultModeSettings[MODE_CONTEXT_COUNT] = {
     // [MODE_CONTEXT_AM]
@@ -197,110 +252,123 @@ const ModeDefaults defaultModeSettings[MODE_CONTEXT_COUNT] = {
     {.agc = 0, .soft_mute = 0, .avc = 90 }
 };
 
-// used by SettingParamToUI function to convert parameter values to display strings
-const char PROGMEM paramTexts[][4] = {
-  "AUT", "On ", "Off", "50u", "75u", "kHz", "MHz",
-  "RSS", "SNR", "LSB", "USB", "100", "50%"
-};
+// "Live State" storage for mode-dependent settings
+// This array is loaded from and saved to EEPROM
+int8_t g_modeSettings[MODE_SETTINGS_COUNT][MODE_CONTEXT_COUNT];
 
+// -------------------------------------------------------------------------------------------------
+// General Settings
+// -------------------------------------------------------------------------------------------------
 // "UI Buffer" - A temporary buffer for the settings UI, stored in RAM
 // It holds the live state of settings while the user is in the menu
 // This buffer is populated from g_modeSettings upon entering the menu
 // The initial values here are defaults and will be overwritten
 SettingsItem g_Settings[] =
 {
-    //  { Name, Default Param,     Behavior,    Callback          }
-        { "ATT", 0,  SettingType::ZeroAuto,     doAttenuation     },
-        { "SM ", 0,  SettingType::Num,          doSoftMute        },
-        { "SVC", 1,  SettingType::Switch,       doSSBAVC          },
-        { "SYN", 0,  SettingType::Switch,       doSync            },
-        { "DE",  1,  SettingType::Switch,       doDeEmp           },
-        { "AVC", 90, SettingType::Num,          doAvc             },
-        { "SCR", 9,  SettingType::Num,          doBrightness      },
-        { "SWU", 0,  SettingType::Switch,       doSWUnits         },
-        { "SSM", 1,  SettingType::Switch,       doSSBSoftMuteMode },
-        { "COF", 0,  SettingType::SwitchAuto,   doCutoffFilter    },
-        { "CPU", 0,  SettingType::Switch,       doCPUSpeed        },
-        { "BFO", 0,  SettingType::Num,          doBFOCalibration  },
-        { "UNI", 1,  SettingType::Switch,       doUnitsSwitch     },
-        { "SCN", 1,  SettingType::Switch,       doScanSwitch      },
-        { "CW ", 0,  SettingType::Switch,       doCWSwitch        },
-        { "CAP", 1,  SettingType::Switch,       doAntennaCapacitor},
-};
-
-// Defines how a setting's parameter is converted into a text index
-struct SwitchMapEntry {
-    uint8_t baseIndex;
-    bool inverted;                  // if true, the parameter is subtracted from the base index
+    //  { Name, Default Param,     Behavior,             Callback          }
+        { "ATT", 0,            SettingType::ZeroAuto,   doAttenuation     },
+        { "SM ", 0,            SettingType::Num,        doSoftMute        },
+        { "SVC", 1,            SettingType::Switch,     doSSBAVC          },
+        { "SYN", 0,            SettingType::Switch,     doSync            },
+        { "DE",  1,            SettingType::Switch,     doDeEmp           },
+        { "AVC", 90,           SettingType::Num,        doAvc             },
+        { "SCR", 4,            SettingType::Num,        doBrightness      },
+        { "SWU", 0,            SettingType::Switch,     doSWUnits         },
+        { "SSM", 1,            SettingType::Switch,     doSSBSoftMuteMode },
+        { "COF", 0,            SettingType::SwitchAuto, doCutoffFilter    },
+        { "CPU", 0,            SettingType::Switch,     doCPUSpeed        },
+        { "BFO", 0,            SettingType::Num,        doBFOCalibration  },
+        { "UNI", 1,            SettingType::Switch,     doUnitsSwitch     },
+        { "SCN", 1,            SettingType::Switch,     doScanSwitch      },
+        { "CW ", 0,            SettingType::Switch,     doCWSwitch        },
+        { "CAP", 0,            SettingType::Switch,     doAntennaCapacitor},
 };
 
 // defines the text conversion rules ONLY for settings of type 'Switch'
-// it  is indexed here by the SettingsIndex enum
+// it is indexed here by the SettingsIndex enum
 const PROGMEM SwitchMapEntry switch_setting_map[] = {
-    [ATT] = {0, false},             // Ignored, type is ZeroAuto
-    [SoftMute] = {0, false},        // Ignored, type is Num
+    [ATT] = {0, false},                     // Ignored, type is ZeroAuto
+    [SoftMute] = {0, false},                // Ignored, type is Num
     [SVC] = {2, true},
     [Sync] = {2, true},
     [DeEmp] = {3, false},
-    [AutoVolControl] = {0, false},  // Ignored, type is Num
-    [Brightness] = {0, false},      // Ignored, type is Num
+    [AutoVolControl] = {0, false},          // Ignored, type is Num
+    [Brightness] = {0, false},              // Ignored, type is Num
     [SWUnits] = {5, false},
     [SSM] = {7, false},
-    [CutoffFilter] = {0, false},    // Ignored, type is SwitchAuto
+    [CutoffFilter] = {0, false},            // Ignored, type is SwitchAuto
     [CPUSpeed] = {11, false},
-    [BFO] = {0, false},             // Ignored, type is Num
+    [BFO] = {0, false},                     // Ignored, type is Num
     [UnitsSwitch] = {2, true},
     [ScanSwitch] = {2, true},
     [CWSwitch] = {9, false},
     [AntennaCap] = {1, false}
 };
 
-// Common bandwidth strings are defined once to save flash space
-const char bw_common_1k0[] PROGMEM = "1.0k";
-const char bw_common_3k0[] PROGMEM = "3.0k";
-const char bw_common_4k0[] PROGMEM = "4.0k";
+// -------------------------------------------------------------------------------------------------
+// Band Definitions
+// -------------------------------------------------------------------------------------------------
+// we use an index to track the current band. band index 1 is mw.
+int8_t g_bandIndex = 1;
 
-// For SSB - using PROGMEM to save RAM
-const char bw_ssb_0[] PROGMEM = "0.5k";
-const char bw_ssb_2[] PROGMEM = "1.2k";
-const char bw_ssb_3[] PROGMEM = "2.2k";
-const char* const bw_ssb_table[] PROGMEM = {
-    bw_ssb_0,
-    bw_common_1k0, // Re-use
-    bw_ssb_2,
-    bw_ssb_3,
-    bw_common_3k0, // Re-use
-    bw_common_4k0  // Re-use
+// this array is now the single source of truth for all bands (reduse size flash too now)
+// it is defined here directly
+Band g_bandList[g_bandCount] = {
+    // name,         min_freq,  max_freq, band_type,    current_freq, stepAM, stepSSB, stepFM, bwAM, bwSSB, bwFM
+    { PACK_STR4("LW  "),   150,       520, LW_BAND_TYPE,   300,        2,      4,       1,      4,    4,     0 },
+    { PACK_STR4("MW  "),   520,      1710, MW_BAND_TYPE,  1080,        3,      4,       1,      4,    4,     0 },
+    // --- SW sub bands ---
+    { PACK_STR4("SW  "),  1710,      1810, SW_BAND_TYPE,  1750,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("160m"),  1810,      2000, SW_BAND_TYPE,  1850,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("SW  "),  2000,      2300, SW_BAND_TYPE,  2150,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("120m"),  2300,      2500, SW_BAND_TYPE,  2400,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("SW  "),  2500,      3200, SW_BAND_TYPE,  2800,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("90m "),  3200,      3400, SW_BAND_TYPE,  3300,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("SW  "),  3400,      3500, SW_BAND_TYPE,  3450,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("80m "),  3500,      3900, SW_BAND_TYPE,  3700,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("75m "),  3900,      4000, SW_BAND_TYPE,  3950,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("SW  "),  4000,      4750, SW_BAND_TYPE,  4400,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("60m "),  4750,      5060, SW_BAND_TYPE,  4850,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("SW  "),  5060,      5900, SW_BAND_TYPE,  5500,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("49m "),  5900,      6200, SW_BAND_TYPE,  6000,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("SW  "),  6200,      7000, SW_BAND_TYPE,  6500,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("40m "),  7000,      7300, SW_BAND_TYPE,  7150,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("41m "),  7300,      9400, SW_BAND_TYPE,  8500,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("31m "),  9400,      9900, SW_BAND_TYPE,  9600,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("SW  "),  9900,     10100, SW_BAND_TYPE, 10000,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("30m "), 10100,     10150, SW_BAND_TYPE, 10120,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("25m "), 10150,     18068, SW_BAND_TYPE, 14000,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("17m "), 18068,     18168, SW_BAND_TYPE, 18100,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("16m "), 18168,     21000, SW_BAND_TYPE, 19500,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("15m "), 21000,     21450, SW_BAND_TYPE, 21200,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("13m "), 21450,     28000, SW_BAND_TYPE, 25000,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("10m "), 28000,     30000, SW_BAND_TYPE, 28400,        1,      4,       1,      4,    4,     0 },
+    // --- FM ---
+    { PACK_STR4("    "),  6400,     10800, FM_BAND_TYPE,   8400,        1,      4,       1,      4,    4,     0 }
 };
-int8_t g_bwIndexSSB = 4;
+
+// -------------------------------------------------------------------------------------------------
+// Bandwidth Tables
+// -------------------------------------------------------------------------------------------------
+// single string array in PROGMEM holds all bandwidth labels to save Flash
+const char bw_all_data[] PROGMEM =
+"0.5k" "1.0k" "1.2k" "1.8k" "2.0k" "2.2k" "2.5k" "3.0k"
+"4.0k" "6.0k" "AUTO" "110k" " 84k" " 60k" " 40k";
+
+// more compact (1 byte per entry) than a early table of pointers (2 bytes per entry)
+const uint8_t bw_ssb_map[] PROGMEM = { 0 * 4, 1 * 4, 2 * 4, 5 * 4, 7 * 4, 8 * 4 };
+const uint8_t bw_am_map[] PROGMEM = { 1 * 4, 3 * 4, 4 * 4, 6 * 4, 7 * 4, 8 * 4, 9 * 4 };
+const uint8_t bw_fm_map[] PROGMEM = { 10 * 4, 11 * 4, 12 * 4, 13 * 4, 14 * 4 };
+
+// arrays for chip configuration. They map the our UI index to configure IC Si473x
 const uint8_t g_bwSSBIdx[] = { 4, 5, 0, 1, 2, 3 };
 const uint8_t g_bwSSBMaxIdx = 5;
-
-const char bw_am_1[] PROGMEM = "1.8k";
-const char bw_am_2[] PROGMEM = "2.0k";
-const char bw_am_3[] PROGMEM = "2.5k";
-const char bw_am_6[] PROGMEM = "6.0k";
-const char* const bw_am_table[] PROGMEM = {
-    bw_common_1k0, // Re-use
-    bw_am_1,
-    bw_am_2,
-    bw_am_3,
-    bw_common_3k0, // Re-use
-    bw_common_4k0, // Re-use
-    bw_am_6
-};
-int8_t g_bwIndexAM = 4;
 const uint8_t g_maxFilterAM = 6;
 const uint8_t g_bwAMIdx[] = { 4, 5, 3, 6, 2, 1, 0 };
 
-const char bw_fm_0[] PROGMEM = "AUTO";
-const char bw_fm_1[] PROGMEM = "110k";
-const char bw_fm_2[] PROGMEM = " 84k";
-const char bw_fm_3[] PROGMEM = " 60k";
-const char bw_fm_4[] PROGMEM = " 40k";
-const char* const bw_fm_table[] PROGMEM = { bw_fm_0, bw_fm_1, bw_fm_2, bw_fm_3, bw_fm_4 };
-int8_t g_bwIndexFM = 0;
-
+// -------------------------------------------------------------------------------------------------
+// Tuning Step Tables
+// -------------------------------------------------------------------------------------------------
 // Array with tuning steps. The structure is defined like - AM (in kHz), then SSB (in Hz)
 int g_tabStep[] =
 {
@@ -317,61 +385,17 @@ const uint8_t AM_STEPS_COUNT = 7;
 const uint8_t SSB_STEPS_COUNT = 9;
 const uint8_t SSB_STEP_OFFSET = 7;
 
-// Separated state variables for step index storage
-int8_t g_stepIndexAM = 3;   // Stores the current step index ONLY for AM mode (range 0..6)
-int8_t g_stepIndexSSB = 0;  // Stores the current step index ONLY for SSB mode (range 0..8)
-
 int8_t g_tabStepFM[] = { 5, 10, 100 };
-int8_t g_FMStepIndex = 1;
 const int8_t g_lastStepFM = (sizeof(g_tabStepFM) / sizeof(int8_t)) - 1;
 
-const char bandTags[][3] = { "LW", "MW", "  ", "  " };
-
-// https://github.com/goshante/ats20_ats_ex/issues/44
-Band g_bandList[] =
-{
-    // FreqMin,                      FreqMax,  FreqCurrent,stepAM,stepSSB,  stepFM,  bwAM, bwSSB,   bwFM
-    /* LW */ { LW_LIMIT_LOW,             520,          300,     2,      4,       1,      4,    4,     0 }, // Default: 9k,  500Hz, 100k | 3.0k, 3.0k, AUTO
-    /* MW */ { 450,                     1710,         1080,     3,      4,       1,      4,    4,     0 }, // Default: 10k, 500Hz, 100k | 3.0k, 3.0k, AUTO
-    /* SW */ { SW_LIMIT_LOW,   SW_LIMIT_HIGH, SW_LIMIT_LOW,     1,      4,       1,      4,    4,     0 }, // Default: 5k,  500Hz, 100k | 3.0k, 3.0k, AUTO
-    /* FM */ { 6400,                   10800,         8400,     1,      4,       1,      4,    4,     0 }  // Default: --,     --, 100k |   --,   --, AUTO
+// -------------------------------------------------------------------------------------------------
+// UI Text & Other Data
+// -------------------------------------------------------------------------------------------------
+// used by SettingParamToUI function to convert parameter values to display strings
+const char PROGMEM paramTexts[][4] = {
+  "AUT", "On ", "Off", "50u", "75u", "kHz", "MHz",
+  "RSS", "SNR", "LSB", "USB", "100", "50%"
 };
-
-uint16_t SWSubBands[] =
-{
-    SW_LIMIT_LOW,   // 160 Meter
-    3500,           // 80 Meter
-    4500,
-    5600,
-    6800,           // 40 Meter
-    7200,           // 41 Meter
-    8500,
-    10000,          // 30 Meter
-    11200,
-    13400,
-    14000,          // 20 Meter
-    15000,
-    17200,
-    18000,          // 17 Meter
-    21000,          // 15 Meter
-    21400,          // 13 Meter
-    24890,          // 12 Meter
-    CB_LIMIT_LOW,   // CB Band (11 Meter)
-    CB_LIMIT_HIGH   // 10 Meter
-};
-const uint8_t g_SWSubBandCount = sizeof(SWSubBands) / sizeof(uint16_t);
-
-// Array of SW sub-band names, with broadcasting bands filled in
-const uint8_t band_names_packed[][4] PROGMEM = {
-    PACK_STR4("160m"), PACK_STR4("80m "), PACK_STR4("60m "), PACK_STR4("49m "),
-    PACK_STR4("40m "), PACK_STR4("41m "), PACK_STR4("31m "), PACK_STR4("30m "),
-    PACK_STR4("25m "), PACK_STR4("22m "), PACK_STR4("20m "), PACK_STR4("19m "),
-    PACK_STR4("16m "), PACK_STR4("17m "), PACK_STR4("15m "), PACK_STR4("13m "),
-    PACK_STR4("12m "), PACK_STR4("CB  "), PACK_STR4("10m ")
-};
-
-const uint8_t g_lastBand = (sizeof(g_bandList) / sizeof(Band)) - 1;
-int8_t g_bandIndex = 1;
 
 const char g_bandModeDesc[][4] = { "AM ", "LSB", "USB", "CW ", "FM " };
 
