@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 // EEPROM Memory Map
 // This map describes how data is organized in the receiver's non-volatile memory

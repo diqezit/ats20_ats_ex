@@ -51,49 +51,32 @@ void oledPrint(T value, int offX = -1, int offY = -1, const DCfont* font = LastF
 */
 
 //Better than sprintf which has overwhelmingly large overhead, it helps to reduce binary size
-void convertToChar(char* strValue, uint16_t value, uint8_t len, uint8_t dot = 0, uint8_t separator = 0, uint8_t space = ' ')
+void convertToChar(char* str, uint16_t value, uint8_t len, uint8_t dot = 0, char separator = '.', char space = ' ')
 {
-    char d;
-    int8_t i;
-    for (i = (len - 1); i >= 0; i--)
-    {
-        d = value % 10;
-        value = value / 10;
-        strValue[i] = d + 48;
-    }
-    strValue[len] = '\0';
+    uint8_t current_pos = len + (dot > 0);
+    str[current_pos] = '\0';
 
-    if (dot > 0)
+    for (uint8_t i = 0; i < len; ++i)
     {
-        for (int i = len; i >= dot; i--)
-        {
-            strValue[i + 1] = strValue[i];
-        }
-        strValue[dot] = separator;
-        len = dot;
+        if (dot > 0 && i == (len - dot))
+            str[--current_pos] = separator;
+        
+        str[--current_pos] = (value % 10) + '0';
+        value /= 10;
     }
-    i = 0;
-    len--;
 
-    while ((i < len) && ('0' == strValue[i]))
+    uint8_t integer_part_len = (dot > 0) ? dot : len;
+    for (uint8_t i = 0; i < integer_part_len - 1 && str[i] == '0'; ++i)
     {
-        strValue[i++] = space;
+        str[i] = space;
     }
 }
 
 //Measure integer digit length
-uint8_t ilen(uint16_t n)
-{
-    if (n < 10)
-        return 1;
-    else if (n < 100)
-        return 2;
-    else if (n < 1000)
-        return 3;
-    else if (n < 10000)
-        return 4;
-    else
-        return 5;
+uint8_t ilen(uint16_t n) {
+    if (n < 100) return 1 + (n >= 10);
+    if (n < 10000) return 3 + (n >= 1000);
+    return 5;
 }
 
 //Split KHz frequency + BFO to KHz and .00 tail
@@ -134,3 +117,17 @@ static inline uint8_t sw_div(uint16_t& dividend, const uint16_t divisor) {
     }
     return quotient;
 }
+
+// save more flash image size
+static void doSwitchLogic(int8_t& param, int8_t low, int8_t high, int8_t step) {
+    param += step;
+    if (param < low)
+        param = high;
+    else if (param > high)
+        param = low;
+}
+
+static void toggleSetting(uint8_t settingIndex) {
+    g_Settings[settingIndex].param = 1 - g_Settings[settingIndex].param;
+}
+
