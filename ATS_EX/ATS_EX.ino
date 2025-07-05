@@ -9,7 +9,7 @@
 // 02.2024
 // http://github.com/goshante
 // ----------------------------------------------------------------------
-// MOD_NO_RDS_v4.0 by diqezit
+// MOD_NO_RDS_v4.1 by diqezit
 // More info for this mod you can get below
 // https://github.com/diqezit/ats20_ats_ex
 // ----------------------------------------------------------------------
@@ -46,7 +46,7 @@ static bool isSSB() {
 // ------- Main logic -------
 // --------------------------
 
-constexpr auto APP_VERSION = 40;
+constexpr auto APP_VERSION = 41;
 
 // Helper function to get the current context (AM or SSB/CW)
 static ModeContext getModeContext() {
@@ -245,7 +245,13 @@ static void updateSSBCutoffFilter() {
 // most state is already in the band list
 // only need to sync the single live frequency variable
 static void syncActiveStateToBand() {
-    g_bandList[g_bandIndex].currentFreq = g_currentFrequency;
+    const Band& current_band = g_bandList[g_bandIndex];
+
+    // update only band stored frequency if the current live frequency
+    // is within the valid range for this band
+    if (g_currentFrequency >= current_band.minimumFreq && g_currentFrequency <= current_band.maximumFreq) {
+        g_bandList[g_bandIndex].currentFreq = g_currentFrequency;
+    }
 }
 
 // functions will read step/bw directly from the band list
@@ -608,22 +614,39 @@ static bool checkStopSeeking() {
     return g_seekStop || !(PINC & (1 << (ENCODER_BUTTON - 14)));
 }
 
-static void doSeek() {
-    // Need these calls when library is not modified
-    if (g_seekDirection)
-        g_si4735.frequencyUp();
-    else
-        g_si4735.frequencyDown();
+// Handles the low-level interaction with the Si4735 chip to perform a seek
+static inline uint16_t executeHardwareSeek() {
+    g_si4735.setFrequency(g_currentFrequency);
+    delay(30);
+
+    if (g_bandList[g_bandIndex].bandType != FM_BAND_TYPE) {
+        g_si4735.setSeekAmLimits(150, 30000);
+    }
 
     g_seekStop = false;
     g_si4735.seekStationProgress(showFrequencySeek, checkStopSeeking, g_seekDirection);
 
-    // Proper sync after seek completion
     delay(50);
-    g_currentFrequency = g_si4735.getFrequency();
+    return g_si4735.getFrequency();
+}
 
-    // For FM, ensure frequency is on 100 kHz boundary
-    if (g_currentMode == FM) {
+// Manages the seek process and updates the application state.
+static void doSeek() {
+    g_currentFrequency = executeHardwareSeek();
+
+    if (g_bandList[g_bandIndex].bandType != FM_BAND_TYPE) {
+        for (uint8_t i = 0; i < g_bandCount; i++) {
+            if (g_bandList[i].bandType != FM_BAND_TYPE &&
+                g_currentFrequency >= g_bandList[i].minimumFreq &&
+                g_currentFrequency <= g_bandList[i].maximumFreq) {
+                g_bandIndex = i;
+                break;
+            }
+        }
+        const Band& new_band = g_bandList[g_bandIndex];
+        g_si4735.setSeekAmLimits(new_band.minimumFreq, new_band.maximumFreq);
+    }
+    else { // FM band
         uint16_t rounded = (g_currentFrequency / 10) * 10;
         if (rounded != g_currentFrequency) {
             g_currentFrequency = rounded;
@@ -632,7 +655,7 @@ static void doSeek() {
     }
 
     syncActiveStateToBand();
-    showFrequency();
+    showStatus(true);
     resetEepromDelay();
 }
 
@@ -1049,6 +1072,7 @@ static void bandSwitch(bool up) {
     markStateAsDirty();
 
     uint8_t oldBandIndex = g_bandIndex;
+    g_currentBFO = 0;
 
     if (up) {
         g_bandIndex = (g_bandIndex + 1) % g_bandCount;
