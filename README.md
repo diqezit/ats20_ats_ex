@@ -102,6 +102,56 @@ This version introduces the ability to save your favorite FM stations.
 *   **[Improved] FM Band UI:** The on-screen text inversion for `CMD_BAND` mode now works correctly for the FM band, inverting the top-line "FM" text instead of a non-existent bottom-line name.
 *   **[Fixed] RSSI Display on FM:** Corrected the logic in the periodic task handler to ensure the RSSI value is now reliably displayed and updated while on the FM band.
 
+
+### **MOD_NO_RDS v4.0**
+`(!) Attention: This version introduces a new EEPROM data structure and still in free-test mode. 
+	All saved settings, including volume and FM favorites (etc), will be reset to factory defaults upon the first boot.`
+
+*   **[New] Per-Band State Saving:** The receiver now remembers the last used frequency, tuning step, and bandwidth for each of the 28 individual bands (LW, MW, all SW sub-bands, FM). 
+	This state is automatically saved and persists after power-off.
+	
+*   **[New] Seamless Band Coverage:** The band list has been re-architected to provide continuous tuning from 150 kHz to 30 MHz. 
+	"Gaps" between traditional bands are now filled with generic "SW" segments, allowing exploration of the entire spectrum.
+	
+*   **[Changed] Unified Band Switching:** The band switching logic is now universal for all bands. 
+	Pressing `Band Up/Down` cycles sequentially through the entire list (e.g., from "10m" to "FM" and from "LW" to "FM").
+	
+*   **[Fixed] SSB State Persistence:** The tuning step for SSB mode is no longer reset when switching from AM, allowing custom step sizes to be saved per band. 	
+	The bandwidth setting is also now intelligently carried over between AM and SSB modes.
+	
+*   **[Fixed] Amplifier Pop/Click:** Resolved the audible pop when switching between FM and AM/SW bands by implementing a correct power-down/power-up sequence for the audio amplifier.
+
+*   **[Fixed] Multiple UI & Tuning Bugs:** Addressed critical bugs that caused system freezes, display of invalid data (`65535 MHz`), 
+	and incorrect band boundary behavior during the refactoring process.
+	
+*   **[Refactor] Brightness Control:** Replaced the static look-up table (LUT) for brightness with an on-the-fly calculation. 
+	The new implementation uses optimized fixed-point integer math to generate a perceptually linear gamma curve, embedding the logic directly into the function.
+	
+*   **[Improved] EEPROM Protection:** Removed the aggressive 10-second save timer. 
+	System now saves state after 30 seconds of tuning inactivity, or immediately upon switching bands and modes.
+	
+*   **[Optimized] FM Favorites Saving:** Disabled immediate saving on each change. Favorites list is now written to memory in a single batch upon exiting the menu.
+
+*   **[Optimized] UI Event Handling:** Refactored encoder button handler (handleEncoderButton) to use a switch-case on a computed context.
+
+*   **[Optimized]** Refactored `showFrequency` to simplify the logic for calculating the decimal point position, slightly reducing Flash and stack usage.
+
+*   **[Optimized] Bandwidth String Storage:** Replaced the system of multiple individual strings and pointer tables for bandwidth labels with a single packed string array (`bw_all_data`) and compact index tables.
+	This change reduces Flash memory usage by eliminating redundant null-terminators and pointer overhead.
+		
+*   **[Refactor] Safe Band Name Handling:** Introduced a dedicated helper function (`getBandName`) to safely retrieve band names. 
+	Corrects a potential vulnerability where using `PACK_STR4` macro could lead to buffer over-reads.
+
+*   **[New] Smart Power Management (AGC Button):** The `AGC` button now toggles the display and automatically reduces CPU speed to 8MHz when the screen is off to conserve power.
+
+*   **[Optimized] Flash Savings:** Replaced expensive division/modulo math in the FM Favorites menu with a lightweight (`sw_div`)
+	
+	
+*   [Global BFO calibration]: How is a compromise. 
+    If your receiver has a different frequency drift on 160 meters than on 10 meters, you will only be able to calibrate one band perfectly. 
+    The others will have a margin of error that you can adjust to suit you.
+
+
 ---
 
 Thank you all for your participation and feedback
