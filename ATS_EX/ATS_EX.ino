@@ -1,4 +1,4 @@
-﻿// ----------------------------------------------------------------------
+// ----------------------------------------------------------------------
 // ATS_EX (Extended) Firmware for ATS-20 and ATS-20+ receivers.
 // Based on PU2CLR sources.
 // Inspired by closed-source swling.ru firmware.
@@ -9,7 +9,7 @@
 // 02.2024
 // http://github.com/goshante
 // ----------------------------------------------------------------------
-// MOD_NO_RDS_v4.1 by diqezit
+// MOD_NO_RDS_v4.2 by diqezit
 // More info for this mod you can get below
 // https://github.com/diqezit/ats20_ats_ex
 // ----------------------------------------------------------------------
@@ -46,7 +46,7 @@ static bool isSSB() {
 // ------- Main logic -------
 // --------------------------
 
-constexpr auto APP_VERSION = 41;
+constexpr auto APP_VERSION = 42;
 
 // Helper function to get the current context (AM or SSB/CW)
 static ModeContext getModeContext() {
@@ -647,9 +647,10 @@ static void doSeek() {
         g_si4735.setSeekAmLimits(new_band.minimumFreq, new_band.maximumFreq);
     }
     else { // FM band
-        uint16_t rounded = (g_currentFrequency / 10) * 10;
-        if (rounded != g_currentFrequency) {
-            g_currentFrequency = rounded;
+        // round down the frequency to the nearest 10khz step (e.g. 102.57 -> 102.50)
+        uint16_t rounded = g_currentFrequency % 10;
+        if (rounded != 0) {
+            g_currentFrequency -= rounded;
             g_si4735.setFrequency(g_currentFrequency);
         }
     }
@@ -669,61 +670,46 @@ void showStatus(bool cleanFreq) {
     showBandwidth();
     updateAndShowBattery(true);
     showVolume();
-    showRSSI();
-}
-
-static void updateLowerDisplayLine() {
-    oledPrint(_literal_EmptyLine, 0, 6, DEFAULT_FONT);
-    showModulation();
-    showStep();
-    updateAndShowBattery(true);
+    showSignalQuality();
 }
 
 // Converts setting parameter value to UI display string
 // Handles different setting types (Num, ZeroAuto, Switch, SwitchAuto)
 static void SettingParamToUI(char* buf, uint8_t idx) {
     int8_t param = g_Settings[idx].param;
+    uint8_t type = g_Settings[idx].type;
     uint8_t textIdx;
 
-    switch (g_Settings[idx].type) {
-    case SettingType::Num:
-        if (idx == SettingsIndex::Brightness) param += 1;
-        convertToChar(buf, abs(param), 3);
-        if (param < 0) buf[0] = '-';
-        buf[3] = '\0';
+    if (type == SettingType::Switch || type == SettingType::SwitchAuto) {
+        if (type == SettingType::SwitchAuto) {
+            textIdx = param;
+        }
+        else { // SettingType::Switch
+            uint8_t base = pgm_read_byte(&switch_setting_map[idx].baseIndex);
+            bool inv = pgm_read_byte(&switch_setting_map[idx].inverted);
+            textIdx = inv ? (base - param) : (base + param);
+        }
+        strcpy_P(buf, paramTexts[textIdx]);
         return;
-
-    case SettingType::ZeroAuto:
-        if (param == 0) {
-            textIdx = 0; // "AUT"
-        }
-        else {
-            convertToChar(buf, param, 3);
-            buf[3] = '\0';
-            return;
-        }
-        break;
-
-    case SettingType::SwitchAuto:
-        textIdx = param;
-        break;
-
-    case SettingType::Switch: {
-        // Read conversion rules directly from the PROGMEM map
-        uint8_t base = pgm_read_byte(&switch_setting_map[idx].baseIndex);
-        bool inv = pgm_read_byte(&switch_setting_map[idx].inverted);
-
-        if (inv) {
-            textIdx = base - param;
-        }
-        else {
-            textIdx = base + param;
-        }
-        break;
-    }
     }
 
-    strcpy_P(buf, paramTexts[textIdx]);
+    // Handle all numeric types (Num, ZeroAuto) in a single, unified code path
+    if (type == SettingType::ZeroAuto && param == 0) {
+        strcpy_P(buf, paramTexts[0]); // "AUT"
+    }
+    else {
+        // Common path for Num and non-zero ZeroAuto
+        uint8_t val_to_convert = abs(param);
+        if (idx == SettingsIndex::Brightness) {
+            val_to_convert += 1;
+        }
+
+        convertToChar(buf, val_to_convert, 3);
+        if (param < 0) {
+            buf[0] = '-';
+        }
+        buf[3] = '\0';
+    }
 }
 
 // If full false - update only value
@@ -865,17 +851,19 @@ static void showVolume() {
     oledPrint(buf, (128 - (8 * 2) + 2 - 6), 0, DEFAULT_FONT, g_activeCommand == CMD_VOLUME);
 }
 
-// RSSI drawings
-static void showRSSI() {
-    if (g_settingsActive || g_favoritesActive || g_currentMode != FM)
-        return;
+// Displays the current signal quality value (RSSI)
+static void showSignalQuality() {
+    if (g_settingsActive || g_favoritesActive) return;
 
     oled.setCursor(84, 0);
-    if (g_currentRSSI == 255)
-        oled.print("--|");
+
+    // 255 is not available
+    if (g_signalQualityValue == 255) {
+        oled.print("   ");
+    }
     else {
-        if (g_currentRSSI < 10) oled.print(' ');
-        oled.print(g_currentRSSI);
+        if (g_signalQualityValue < 10) oled.print(' ');
+        oled.print(g_signalQualityValue);
         oled.print('|');
     }
 }
@@ -1157,8 +1145,6 @@ static void configureFMMode() {
     g_si4735.setFmBandwidth(current_band.bwIdxFM);
     g_si4735.setFMDeEmphasis(
         (g_Settings[DeEmp].param == 0) ? 1 : 2);
-
-    g_currentRSSI = 255;
 }
 
 // Initialize SSB mode with patch loading, BFO setup, filters, and audio bandwidth configuration
@@ -1221,6 +1207,10 @@ static void configureAMCommon(uint16_t minFreq, uint16_t maxFreq) {
     g_si4735.setSeekAmLimits(minFreq, maxFreq);
     // For seek spacing, always use the AM step, as SSB does not have hardware seek
     g_si4735.setSeekAmSpacing(g_tabStep[g_bandList[g_bandIndex].stepIdxAM]);
+
+    // Set custom seek thresholds to improve seek on weak stations as in FM early
+    g_si4735.setProperty(AM_SEEK_SNR_THRESHOLD, 2);     // AM_SEEK_TUNE_SNR_THRESHOLD (Default: 5)
+    g_si4735.setProperty(AM_SEEK_RSSI_THRESHOLD, 12);   // AM_SEEK_TUNE_RSSI_THRESHOLD (Default: 25)
 }
 
 // AGC hardware control
@@ -1242,20 +1232,20 @@ static void applyAgcSettings() {
 
 // Main band switching logic that coordinates mode transitions and amplifier control
 void applyBandConfiguration(bool extraSSBReset) {
-    // if transitioning between FM and pure AM
     bool prevWasFM = (g_currentMode == FM);
-    // use bandType field instead of comparing g_bandIndex to an enum value
     bool nextIsFM = (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE);
     bool nextIsPureAM = !nextIsFM && !g_ssbLoaded;
     bool switchingBetweenFMandAM = (prevWasFM && nextIsPureAM) || (!prevWasFM && nextIsFM);
 
-    // power down amplifier if switching modes
     if (switchingBetweenFMandAM)
         safeAmpOff();
 
     loadActiveStateFromBand();
 
-    // Tune antenna capacitor
+    // Reset signal quality to force an update on the new band
+    g_signalQualityValue = 255;
+    g_forceRssiUpdate = true;
+
     uint8_t cap_value = (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE) ? 1 : g_Settings[AntennaCap].param;
     g_si4735.setTuneFrequencyAntennaCapacitor(cap_value);
 
@@ -1263,8 +1253,6 @@ void applyBandConfiguration(bool extraSSBReset) {
         configureFMMode();
     }
     else {
-        // AM frequency limits
-        // now must ALWAYS use the specific limits from the g_bandList  entry
         uint16_t minFreq = g_bandList[g_bandIndex].minimumFreq;
         uint16_t maxFreq = g_bandList[g_bandIndex].maximumFreq;
 
@@ -1274,23 +1262,18 @@ void applyBandConfiguration(bool extraSSBReset) {
         else {
             configureAMMode(minFreq, maxFreq);
         }
-
-        // Common AM/SSB post-processing
         configureAMCommon(minFreq, maxFreq);
     }
 
     applyAgcSettings();
 
     if (!g_settingsActive) {
-        // Clear OLED buffer
         oled.clear();
-        // then draw status and flush buffer
         showStatus(true);
     }
 
     resetEepromDelay();
 
-    // Re-enable amplifier if modes toggled
     if (switchingBetweenFMandAM)
         safeAmpOn();
 }
@@ -1353,15 +1336,6 @@ static void doVolume(int8_t v) {
     showVolume();
 }
 
-//Helps to save more flash image size
-static void doSwitchLogic(int8_t& param, int8_t low, int8_t high, int8_t step) {
-    param += step;
-    if (param < low)
-        param = high;
-    else if (param > high)
-        param = low;
-}
-
 //Settings: Attenuation
 void doAttenuation(int8_t v) {
     uint8_t max_att_value = (g_currentMode == FM) ? 26 : 37;
@@ -1401,9 +1375,8 @@ void doBrightness(int8_t v) {
 }
 
 //Settings: SSB AVC Switch
-void doSSBAVC(int8_t v = 0) {
-    doSwitchLogic(g_Settings[SVC].param, 0, 1, v);
-
+void doSSBAVC(int8_t v) {
+    toggleSetting(SVC);
     if (isSSB()) {
         g_si4735.setSSBAutomaticVolumeControl(g_Settings[SVC].param);
         applyBandConfiguration(true);
@@ -1419,15 +1392,13 @@ void doAvc(int8_t v) {
 }
 
 //Settings: Sync switch
-void doSync(int8_t v = 0) {
+void doSync(int8_t v) {
     bool wasSettingsActive = g_settingsActive;
-    doSwitchLogic(g_Settings[Sync].param, 0, 1, v);
-
+    toggleSetting(Sync);
     if (isSSB()) {
         g_si4735.setSSBDspAfc(g_Settings[Sync].param == 1 ? 0 : 1);
-        g_si4735.setSSBAvcDivider(g_Settings[Sync].param == 0 ? 0 : 3);  //Set Sync mode
+        g_si4735.setSSBAvcDivider(g_Settings[Sync].param == 0 ? 0 : 3);
         applyBandConfiguration(true);
-
         if (wasSettingsActive) {
             showSettingsTitle();
             showSettings();
@@ -1436,22 +1407,20 @@ void doSync(int8_t v = 0) {
 }
 
 //Settings: FM DeEmp switch (50 or 75)
-void doDeEmp(int8_t v = 0) {
-    doSwitchLogic(g_Settings[DeEmp].param, 0, 1, v);
-
+void doDeEmp(int8_t v) {
+    toggleSetting(DeEmp);
     if (g_currentMode == FM)
         g_si4735.setFMDeEmphasis(g_Settings[DeEmp].param == 0 ? 1 : 2);
 }
 
 //Settings: SW Units
-void doSWUnits(int8_t v = 0) {
-    doSwitchLogic(g_Settings[SWUnits].param, 0, 1, v);
+void doSWUnits(int8_t v) {
+    toggleSetting(SWUnits);
 }
 
 //Settings: SW Units
-void doSSBSoftMuteMode(int8_t v = 0) {
-    doSwitchLogic(g_Settings[SSM].param, 0, 1, v);
-
+void doSSBSoftMuteMode(int8_t v) {
+    toggleSetting(SSM);
     if (isSSB())
         g_si4735.setSSBSoftMute(g_Settings[SSM].param);
 }
@@ -1466,8 +1435,7 @@ void doCutoffFilter(int8_t v) {
 
 //Settings: CPU Frequency divider
 void doCPUSpeed(int8_t v = 0) {
-    doSwitchLogic(g_Settings[CPUSpeed].param, 0, 1, v);
-
+    toggleSetting(CPUSpeed);
     noInterrupts();
     CLKPR = 0x80;
     CLKPR = g_Settings[CPUSpeed].param;
@@ -1487,26 +1455,30 @@ void doBFOCalibration(int8_t v) {
 
 //Settings: Tune Frequency Antenna Capacitor
 void doUnitsSwitch(int8_t v) {
-    doSwitchLogic(g_Settings[UnitsSwitch].param, 0, 1, v);
+    toggleSetting(UnitsSwitch);
 }
 
 //Settings: Scan button switch
-void doScanSwitch(int8_t v = 0) {
-    doSwitchLogic(g_Settings[ScanSwitch].param, 0, 1, v);
+void doScanSwitch(int8_t v) {
+    toggleSetting(ScanSwitch);
 }
 
 //Settings: CW mode switch
-void doCWSwitch(int8_t v = 0) {
+void doCWSwitch(int8_t v) {
     syncActiveStateToBand();
-    doSwitchLogic(g_Settings[CWSwitch].param, 0, 1, v);
-
+    toggleSetting(CWSwitch);
     if (g_currentMode == CW)
         applyBandConfiguration(false);
 }
 
 //Settings: Auto Antenna Capacitor
 void doAntennaCapacitor(int8_t v) {
-    doSwitchLogic(g_Settings[AntennaCap].param, 0, 1, v);
+    toggleSetting(AntennaCap);
+}
+
+//Settings: RSSI AM Off switch
+void doRSSIAMOff(int8_t v) {
+    toggleSetting(RSSI_AM_Off);
 }
 
 // handles bandwidth adjustment and updates the current band's state
@@ -1563,6 +1535,7 @@ static void resetCommandMode() {
 static inline void markStateAsDirty() {
     g_lastUserActivityTime = millis();
     g_stateIsDirty = true;
+    g_forceRssiUpdate = true;
 }
 
 // handles frequency tuning for am/fm
@@ -1672,94 +1645,58 @@ static void doFrequencyTuneSSB() {
     markStateAsDirty();
 }
 
-// helper functions for processButtonEvents
+// helper function for processbuttonevents, handles encoder button presses
 static inline void handleEncoderButton() {
     uint8_t evt = btn_Encoder.checkEvent(simpleEvent);
     if (BUTTONEVENT_SHORTPRESS != evt) return;
 
-    // determine the current ui context to use in a switch-case
-    uint8_t context = 0;
-    if (g_activeCommand != CMD_NONE)      context = 1;
-    else if (g_settingsActive)            context = 2;
-    else if (g_favoritesActive)           context = 3;
-    else if (isSSB() || !g_Settings[ScanSwitch].param) context = 4;
-    else                                  context = 5;
-
-    switch (context) {
-    case 1:
+    if (g_activeCommand != CMD_NONE) {
         resetCommandMode();
-        break;
-    case 2:
+        return;
+    }
+
+    if (g_settingsActive) {
         g_SettingEditing = !g_SettingEditing;
         DrawSetting(g_SettingSelected, true);
-        break;
-    case 3:
-        if (g_totalFavorites) {
-            g_currentFrequency = g_fmFavorites[g_favoriteSelected].frequency;
-            g_si4735.setFrequency(g_currentFrequency);
-        }
-        exitFavoritesMenu();
-        break;
-    case 4:
+        return;
+    }
+
+    if (isSSB() || !g_Settings[ScanSwitch].param) {
         switchCommand(CMD_STEP);
-        break;
-    case 5:
+    }
+    else {
         doSeek();
-        break;
     }
 }
 
 static inline void handleBandwidthButton() {
-    // bandwidth (bw) button handler
     uint8_t evt = btn_Bandwidth.checkEvent(simpleEvent);
     if (BUTTONEVENT_SHORTPRESS != evt) return;
 
-    if (g_favoritesActive) {
-        // in favorites menu, this button deletes the selected favorite
-        delFav();
-        oled.clear();
-        showFav();
-    }
-    else if (!g_settingsActive && g_currentMode != CW) {
-        // in main screen, it enters bandwidth adjustment mode (not available for cw)
+    if (!g_settingsActive && g_currentMode != CW) {
         switchCommand(CMD_BW);
     }
 }
 
 static inline void handleBandUpButton() {
-    // band up button handler
     uint8_t evt = btn_BandUp.checkEvent(bandEvent);
     if (BUTTONEVENT_SHORTPRESS != evt) return;
 
-    if (g_favoritesActive) {
-        // any navigation button exits the favorites menu
-        exitFavoritesMenu();
-    }
-    else if (g_settingsActive) {
-        // in settings menu, it switches to the next page
+    if (g_settingsActive) {
         switchSettingsPage();
     }
     else {
-        // in main screen, it enters band selection mode
         switchCommand(CMD_BAND);
     }
 }
 
 static inline void handleBandDownButton() {
-    // band down button (settings) handler
     uint8_t evt = btn_BandDn.checkEvent(bandEvent);
     if (BUTTONEVENT_SHORTPRESS != evt) return;
 
-    if (g_favoritesActive) {
-        // any navigation button exits the favorites menu
-        exitFavoritesMenu();
-    }
-    else {
-        // this button's primary role is to toggle the main settings menu
-        resetCommandMode(); // ensure no command is active when entering settings
-        g_settingsActive = !g_settingsActive;
-        switchSettings();
-    }
+    resetCommandMode();
+    g_settingsActive = !g_settingsActive;
+    switchSettings();
 }
 
 static inline void handleVolumeUpButton() {
@@ -1848,16 +1785,7 @@ static inline void cycleAmSsbCwModes() {
 }
 
 static inline void processModeButtonShortPress() {
-    if (g_favoritesActive) {
-        // if in favorites menu, exit it.
-        g_favoritesActive = false;
-        oled.clear();
-        showStatus();
-        return;
-    }
-
     if (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE) {
-        // if on FM band, enter favorites menu.
         g_favoritesActive = true;
         g_favoriteSelected = 0;
         oled.clear();
@@ -1865,18 +1793,18 @@ static inline void processModeButtonShortPress() {
         return;
     }
 
-    // if not in favorites and not on FM, cycle modulation
     cycleAmSsbCwModes();
 }
 
 // handles mode button presses, dispatching tasks based on the current context
 static inline void handleModeButton() {
     uint8_t evt = btn_Mode.checkEvent(simpleEvent);
+    if (g_settingsActive) return;
 
-    if (BUTTONEVENT_SHORTPRESS == evt && !g_settingsActive) {
+    if (BUTTONEVENT_SHORTPRESS == evt)
         processModeButtonShortPress();
-    }
-    else if (BUTTONEVENT_LONGPRESSDONE == evt && !g_settingsActive &&
+    
+    else if (BUTTONEVENT_LONGPRESSDONE == evt &&
         g_bandList[g_bandIndex].bandType == FM_BAND_TYPE && !g_favoritesActive) {
         // long press on FM adds the current station to favorites
         addFav();
@@ -1899,8 +1827,16 @@ static inline void exitFavoritesMenu() {
     showStatus();
 }
 
-// key process for all keys
+// key process for all keys. Acts as a dispatcher based on the current UI mode
 static void processButtonEvents() {
+
+    // process buttons for FM favorites
+    if (g_favoritesActive) {
+        handleFavoritesMenuButtons();
+        return;
+    }
+
+    // process buttons for main screen / settings menu
     handleEncoderButton();
     handleBandwidthButton();
     handleBandUpButton();
@@ -1922,7 +1858,32 @@ static void updateEncoderState() {
     }
 }
 
-// Handles all user input and display updates when in the Favorites menu.
+// Centralized button handler for the Favorites menu
+static void handleFavoritesMenuButtons() {
+    if (BUTTONEVENT_SHORTPRESS == btn_Encoder.checkEvent(simpleEvent)) {
+        if (g_totalFavorites) {
+            g_currentFrequency = g_fmFavorites[g_favoriteSelected].frequency;
+            g_si4735.setFrequency(g_currentFrequency);
+        }
+        exitFavoritesMenu();
+        return;
+    }
+
+    if (BUTTONEVENT_SHORTPRESS == btn_Bandwidth.checkEvent(simpleEvent)) {
+        delFav();
+        oled.clear();
+        showFav();
+        return;
+    }
+
+    if ((BUTTONEVENT_SHORTPRESS == btn_BandUp.checkEvent(bandEvent)) ||
+        (BUTTONEVENT_SHORTPRESS == btn_BandDn.checkEvent(bandEvent)) ||
+        (BUTTONEVENT_SHORTPRESS == btn_Mode.checkEvent(simpleEvent))) {
+        exitFavoritesMenu();
+    }
+}
+
+// Handles ONLY encoder input for the Favorites menu.
 static void handleFavoritesMenu() {
     if (g_safeEncoderMovement) {
         if (g_totalFavorites > 0) {
@@ -1931,7 +1892,6 @@ static void handleFavoritesMenu() {
         }
         g_safeEncoderMovement = 0;
     }
-    processButtonEvents();
 }
 
 // handles encoder movement within the settings menu
@@ -1940,9 +1900,15 @@ static inline void processEncoderForSettings(int encoder_delta) {
         int8_t prev = g_SettingSelected;
         g_SettingSelected += encoder_delta;
         uint8_t page = g_SettingsPage - 1;
-        uint8_t max = min((page * 6) + 5, SettingsIndex::SETTINGS_MAX - 1);
+
+        // for flash savings
+        uint8_t a = (page * 6) + 5;
+        uint8_t b = SettingsIndex::SETTINGS_MAX - 1;
+        uint8_t max = (a < b) ? a : b;
+
         if (g_SettingSelected < page * 6) g_SettingSelected = max;
         else if (g_SettingSelected > max) g_SettingSelected = page * 6;
+
         DrawSetting(prev, true);
         DrawSetting(g_SettingSelected, true);
     }
@@ -2028,24 +1994,49 @@ static void handleDelayedFrequencyUpdate() {
     }
 }
 
-// Runs all periodic, time-based tasks like RSSI updates and EEPROM saves.
+// logic for updating the signal quality indicator
+static inline void updateSignalQuality() {
+    uint8_t new_value;
+
+    // Check if setting is OFF (param==1) for AM/SSB
+    if (g_currentMode != FM && g_Settings[RSSI_AM_Off].param == 1) {
+        new_value = 255; // Set to the "off/hidden" state
+    }
+    else if (g_currentMode == FM) {
+        // in FM, RSQ_STATUS is reliable and doesn`t cause audio interference
+        g_si4735.getCurrentReceivedSignalQuality(1);
+        new_value = g_si4735.getCurrentRSSI();
+    }
+    else { // AM/SSB and the setting is ON
+        if (g_forceRssiUpdate) {
+            g_si4735.setFrequency(g_currentFrequency);
+            g_forceRssiUpdate = false;
+        }
+        g_si4735.getStatus();
+        new_value = g_si4735.getReceivedSignalStrengthIndicator();
+    }
+
+    // Update the display only if the value has changed.
+    if (g_signalQualityValue != new_value) {
+        g_signalQualityValue = new_value;
+        showSignalQuality();
+    }
+}
+
+// Runs all periodic, time-based tasks like signal quality updates and EEPROM saves
 static void handlePeriodicTasks() {
     if (millis() - g_lastFreqChange >= 500) {
-        if (!g_settingsActive && millis() - g_lastRSSIUpdate >= 1000) {
+        if (!g_settingsActive && !g_favoritesActive && millis() - g_lastRSSIUpdate >= 1000) {
             g_lastRSSIUpdate = millis();
-            if (g_currentMode == FM) {
-                g_si4735.getCurrentReceivedSignalQuality();
-                uint8_t rssi = g_si4735.getCurrentRSSI();
-                if (g_currentRSSI != rssi || g_currentRSSI == 255) {
-                    g_currentRSSI = rssi;
-                    showRSSI();
-                }
-                if (millis() > 3000) {
-                    bool stereo = g_si4735.getCurrentPilot();
-                    if (g_stereoStatus != stereo) {
-                        g_stereoStatus = stereo;
-                        updateStereoIndicator();
-                    }
+
+            updateSignalQuality();
+
+            // Stereo indicator logic is specific to FM
+            if (g_currentMode == FM && millis() > 3000) {
+                bool stereo = g_si4735.getCurrentPilot();
+                if (g_stereoStatus != stereo) {
+                    g_stereoStatus = stereo;
+                    updateStereoIndicator();
                 }
             }
         }
@@ -2057,7 +2048,6 @@ static void handlePeriodicTasks() {
 
     updateAndShowBattery(false);
 
-    // Save if global settings were changed (e.g., in the settings menu)
     if (g_settingsDirty) {
         saveAllReceiverInformation(true);
         g_settingsDirty = false;
@@ -2070,6 +2060,7 @@ void loop() {
 
     if (g_favoritesActive) {
         handleFavoritesMenu();
+        processButtonEvents();
         return;
     }
 
@@ -2083,10 +2074,6 @@ void loop() {
     // process buttons only if the encoder was not used for a major tuning event
     if (!frequencyTuned) {
         processButtonEvents();
-    }
-
-    if (g_lastAdjustmentTime && millis() - g_lastAdjustmentTime > ADJUSTMENT_ACTIVE_TIMEOUT) {
-        resetCommandMode();
     }
 
     handlePeriodicTasks();
@@ -2105,4 +2092,4 @@ int main(void) {
     while (1)
         loop();
     return 0;
-}
+} 

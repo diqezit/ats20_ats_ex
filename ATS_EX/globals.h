@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 // =================================================================================================
 // Function Prototypes
@@ -19,6 +19,7 @@ void doCPUSpeed(int8_t v = 0);
 void doBFOCalibration(int8_t v);
 void doUnitsSwitch(int8_t v = 0);
 void doScanSwitch(int8_t v = 0);
+void doRSSIAMOff(int8_t v = 0);
 void doCWSwitch(int8_t v = 0);
 void doAntennaCapacitor(int8_t v = 0);
 void showSplashScreen();
@@ -96,6 +97,7 @@ enum SettingsIndex
     ScanSwitch,
     CWSwitch,
     AntennaCap,
+    RSSI_AM_Off,
     SETTINGS_MAX
 };
 
@@ -203,7 +205,8 @@ uint8_t g_totalFavorites = 0;
 // -------------------------------------------------------------------------------------------------
 // Radio State
 // -------------------------------------------------------------------------------------------------
-uint8_t g_currentRSSI = 0;
+bool g_forceRssiUpdate = true;      // Flag to trigger a one-time RSSI update "kick" in AM/SSB.
+uint8_t g_signalQualityValue = 255; // Unified value for RSSI (all modes). 255 = invalidated.
 uint32_t g_lastRSSIUpdate = 0;
 uint8_t g_muteVolume = 0;
 uint8_t g_volume = DEFAULT_VOLUME;
@@ -282,6 +285,7 @@ SettingsItem g_Settings[] =
         { "SCN", 1,            SettingType::Switch,     doScanSwitch      },
         { "CW ", 0,            SettingType::Switch,     doCWSwitch        },
         { "CAP", 0,            SettingType::Switch,     doAntennaCapacitor},
+        { "RSI", 1,            SettingType::Switch,     doRSSIAMOff       },
 };
 
 // defines the text conversion rules ONLY for settings of type 'Switch'
@@ -302,7 +306,8 @@ const PROGMEM SwitchMapEntry switch_setting_map[] = {
     [UnitsSwitch] = {2, true},
     [ScanSwitch] = {2, true},
     [CWSwitch] = {9, false},
-    [AntennaCap] = {1, false}
+    [AntennaCap] = {1, false},
+    [RSSI_AM_Off] = {1, true}
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -399,6 +404,4 @@ const char PROGMEM paramTexts[][4] = {
 
 const char g_bandModeDesc[][4] = { "AM ", "LSB", "USB", "CW ", "FM " };
 
-FMFavorite g_fmFavorites[MAX_FM_FAVORITES];
-
-char _literal_EmptyLine[17] = "                ";
+FMFavorite g_fmFavorites[MAX_FM_FAVORITES]; 
