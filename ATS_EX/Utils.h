@@ -99,9 +99,22 @@ uint8_t ilen(uint16_t n)
 //Split KHz frequency + BFO to KHz and .00 tail
 void splitFreq(uint16_t& khz, uint16_t& tail)
 {
-    int32_t freq = (static_cast<int32_t>(g_currentFrequency) * 1000) + g_currentBFO;
-    khz = freq / 1000;
-    tail = abs(freq % 1000) / 10;
+    // replaced the original 32-bit math to save a ton of flash space
+    // old way ( (freq * 1000) + bfo ) was linking huge lib
+
+    khz = g_currentFrequency;
+    int16_t bfo_temp = g_currentBFO;
+
+    // manually handle the "borrow" if BFO is negative
+    // way cheaper than converting everything to 32-bit
+    while (bfo_temp < 0) {
+        bfo_temp += 1000;
+        khz--;
+    }
+
+    // bfo_temp is just the positive part, 0-999
+    // final division is a cheap 16-bit one
+    tail = bfo_temp / 10;
 }
 
 uint8_t strlen8(const char* s)
