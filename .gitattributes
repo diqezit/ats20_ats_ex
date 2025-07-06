@@ -1,0 +1,22 @@
+# =========================================================================
+# .gitattributes for the ATS_EX project
+# This file ensures consistent file handling across different environments.
+# =========================================================================
+
+# Set default behavior for all files to handle line endings automatically.
+# Git will store text files with LF in the repo and convert to native line endings on checkout.
+* text=auto
+
+# Explicitly define source code and text files.
+# This forces them to be treated as text, with LF line endings in the repository,
+# and helps tools correctly identify them as UTF-8.
+*.ino   text eol=lf
+*.h     text eol=lf
+*.cpp   text eol=lf
+*.md    text eol=lf
+
+# Define binary files to prevent Git from modifying them (e.g., changing line endings).
+# Uncomment and add lines if you have specific binary assets.
+# *.jpg    binary
+# *.png    binary
+# *.bin    binary
