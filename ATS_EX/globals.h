@@ -45,8 +45,7 @@ const uint8_t g_lastBand = g_bandCount - 1;
 // =================================================================================================
 
 // NEW ENUM for Command Mode
-enum CommandMode : uint8_t
-{
+enum CommandMode : uint8_t {
     CMD_NONE,
     CMD_VOLUME,
     CMD_STEP,
@@ -56,31 +55,27 @@ enum CommandMode : uint8_t
 };
 
 // Enum for convenient access to mode-dependent settings
-enum ModeSettingType
-{
+enum ModeSettingType {
     MODE_SETTING_AGC,
     MODE_SETTING_SOFT_MUTE,
     MODE_SETTING_AVC,
     MODE_SETTINGS_COUNT // Counter for use in loops
 };
 
-enum ModeContext
-{
+enum ModeContext {
     MODE_CONTEXT_AM,
     MODE_CONTEXT_SSB,
     MODE_CONTEXT_COUNT
 };
 
-enum SettingType
-{
+enum SettingType {
     ZeroAuto,
     Num,
     Switch,
     SwitchAuto
 };
 
-enum SettingsIndex
-{
+enum SettingsIndex {
     ATT,
     SoftMute,
     SVC,
@@ -101,16 +96,14 @@ enum SettingsIndex
     SETTINGS_MAX
 };
 
-enum BandType : uint8_t
-{
+enum BandType : uint8_t {
     LW_BAND_TYPE,
     MW_BAND_TYPE,
     SW_BAND_TYPE,
     FM_BAND_TYPE
 };
 
-enum Modulations : uint8_t
-{
+enum Modulations : uint8_t {
     AM,
     LSB,
     USB,
@@ -124,15 +117,13 @@ enum Modulations : uint8_t
 
 // "Source of Truth" for default values
 // This is an immutable template for resetting settings
-struct ModeDefaults
-{
+struct ModeDefaults {
     const int8_t agc;       // Default for Attenuation/AGC
     const int8_t soft_mute; // Default for Soft Mute
     const int8_t avc;       // Default for AVC Max Gain
 };
 
-struct SettingsItem
-{
+struct SettingsItem {
     char name[4];
     int8_t param;
     uint8_t type;
@@ -141,8 +132,7 @@ struct SettingsItem
 
 // defines all properties of a frequency band
 // this unified structure is the core of the new elegant architecture
-struct Band
-{
+struct Band {
     // --- constant data, defined at compile time ---
     char name[4];
     uint16_t minimumFreq;
@@ -159,14 +149,12 @@ struct Band
     int8_t bwIdxFM;
 };
 
-struct FMFavorite
-{
+struct FMFavorite {
     uint16_t frequency;
 };
 
 // Defines how a setting's parameter is converted into a text index
-struct SwitchMapEntry
-{
+struct SwitchMapEntry {
     uint8_t baseIndex;
     bool inverted;                  // if true, the parameter is subtracted from the base index
 };
@@ -404,4 +392,4 @@ const char PROGMEM paramTexts[][4] = {
 
 const char g_bandModeDesc[][4] = { "AM ", "LSB", "USB", "CW ", "FM " };
 
-FMFavorite g_fmFavorites[MAX_FM_FAVORITES]; 
+FMFavorite g_fmFavorites[MAX_FM_FAVORITES];

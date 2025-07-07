@@ -3,7 +3,7 @@
 
 
 #define BUTTONSTATE_IDLE          0           // Button not pressed (initial state) 
-                                              // DO NOT CHANGE!!! BUTTONSTATE_IDLE must always be defined as 0 (Zero)!
+// DO NOT CHANGE!!! BUTTONSTATE_IDLE must always be defined as 0 (Zero)!
 #define BUTTONSTATE_DEBOUNCE      1           // Button press detected, waiting for debounce
 #define BUTTONSTATE_RELEASE       2           // Button was released again
 
@@ -18,30 +18,23 @@
 //#define BUTTONSTATE_2DEBOUNCE     7
 
 
-SimpleButton::SimpleButton(uint8_t pin)
-{
-  //pinMode(pin, INPUT_PULLUP);
-    if (pin < 8)
-    {
+SimpleButton::SimpleButton(uint8_t pin) {
+    //pinMode(pin, INPUT_PULLUP);
+    if (pin < 8) {
         DDRD &= ~(1 << pin);
         PORTD |= (1 << pin);
-    }
-    else if (pin < 14)
-    {
+    } else if (pin < 14) {
         DDRB &= ~(1 << (pin - 8));
         PORTB |= (1 << (pin - 8));
-    }
-    else
-    {
+    } else {
         DDRC &= ~(1 << (pin - 14));
         PORTC |= (1 << (pin - 14));
     }
-  _PinDebounceState = ((uint16_t)pin << 10);
+    _PinDebounceState = ((uint16_t)pin << 10);
 }
 
 
-uint8_t SimpleButton::checkEvent(uint8_t (*_event)(uint8_t event, uint8_t pin)) 
-{
+uint8_t SimpleButton::checkEvent(uint8_t(*_event)(uint8_t event, uint8_t pin)) {
     uint8_t ret = 0;
     uint16_t timeNow = millis() & 0x3f0;
     uint16_t state = _PinDebounceState & 0xf;
@@ -50,107 +43,84 @@ uint8_t SimpleButton::checkEvent(uint8_t (*_event)(uint8_t event, uint8_t pin))
     uint8_t pinState;
     uint16_t elapsed;
 
-    if (pin < 8) 
+    if (pin < 8)
         pinState = (PIND & (1 << pin)) ? HIGH : LOW;
-    else if (pin < 14) 
+    else if (pin < 14)
         pinState = (PINB & (1 << (pin - 8))) ? HIGH : LOW;
     else
         pinState = (PINC & (1 << (pin - 14))) ? HIGH : LOW;
 
-      if (timeNow < debounce)
+    if (timeNow < debounce)
         timeNow = timeNow + 0x400;
 
     elapsed = timeNow - debounce;
-    switch(state)
-    {
+    switch (state) {
     case BUTTONSTATE_IDLE:
-        if (!pinState)
-        {
+        if (!pinState) {
             state = BUTTONSTATE_DEBOUNCE;
-            debounce = timeNow;        
+            debounce = timeNow;
         }
-        break;  
+        break;
     case BUTTONSTATE_DEBOUNCE:
-        if (pinState)
-        {
+        if (pinState) {
             state = BUTTONSTATE_IDLE;
-        }
-        else if (elapsed >= BUTTONTIME_PRESSDEBOUNCE)
-        {
+        } else if (elapsed >= BUTTONTIME_PRESSDEBOUNCE) {
             state = BUTTONSTATE_PRESSED;
         }
-        break;  
+        break;
     case BUTTONSTATE_PRESSED:
-        if (pinState)
-        {
+        if (pinState) {
             debounce = timeNow;
             state = BUTTONSTATE_SHORTRELEASE;
-        }
-        else if (elapsed >= BUTTONTIME_LONGPRESS1)
-        {
+        } else if (elapsed >= BUTTONTIME_LONGPRESS1) {
             ret = BUTTONEVENT_FIRSTLONGPRESS;
             state = BUTTONSTATE_LONGPRESS;
             debounce = timeNow;
         }
         break;
     case BUTTONSTATE_LONGPRESS:
-        if (pinState)
-        {
+        if (pinState) {
             state = BUTTONSTATE_LONGRELEASE;
-        }
-        else if (elapsed >= BUTTONTIME_LONGPRESSREPEAT)
-        {
+        } else if (elapsed >= BUTTONTIME_LONGPRESSREPEAT) {
             debounce = timeNow;
             ret = BUTTONEVENT_LONGPRESS;
         }
         break;
     case BUTTONSTATE_LONGRELEASE:
-        if (pinState)
-        {
+        if (pinState) {
             ret = BUTTONEVENT_LONGPRESSDONE;
             state = BUTTONSTATE_RELEASE;
             debounce = timeNow;
-        }
-        else
-        {
+        } else {
             state = BUTTONSTATE_LONGPRESS;
         }
         break;
     case BUTTONSTATE_SHORTRELEASE:
-        if (pinState)
-        {
+        if (pinState) {
             ret = BUTTONEVENT_SHORTPRESS;
             state = BUTTONSTATE_RELEASE;
-        }
-        else
-        {
+        } else {
             state = BUTTONSTATE_PRESSED;
         }
         break;
     case BUTTONSTATE_RELEASE:
-        if (pinState)
-        {
+        if (pinState) {
             if (elapsed >= BUTTONTIME_RELEASEDEBOUNCE)//(millis() - (_debounce > (BUTTON_DEBOUNCE)))
                 state = BUTTONSTATE_IDLE;
-        }
-        else 
-        {
+        } else {
             debounce = timeNow;
         }
-        break;  
+        break;
     default:
         break;
     }
 
     _PinDebounceState = (_PinDebounceState & 0xfc00) | (debounce & 0x3f0) | state;
 
-    if (ret)
-    {
+    if (ret) {
         if (_event)
-            ret = _event(ret, pin); 
-    }
-    else
-    {
+            ret = _event(ret, pin);
+    } else {
         if (state > BUTTONSTATE_RELEASE)
             ret = BUTTON_PRESSED;
     }

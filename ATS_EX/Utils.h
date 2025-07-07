@@ -2,18 +2,15 @@
 
 const DCfont* LastFont = DEFAULT_FONT;
 
-void oledSetFont(const DCfont* font)
-{
-    if (font && LastFont != font)
-    {
+void oledSetFont(const DCfont* font) {
+    if (font && LastFont != font) {
         LastFont = font;
         oled.setFont(font);
     }
 }
 
 template <typename T>
-void oledPrint(T value, int offX = -1, int offY = -1, const DCfont* font = LastFont, bool invert = false)
-{
+void oledPrint(T value, int offX = -1, int offY = -1, const DCfont* font = LastFont, bool invert = false) {
     oledSetFont(font);
     if (invert)
         oled.invertOutput(invert);
@@ -51,23 +48,20 @@ void oledPrint(T value, int offX = -1, int offY = -1, const DCfont* font = LastF
 */
 
 //Better than sprintf which has overwhelmingly large overhead, it helps to reduce binary size
-void convertToChar(char* str, uint16_t value, uint8_t len, uint8_t dot = 0, char separator = '.', char space = ' ')
-{
+void convertToChar(char* str, uint16_t value, uint8_t len, uint8_t dot = 0, char separator = '.', char space = ' ') {
     uint8_t current_pos = len + (dot > 0);
     str[current_pos] = '\0';
 
-    for (uint8_t i = 0; i < len; ++i)
-    {
+    for (uint8_t i = 0; i < len; ++i) {
         if (dot > 0 && i == (len - dot))
             str[--current_pos] = separator;
-        
+
         str[--current_pos] = (value % 10) + '0';
         value /= 10;
     }
 
     uint8_t integer_part_len = (dot > 0) ? dot : len;
-    for (uint8_t i = 0; i < integer_part_len - 1 && str[i] == '0'; ++i)
-    {
+    for (uint8_t i = 0; i < integer_part_len - 1 && str[i] == '0'; ++i) {
         str[i] = space;
     }
 }
@@ -80,8 +74,7 @@ uint8_t ilen(uint16_t n) {
 }
 
 //Split KHz frequency + BFO to KHz and .00 tail
-void splitFreq(uint16_t& khz, uint16_t& tail)
-{
+void splitFreq(uint16_t& khz, uint16_t& tail) {
     // replaced the original 32-bit math to save a ton of flash space
     // old way ( (freq * 1000) + bfo ) was linking huge lib
 
@@ -100,8 +93,7 @@ void splitFreq(uint16_t& khz, uint16_t& tail)
     tail = bfo_temp / 10;
 }
 
-uint8_t strlen8(const char* s)
-{
+uint8_t strlen8(const char* s) {
     const char* start = s;
     while (*s)
         s++;
