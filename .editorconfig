@@ -1,0 +1,26 @@
+# ===================================================================
+# EditorConfig
+# ===================================================================
+
+root = true
+
+[*]
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+indent_style = space
+indent_size = 4
+
+[*.{c,cpp,h,hpp,ino}]
+cpp_indent_case_contents = true
+cpp_new_line_before_open_brace_function = new_line
+cpp_new_line_before_open_brace_block = same_line
+cpp_new_line_before_else = false
+cpp_space_after_keywords_in_control_flow_statements = true
+cpp_space_before_function_open_parenthesis = remove
+cpp_space_around_binary_operator = insert
+cpp_space_around_assignment_operator = insert
+cpp_space_before_comma = false
+cpp_space_after_comma = true
+cpp_space_pointer_reference_alignment = left
