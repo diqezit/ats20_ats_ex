@@ -9,7 +9,7 @@
 // 02.2024
 // http://github.com/goshante
 // ----------------------------------------------------------------------
-// MOD_NO_RDS_v4.4 by diqezit
+// MOD_NO_RDS_v4.5 by diqezit
 // More info for this mod you can get below
 // https://github.com/diqezit/ats20_ats_ex
 // ----------------------------------------------------------------------
@@ -38,7 +38,7 @@
 #include "globals.h"
 #include "Utils.h"
 
-constexpr auto APP_VERSION = 44;
+constexpr auto APP_VERSION = 45;
 
 // ------------------------------------------
 // ------- Utility & Helper Functions -------
@@ -712,7 +712,7 @@ void showSplashScreen() {
     oled.setFont(DEFAULT_FONT);
 
     oled.setCursor(26, 1);
-    oled.print(F("ATS-20+ v4.4"));
+    oled.print(F("ATS-20+ v4.5"));
 
     oled.setCursor(32, 3);
     oled.print(F("Mod No RDS"));
@@ -738,24 +738,38 @@ static void showFrequency(bool cleanDisplay = false) {
     bool ssbMode = isSSB();
     uint8_t off = (ssbMode ? -5 : 4) + 8;
     const char* unit = "kHz";
-
+    uint8_t displayMode = 0;
     BandType currentBandType = g_bandList[g_bandIndex].bandType;
 
-    if (currentBandType == FM_BAND_TYPE) {
+    if (ssbMode) {
+        displayMode = 2;
+    } else if (currentBandType == FM_BAND_TYPE) {
+        displayMode = 1;
+    }
+
+    switch (displayMode) {
+    case 2: // SSB
+        splitFreq(khzBFO, tailBFO);
+        convertToChar(freqDisplay, khzBFO, ilen(khzBFO), 0, '.', ' ');
+        break;
+
+    case 1: // FM
         convertToChar(freqDisplay, g_currentFrequency, 5, 3, '.', '/');
         unit = "MHz";
-    } else {
-        if (!ssbMode) {
-            uint8_t dot_pos = 0;
-            if (currentBandType == SW_BAND_TYPE && g_Settings[SettingsIndex::SWUnits].param == 1) {
-                dot_pos = 2;
-                unit = "MHz";
-            }
-            convertToChar(freqDisplay, g_currentFrequency, 5, dot_pos, '.', '/');
-        } else {
-            splitFreq(khzBFO, tailBFO);
-            convertToChar(freqDisplay, khzBFO, ilen(khzBFO));
+        break;
+
+    case 0: // AM-like modes SW, MW, LW
+    default:
+        uint8_t dot_pos = 0;
+
+        // applies MHz format ONLY to the SW band
+        // MW/LW, this check is always false, leaving dot_pos at 0
+        if (currentBandType == SW_BAND_TYPE && g_Settings[SettingsIndex::SWUnits].param == 1) {
+            dot_pos = 2;
+            unit = "MHz";
         }
+        convertToChar(freqDisplay, g_currentFrequency, 5, dot_pos, '.', '/');
+        break;
     }
 
     uint8_t len = ssbMode ? ilen(khzBFO) : ilen(g_currentFrequency);
@@ -802,12 +816,12 @@ static void showBandTag() {
     static char name_buffer[5];
     getBandName(name_buffer, g_bandIndex);
 
-    oledPrint(name_buffer, 0, 6, DEFAULT_FONT, invert);
+    oledPrint(name_buffer, 0, 0, DEFAULT_FONT, invert);
 }
 
 //Draw current modulation (AM/LSB/USB/CW/FM) and stereo indicator
 static void showModulation() {
-    oledPrint(g_bandModeDesc[g_currentMode], 0, 0, DEFAULT_FONT,
+    oledPrint(g_bandModeDesc[g_currentMode], 0, 6, DEFAULT_FONT,
         g_activeCommand == CMD_BAND && g_bandList[g_bandIndex].bandType == FM_BAND_TYPE);
 
     oled.print(' ');
@@ -832,7 +846,7 @@ static void showVolume() {
 // Displays the current signal quality value (RSSI)
 static void showSignalQuality() {
     if (g_settingsActive || g_favoritesActive) return;
-    oled.setCursor(84, 0);
+    oled.setCursor(78, 6);
     if (g_signalQualityValue == 255) {
         oled.print("   ");
     } else {
@@ -846,15 +860,17 @@ static void showSignalQuality() {
 static void showChargeOnDisplay() {
     if (g_settingsActive) return;
 
-    char buf[4];
+    oled.setCursor(102, 6);
+    oled.setFont(DEFAULT_FONT);
+
     if (g_stableBatteryPercent >= 100) {
-        buf[0] = '1'; buf[1] = '0'; buf[2] = '0'; buf[3] = '\0';
+        oled.print("100");
     } else {
-        convertToChar(buf, g_stableBatteryPercent, 2);
-        buf[2] = '%';
-        buf[3] = '\0';
+        // Add padding for single-digit numbers to maintain alignment
+        if (g_stableBatteryPercent < 10) oled.print(' ');
+        oled.print(g_stableBatteryPercent);
+        oled.print('%');
     }
-    oledPrint(buf, 102, 6, DEFAULT_FONT);
 }
 
 // displays the current tuning step
@@ -875,9 +891,16 @@ static void showStep() {
     }
 
     formatStepValue(buf, stepValue, isKhz);
-    uint8_t off = 50;
-    oledPrint("St:", off - 16, 6, DEFAULT_FONT, g_activeCommand == CMD_STEP);
-    oledPrint(buf, off + 8, 6, DEFAULT_FONT, g_activeCommand == CMD_STEP);
+
+    oledSetFont(DEFAULT_FONT);
+    bool invert = (g_activeCommand == CMD_STEP);
+    if (invert) oled.invertOutput(true);
+
+    oled.setCursor(34, 0);
+    oled.print("Step:");
+    oled.print(buf);
+
+    if (invert) oled.invertOutput(false);
 }
 
 // displays the current bandwidth
@@ -886,21 +909,21 @@ static void showBandwidth() {
     bw[4] = '\0';
     const Band& current_band = g_bandList[g_bandIndex];
     const uint8_t* table_ptr = nullptr;
-    uint8_t index = 0;
-
-    if (isSSB()) {
-        if (g_currentMode == CW) {
-            bw[0] = '\0';
-        } else {
-            table_ptr = bw_ssb_map;
-            index = current_band.bwIdxSSB;
-        }
-    } else if (g_currentMode == AM) {
+    uint8_t index;
+    switch (g_currentMode) {
+    case LSB:
+    case USB:
+        table_ptr = bw_ssb_map;
+        index = current_band.bwIdxSSB;
+        break;
+    case AM:
         table_ptr = bw_am_map;
         index = current_band.bwIdxAM;
-    } else { // FM
+        break;
+    case FM:
         table_ptr = bw_fm_map;
         index = current_band.bwIdxFM;
+        break;
     }
 
     if (table_ptr) {
@@ -908,15 +931,17 @@ static void showBandwidth() {
         for (uint8_t i = 0; i < 4; i++) {
             bw[i] = pgm_read_byte(&bw_all_data[offset + i]);
         }
+    } else { // for CW
+        bw[0] = '\0';
     }
-    oledPrint(bw, 45, 0, DEFAULT_FONT, g_activeCommand == CMD_BW);
+    oledPrint(bw, 40, 6, DEFAULT_FONT, g_activeCommand == CMD_BW);
 }
 
 void updateStereoIndicator() {
     char c = (isSSB() && g_Settings[SettingsIndex::Sync].param == 1) ? 'S' :
         ((g_currentMode == FM && g_stereoStatus) ? '*' : ' ');
 
-    oled.setCursor(24, 0);
+    oled.setCursor(24, 6);
     oled.print(c);
 }
 
@@ -1085,7 +1110,12 @@ static void bandSwitch(bool up) {
     if (oldType != FM_BAND_TYPE && newType != FM_BAND_TYPE) {
         // fast for seamless transitions within AM/SW bands
         g_si4735.setFrequency(g_currentFrequency);
-        showFrequency(false);
+
+        // clear at SW<->MW/LW transition if MHz mode is enabled
+        bool clean = g_Settings[SettingsIndex::SWUnits].param == 1 &&
+            ((oldType == SW_BAND_TYPE) != (newType == SW_BAND_TYPE));
+
+        showFrequency(clean);
         showBandTag();
         showStep();
         showBandwidth();
@@ -1470,7 +1500,7 @@ void doCWSwitch(int8_t v) {
     constexpr int16_t COMPENSATION_KHZ = (2 * CW_PITCH_OFFSET_HZ) / 1000; // 1 kHz if CW_PITCH_OFFSET_HZ = 500
     const int8_t old_param = g_Settings[CWSwitch].param;
 
-    doSwitchLogic(g_Settings[CWSwitch].param, 0, 1, v);
+    toggleSetting(CWSwitch);
     if (g_currentMode != CW) return;
 
     const int8_t actual_direction = g_Settings[CWSwitch].param - old_param;
