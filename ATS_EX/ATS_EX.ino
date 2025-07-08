@@ -776,9 +776,9 @@ static void showFrequency(bool cleanDisplay = false) {
 
     if (cleanDisplay) {
         oledPrint("/////////", 0, 3, FONT14X24SEVENSEG);
-    } else if (ssbMode && len > prevLen && len == 5)
+    } else if (ssbMode && len > prevLen && len == 5) 
         oledPrint("   ", 102, 4, DEFAULT_FONT);
-
+    
     oledPrint(freqDisplay, off, 3, FONT14X24SEVENSEG);
 
     if (ssbMode) {
