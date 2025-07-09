@@ -9,7 +9,7 @@
 // 02.2024
 // http://github.com/goshante
 // ----------------------------------------------------------------------
-// MOD_NO_RDS_v4.5 by diqezit
+// MOD_NO_RDS_v4.6 by diqezit
 // More info for this mod you can get below
 // https://github.com/diqezit/ats20_ats_ex
 // ----------------------------------------------------------------------
@@ -38,7 +38,7 @@
 #include "globals.h"
 #include "Utils.h"
 
-constexpr auto APP_VERSION = 45;
+constexpr auto APP_VERSION = 46;
 
 // ------------------------------------------
 // ------- Utility & Helper Functions -------
@@ -646,25 +646,31 @@ static void applyAgcSettings() {
     setAgcHardware(att_val);
 }
 
-// Main band switching logic that coordinates mode transitions and amplifier control
-void applyBandConfiguration(bool extraSSBReset) {
+// Helper to detect a major mode switch (FM <-> AM/SSB)
+// is needed for safely toggle amplifier off/on during the internal IC transition
+static inline bool isSwitchingBetweenFmAndAm() {
     bool prevWasFM = (g_currentMode == FM);
     bool nextIsFM = (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE);
     bool nextIsPureAM = !nextIsFM && !g_ssbLoaded;
-    bool switchingBetweenFMandAM = (prevWasFM && nextIsPureAM) || (!prevWasFM && nextIsFM);
+    return (prevWasFM && nextIsPureAM) || (!prevWasFM && nextIsFM);
+}
+
+// Main band switching logic that coordinates mode transitions and amplifier control
+void applyBandConfiguration(bool extraSSBReset) {
+    bool switchingBetweenFMandAM = isSwitchingBetweenFmAndAm();
 
     if (switchingBetweenFMandAM)
         safeAmpOff();
 
     loadActiveStateFromBand();
 
-    // g_signalQualityValue = 255; // keeping the old value on screen temporarily
+    g_signalQualityValue = 255; // not keeping old value on screen temporarily (save 8 bytes)
     g_forceRssiUpdate = true;
 
     uint8_t cap_value = (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE) ? 1 : g_Settings[AntennaCap].param;
     g_si4735.setTuneFrequencyAntennaCapacitor(cap_value);
 
-    if (nextIsFM) {
+    if (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE) { // better use this
         configureFMMode();
     } else {
         uint16_t minFreq = g_bandList[g_bandIndex].minimumFreq;
@@ -712,7 +718,7 @@ void showSplashScreen() {
     oled.setFont(DEFAULT_FONT);
 
     oled.setCursor(26, 1);
-    oled.print(F("ATS-20+ v4.5"));
+    oled.print(F("ATS-20+ v4.6"));
 
     oled.setCursor(32, 3);
     oled.print(F("Mod No RDS"));
@@ -776,9 +782,9 @@ static void showFrequency(bool cleanDisplay = false) {
 
     if (cleanDisplay) {
         oledPrint("/////////", 0, 3, FONT14X24SEVENSEG);
-    } else if (ssbMode && len > prevLen && len == 5) 
+    } else if (ssbMode && len > prevLen && len == 5)
         oledPrint("   ", 102, 4, DEFAULT_FONT);
-    
+
     oledPrint(freqDisplay, off, 3, FONT14X24SEVENSEG);
 
     if (ssbMode) {
@@ -831,16 +837,19 @@ static void showModulation() {
 
 //Draw volume level or mute status
 static void showVolume() {
-    if (g_settingsActive)
-        return;
+    if (g_settingsActive) return;
 
-    char buf[3];
-    if (g_muteVolume == 0)
-        convertToChar(buf, g_si4735.getCurrentVolume(), 2, 0, 0);
-    else {
-        buf[0] = ' '; buf[1] = 'M'; buf[2] = 0;
+    char buf[4];
+    buf[0] = '|';
+
+    if (g_muteVolume == 0) {
+        convertToChar(buf + 1, g_si4735.getCurrentVolume(), 2, 0, 0);
+    } else {
+        buf[1] = ' ';
+        buf[2] = 'M';
+        buf[3] = '\0';
     }
-    oledPrint(buf, (128 - (8 * 2) + 2 - 6), 0, DEFAULT_FONT, g_activeCommand == CMD_VOLUME);
+    oledPrint(buf, 104, 0, DEFAULT_FONT, g_activeCommand == CMD_VOLUME);
 }
 
 // Displays the current signal quality value (RSSI)
@@ -873,23 +882,36 @@ static void showChargeOnDisplay() {
     }
 }
 
-// displays the current tuning step
-static void showStep() {
-    char buf[5];
-    int stepValue;
-    bool isKhz = true;
-
+// computes the current step value and format
+static inline void getStepInfo(int& value, bool& isKhz) {
     const Band& current_band = g_bandList[g_bandIndex];
 
     if (g_currentMode == FM) {
-        stepValue = (g_tabStepFM[current_band.stepIdxFM] == 100) ? 1000 : g_tabStepFM[current_band.stepIdxFM] * 10;
-    } else if (isSSB()) {
-        stepValue = g_tabStep[SSB_STEP_OFFSET + current_band.stepIdxSSB];
-        isKhz = false;
-    } else { // AM
-        stepValue = g_tabStep[current_band.stepIdxAM];
-    }
+        // FM step logic (50k/100k/1M)
+        value = (g_tabStepFM[current_band.stepIdxFM] == 100)
+            ? 1000
+            : g_tabStepFM[current_band.stepIdxFM] * 10;
 
+        isKhz = true;
+    } else {
+        // isSSB() correctly includes LSB/USB/CW
+        const bool use_ssb_steps = isSSB();
+        const uint8_t index = use_ssb_steps
+            ? (SSB_STEP_OFFSET + current_band.stepIdxSSB)
+            : current_band.stepIdxAM;
+
+        value = g_tabStep[index];
+        isKhz = !use_ssb_steps;
+    }
+}
+
+// display the step on the screen
+static void showStep() {
+    int stepValue;
+    bool isKhz;
+    getStepInfo(stepValue, isKhz);
+
+    char buf[5];
     formatStepValue(buf, stepValue, isKhz);
 
     oledSetFont(DEFAULT_FONT);
@@ -1463,13 +1485,18 @@ void doCutoffFilter(int8_t v) {
         updateSSBCutoffFilter();
 }
 
+// Settings: CPU Frequency divider helper
+static void setCpuPrescaler(uint8_t prescaler) {
+    noInterrupts();
+    CLKPR = 0x80;
+    CLKPR = prescaler;
+    interrupts();
+}
+
 //Settings: CPU Frequency divider
 void doCPUSpeed(int8_t v = 0) {
     toggleSetting(CPUSpeed);
-    noInterrupts();
-    CLKPR = 0x80;
-    CLKPR = g_Settings[CPUSpeed].param;
-    interrupts();
+    setCpuPrescaler(g_Settings[CPUSpeed].param);
 }
 
 // Settings: BFO Offset calibration
@@ -1598,13 +1625,9 @@ static uint8_t volumeEvent(uint8_t event, uint8_t pin) {
 }
 
 static uint8_t simpleEvent(uint8_t event, uint8_t pin) {
-    // If the event is from the Mode button in FM mode, pass it through unmodified.
-    if (pin == MODE_SWITCH && g_currentMode == FM) {
-        return event;
+    if (pin != MODE_SWITCH && event == BUTTONEVENT_FIRSTLONGPRESS) {
+        return BUTTONEVENT_SHORTPRESS;
     }
-
-    if (BUTTONEVENT_FIRSTLONGPRESS == event)
-        event = BUTTONEVENT_SHORTPRESS;
     return event;
 }
 
@@ -1716,10 +1739,7 @@ static inline void handleAgcButton() {
     g_displayOn = !g_displayOn;
     uint8_t new_prescaler = g_displayOn ? g_Settings[SettingsIndex::CPUSpeed].param : 1;
 
-    noInterrupts();
-    CLKPR = 0x80;
-    CLKPR = new_prescaler;
-    interrupts();
+    setCpuPrescaler(new_prescaler);
 
     g_displayOn ? oled.on() : oled.off();
 }
@@ -1749,17 +1769,21 @@ static inline void handleModeButton() {
     uint8_t evt = btn_Mode.checkEvent(simpleEvent);
     if (g_settingsActive) return;
 
-    if (BUTTONEVENT_SHORTPRESS == evt)
+    if (BUTTONEVENT_SHORTPRESS == evt) {
         processModeButtonShortPress();
-
-    else if (BUTTONEVENT_LONGPRESSDONE == evt &&
-        g_bandList[g_bandIndex].bandType == FM_BAND_TYPE && !g_favoritesActive) {
-        // long press on FM adds the current station to favorites
-        addFav();
-        oled.setCursor(45, 3);
-        oled.print(F("SAVED"));
-        delay(500);
-        showFrequency(true);
+    } else if (BUTTONEVENT_LONGPRESSDONE == evt) {
+        if (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE && !g_favoritesActive) {
+            // long press in FM mode add to favorites
+            addFav();
+            oled.setCursor(45, 3);
+            oled.print(F("SAVED"));
+            delay(500);
+            showFrequency(true);
+        } else if (isSSB()) {
+            // long press in SSB/CW modes now toggle Sync
+            doSync(0);
+            updateStereoIndicator();
+        }
     }
 }
 
