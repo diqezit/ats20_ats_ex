@@ -76,23 +76,29 @@ enum SettingType {
 };
 
 enum SettingsIndex {
+    // --- Page 1: General & Sound ---
     ATT,
-    SoftMute,
-    SVC,
-    Sync,
-    DeEmp,
-    AutoVolControl,
-    Brightness,
-    SWUnits,
-    SSM,
-    CutoffFilter,
-    CPUSpeed,
+    ScanSwitch,     // SCN
+    AutoVolControl, // AVC
+    SoftMute,       // SM
+    DeEmp,          // DE
+    Brightness,     // SCR
+
+    // --- Page 2: SSB & CW ---
     BFO,
-    UnitsSwitch,
-    ScanSwitch,
-    CWSwitch,
-    AntennaCap,
-    RSSI_AM_Off,
+    SSM,
+    SVC,
+    CutoffFilter,   // COF
+    CWSwitch,       // CW
+    Sync,           // SYN
+
+    // --- Page 3: Hardware & Visual ---
+    AntennaCap,     // CAP
+    UnitsSwitch,    // UNI 
+    CPUSpeed,       // CPU
+    SWUnits,        // SWU
+    RSSI_AM_Off,    // RSI
+
     SETTINGS_MAX
 };
 
@@ -256,46 +262,53 @@ int8_t g_modeSettings[MODE_SETTINGS_COUNT][MODE_CONTEXT_COUNT];
 // The initial values here are defaults and will be overwritten
 SettingsItem g_Settings[] =
 {
-    //  { Name, Default Param,     Behavior,             Callback          }
-        { "ATT", 0,            SettingType::ZeroAuto,   doAttenuation     },
-        { "SM ", 0,            SettingType::Num,        doSoftMute        },
-        { "SVC", 1,            SettingType::Switch,     doSSBAVC          },
-        { "SYN", 0,            SettingType::Switch,     doSync            },
-        { "DE",  1,            SettingType::Switch,     doDeEmp           },
-        { "AVC", 90,           SettingType::Num,        doAvc             },
-        { "SCR", 4,            SettingType::Num,        doBrightness      },
-        { "SWU", 0,            SettingType::Switch,     doSWUnits         },
-        { "SSM", 1,            SettingType::Switch,     doSSBSoftMuteMode },
-        { "COF", 0,            SettingType::SwitchAuto, doCutoffFilter    },
-        { "CPU", 0,            SettingType::Switch,     doCPUSpeed        },
-        { "BFO", 0,            SettingType::Num,        doBFOCalibration  },
-        { "UNI", 1,            SettingType::Switch,     doUnitsSwitch     },
-        { "SCN", 1,            SettingType::Switch,     doScanSwitch      },
-        { "CW ", 0,            SettingType::Switch,     doCWSwitch        },
-        { "CAP", 0,            SettingType::Switch,     doAntennaCapacitor},
-        { "RSI", 1,            SettingType::Switch,     doRSSIAMOff       },
+    // Page 1
+    { "ATT", 0,  SettingType::ZeroAuto,   doAttenuation     },
+    { "SCN", 1,  SettingType::Switch,     doScanSwitch      },
+    { "AVC", 90, SettingType::Num,        doAvc             },
+    { "SM ", 0,  SettingType::Num,        doSoftMute        },
+    { "DE",  1,  SettingType::Switch,     doDeEmp           },
+    { "SCR", 4,  SettingType::Num,        doBrightness      },
+
+    // Page 2
+    { "BFO", 0,  SettingType::Num,        doBFOCalibration  },
+    { "SSM", 1,  SettingType::Switch,     doSSBSoftMuteMode },
+    { "SVC", 1,  SettingType::Switch,     doSSBAVC          },
+    { "COF", 0,  SettingType::SwitchAuto, doCutoffFilter    },
+    { "CW ", 0,  SettingType::Switch,     doCWSwitch        },
+    { "SYN", 0,  SettingType::Switch,     doSync            },
+
+    // Page 3
+    { "CAP", 0,  SettingType::Switch,     doAntennaCapacitor},
+    { "UNI", 1,  SettingType::Switch,     doUnitsSwitch     },
+    { "CPU", 0,  SettingType::Switch,     doCPUSpeed        },
+    { "SWU", 0,  SettingType::Switch,     doSWUnits         },
+    { "RSI", 1,  SettingType::Switch,     doRSSIAMOff       },
 };
 
 // defines the text conversion rules ONLY for settings of type 'Switch'
 // it is indexed here by the SettingsIndex enum
 const PROGMEM SwitchMapEntry switch_setting_map[] = {
-    [ATT] = {0, false},                     // Ignored, type is ZeroAuto
-    [SoftMute] = {0, false},                // Ignored, type is Num
-    [SVC] = {2, true},
-    [Sync] = {2, true},
-    [DeEmp] = {3, false},
-    [AutoVolControl] = {0, false},          // Ignored, type is Num
-    [Brightness] = {0, false},              // Ignored, type is Num
-    [SWUnits] = {5, false},
-    [SSM] = {7, false},
-    [CutoffFilter] = {0, false},            // Ignored, type is SwitchAuto
-    [CPUSpeed] = {11, false},
-    [BFO] = {0, false},                     // Ignored, type is Num
-    [UnitsSwitch] = {2, true},
+    // Page 1
+    [ATT] = {0, false},
     [ScanSwitch] = {2, true},
+    [AutoVolControl] = {0, false},
+    [SoftMute] = {0, false},
+    [DeEmp] = {3, false},
+    [Brightness] = {0, false},
+    // Page 2
+    [BFO] = {0, false},
+    [SSM] = {7, false},
+    [SVC] = {2, true},
+    [CutoffFilter] = {0, false},
     [CWSwitch] = {9, false},
+    [Sync] = {2, true},
+    // Page 3
     [AntennaCap] = {1, false},
-    [RSSI_AM_Off] = {1, true}
+    [UnitsSwitch] = {2, true},
+    [CPUSpeed] = {11, false},
+    [SWUnits] = {5, false},
+    [RSSI_AM_Off] = {1, true},
 };
 
 // -------------------------------------------------------------------------------------------------

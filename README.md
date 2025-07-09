@@ -232,4 +232,74 @@ This version introduces the ability to save your favorite FM stations.
 ------------------------------------------------------------------------------------------------------------
 
 
+### **MOD_NO_RDS v4.4**
+
+`(!) Attention: This version includes significant stability fixes, code refactoring, and flash memory optimizations.`
+
+*   **[Fixed & Improved] Core Receiver Stability:**
+    *   **CW Sideband Switching:** Corrected a major regression in `doCWSwitch` that caused signal loss and BFO resets. Full functionality from v3.4 is now restored.
+    *   **AM RSSI Stability:** Implemented a new sampling strategy for AM RSSI to provide a stable on-screen value and track slow fading. 
+		The value is now read once after a 1-second AGC settle time and then refreshed periodically (in 10 seconds), minimizing noise during active listening.
+
+*   **[Optimized] Flash Memory & Code Structure:**
+    *   **Major Optimization:** Removed a redundant API call (`setSeekAmSpacing`) from the AM configuration routine, resulting in a **38-byte** flash savings
+    *   **Arithmetic & Logic:** Replaced `volumeUp/Down` calls with direct arithmetic in `doVolume()` (saving 14 bytes), replaced costly boolean arithmetic in `handleAgcButton()` (saving 4 bytes), and used a manual `abs()` in `updateStablePercent()` (saving 4 bytes).
+    *   **Code Consolidation:** Eliminated duplicate function calls within `doStep()` and other minor logic blocks, saving an additional 10 bytes.
+
+*   **[Refactored] Code Readability:**
+    *   The main periodic task handler (`handlePeriodicTasks`) was split in inline helpers (`handleSignalAndStereoUpdates`, `handleSettingsSave`, etc.).
+    *   Signal quality logic was separating into `getAmSignalValue` and `getFmSignalValue` helpers too.
+
+
+------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v4.5**
+
+`(!) Attention: Continues optimization effort, focusing on low-level code refinement to free up critical Flash memory.`
+
+*   **[Optimized] Flash Memory & Code Structure:**
+    *   **Frequency Display Overhaul (32 bytes):** rewrote `showFrequency` function to resolve a critical logic bug where the `SWUnits=MHz` setting incorrectly affected
+  MW/LW band display.
+    *   **Direct Display Rendering (26 bytes):** Refactored the `showChargeOnDisplay` function to print the battery percentage directly to the display,
+  eliminating need for temporary string buffer and `convertToChar` helper. **26-byte** flash savings.
+    *   **Specialized Logic (8 bytes):** Replaced generic `doSwitchLogic` function with `toggleSetting` call in `doCWSwitch` for binary (LSB/USB) switching.
+
+*   **[UI] Display Layout Realignment:**
+    *   Re-arranged on-screen indicators (Band/Step top, Mode/BW bottom) to align with physical button positions.
+    *   Relocated RSSI indicator to the bottom row and adjusted all element X-coordinates to resolve text overlap with long values (e.g., `160m`, `Step:100k`).
+
+
+![AM_MODE](https://github.com/user-attachments/assets/6a0405aa-bffc-4cf9-940a-ea39cfad03d2)
+
+![FM_MODE](https://github.com/user-attachments/assets/c0d6a85d-cabf-4a38-bb76-36ddd5e49711)
+
+------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v4.6**
+
+`(!) Attention: Settings have been re-ordered. An EEPROM reset will occur on first boot.`
+
+*   **[New] Quick Sync Toggle:** Long-pressing the `MODE` button in any SSB/CW mode now toggles the `Sync` setting, 
+	providing fast access to this key feature without entering the menu as was early realised in AGC button.
+
+*   **[Reworked] Main Screen UI & Rendering:**
+    *   Volume indicator is now right-aligned and includes an integrated separator (`'|'`) for more consistent layout with step param
+    *   Fixed a bug where the separator was not cleared correctly after changing tuning steps.
+    *   Corrected an issue where only the volume value, not the separator, was highlighted (inverted) during editing.
+
+*   **[UI] Settings Menu Rework:**
+    *   Re-ordered and sorted all settings into logical groups (like General, SSB/CW, Hardware) for faster navigation.
+
+*   **[Fixed] Stale RSSI Display:**
+    *   RSSI value now correctly cleared on mode switch (e.g., from FM to AM), preventing "ghost" values from being displayed.
+
+*   **[Optimized] `showStep` Function (-20 bytes):**
+    *   Rewrote step display logic, which also fixed a bug with incorrect CW steps and resulted in a **20-byte flash saving.**
+	
+
+------------------------------------------------------------------------------------------------------------
+
+
 Thank you all for your participation and feedback
