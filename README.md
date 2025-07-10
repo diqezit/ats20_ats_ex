@@ -3,7 +3,7 @@
 This repository is a fork of the original `goshante/ats20_ats_ex` firmware, dedicated to custom modifications, bug fixes, and new features. All discussion regarding these new versions should take place here.
 
 Your feedback and suggestions are welcome!
-Please put star to raise the firmware higher up on the list, thanks :)
+**Please**, put star to raise the firmware higher up on the global list, **thanks :)**
 
 You can find the original project here: [goshante/ats20_ats_ex](https://github.com/goshante/ats20_ats_ex)
 
