@@ -9,7 +9,7 @@
 // 02.2024
 // http://github.com/goshante
 // ----------------------------------------------------------------------
-// MOD_NO_RDS_v4.7 by diqezit
+// MOD_NO_RDS_v4.8 by diqezit
 // More info for this mod you can get below
 // https://github.com/diqezit/ats20_ats_ex
 // ----------------------------------------------------------------------
@@ -38,7 +38,7 @@
 #include "globals.h"
 #include "Utils.h"
 
-constexpr auto APP_VERSION = 47;
+constexpr auto APP_VERSION = 48;
 
 // ------------------------------------------
 // ------- Utility & Helper Functions -------
@@ -50,7 +50,7 @@ static bool isSSB() {
 
 // Helper function to get the current context (AM or SSB/CW)
 static ModeContext getModeContext() {
-    if (isSSB() || g_currentMode == CW) {
+    if (isSSB()) {
         return MODE_CONTEXT_SSB;
     }
     return MODE_CONTEXT_AM;
@@ -97,6 +97,15 @@ static bool checkStopSeeking() {
     return g_seekStop || !(PINC & (1 << (ENCODER_BUTTON - 14)));
 }
 
+// for snap to new step after switch 
+static inline void snapToNewStep(uint16_t* freq, bool isUp) {
+    uint16_t new_step = g_tabStep[SSB_STEP_OFFSET + g_bandList[g_bandIndex].stepIdxSSB];
+    uint16_t remainder = *freq % new_step;
+    if (remainder != 0) {
+        *freq += isUp ? (new_step - remainder) : -remainder;
+    }
+}
+
 // performs bfo rollover with integrated boundary checks and a max bfo limit
 // this is the core of the stability system for ssb tuning
 // returns true if a band switch occurred, false otherwise
@@ -113,6 +122,8 @@ static inline bool performBfoRolloverWithBandCheck(uint16_t* freq, int32_t* bfo)
         (*freq)++;
         if (*freq >= g_bandList[g_bandIndex].maximumFreq) {
             bandSwitch(true, false);
+            *freq = g_bandList[g_bandIndex].minimumFreq;
+            snapToNewStep(freq, true); // snap for up
         }
         *bfo -= 1000;
     }
@@ -121,6 +132,8 @@ static inline bool performBfoRolloverWithBandCheck(uint16_t* freq, int32_t* bfo)
         (*freq)--;
         if (*freq < g_bandList[g_bandIndex].minimumFreq) {
             bandSwitch(false, false);
+            *freq = g_bandList[g_bandIndex].maximumFreq;
+            snapToNewStep(freq, false); // snap for down
         }
         *bfo += 1000;
     }
@@ -713,16 +726,18 @@ void showSplashScreen() {
     oled.setFont(DEFAULT_FONT);
 
     oled.setCursor(26, 1);
-    oled.print(F("ATS-20+ v4.7"));
+    oled.print(F("ATS-20+ v4.8"));
 
     oled.setCursor(32, 3);
     oled.print(F("Mod No RDS"));
 
+#if ANIMATE_SPLASH
     for (int i = 0; i < 21; i++) {
         oled.setCursor(i * 6, 6);
         oled.print('-');
         delay(70);
     }
+#endif
 
     delay(2000);
     oled.clear();
@@ -822,9 +837,10 @@ static void showFrequency(bool cleanDisplay = false) {
 static void showFrequencySeek(uint16_t freq) {
     g_currentFrequency = freq;
 
-    if (g_currentMode == FM) {
-        g_currentFrequency = (freq / 10) * 10;
-    }
+    //if (g_currentMode == FM) {
+    //    g_currentFrequency = (freq / 10) * 10;
+    //}
+
     showFrequency();
 }
 
@@ -889,8 +905,6 @@ static void showChargeOnDisplay() {
     if (g_stableBatteryPercent >= 100) {
         oled.print("100");
     } else {
-        // Add padding for single-digit numbers to maintain alignment
-        if (g_stableBatteryPercent < 10) oled.print(' ');
         oled.print(g_stableBatteryPercent);
         oled.print('%');
     }
@@ -1010,10 +1024,13 @@ static inline void drawFavItem(uint8_t index, uint8_t y_pos, bool selected) {
 
     uint16_t f_copy = g_fmFavorites[index].frequency;
     uint8_t megahertz = sw_div(f_copy, 100);
+
     if (megahertz < 100) oled.print(' ');
     if (megahertz < 10) oled.print(' ');
+
     oled.print(megahertz);
     oled.print('.');
+
     uint8_t first_decimal = sw_div(f_copy, 10);
     oled.print(first_decimal);
     oled.print(F(" MHz  "));
@@ -1057,21 +1074,25 @@ static void showFav() {
 // --- UI: Settings Menu Drawing ------------
 // ------------------------------------------
 
+static inline void handleSwitchParam(char* buf, uint8_t idx, int8_t param, uint8_t type) {
+    uint8_t textIdx;
+    if (type == SettingType::SwitchAuto) {
+        textIdx = param;
+    } else {
+        uint8_t base = pgm_read_byte(&switch_setting_map[idx].baseIndex);
+        bool inv = pgm_read_byte(&switch_setting_map[idx].inverted);
+        textIdx = inv ? (base - param) : (base + param);
+    }
+    strcpy_P(buf, paramTexts[textIdx]);
+}
+
 // Converts setting parameter value to UI display string
 static void SettingParamToUI(char* buf, uint8_t idx) {
     int8_t param = g_Settings[idx].param;
     uint8_t type = g_Settings[idx].type;
-    uint8_t textIdx;
 
     if (type == SettingType::Switch || type == SettingType::SwitchAuto) {
-        if (type == SettingType::SwitchAuto) {
-            textIdx = param;
-        } else {
-            uint8_t base = pgm_read_byte(&switch_setting_map[idx].baseIndex);
-            bool inv = pgm_read_byte(&switch_setting_map[idx].inverted);
-            textIdx = inv ? (base - param) : (base + param);
-        }
-        strcpy_P(buf, paramTexts[textIdx]);
+        handleSwitchParam(buf, idx, param, type);
         return;
     }
 
@@ -1134,11 +1155,8 @@ static void bandSwitch(bool up, bool loadStoredFreq = true) {
     uint8_t oldBandIndex = g_bandIndex;
     g_currentBFO = 0;
 
-    if (up) {
-        g_bandIndex = (g_bandIndex + 1) % g_bandCount;
-    } else {
-        g_bandIndex = (g_bandIndex == 0) ? (g_bandCount - 1) : (g_bandIndex - 1);
-    }
+    int8_t delta = up ? 1 : -1;
+    g_bandIndex = (g_bandIndex + delta + g_bandCount) % g_bandCount;
 
     // load stored frequency ONLY if requested (for manual band switching BAND+)
     if (loadStoredFreq) loadActiveStateFromBand();
@@ -1214,9 +1232,10 @@ static void doFrequencyTune() {
 
     if (temp_freq >= current_band.maximumFreq) {
         bandSwitch(true, false);
-        // snap-to-grid logic below will use the OLD step for one turn to compromise 
+        temp_freq = g_bandList[g_bandIndex].minimumFreq; // continuous to new min
     } else if (temp_freq < current_band.minimumFreq) {
         bandSwitch(false, false);
+        temp_freq = g_bandList[g_bandIndex].maximumFreq; // continuous to new max
     }
 
     // if safe, commit the new frequency and align it to the grid (snap)
@@ -1550,7 +1569,7 @@ void doCWSwitch(int8_t v) {
     if (g_currentMode != CW) return;
 
     const int8_t actual_direction = g_Settings[CWSwitch].param - old_param;
-    if (actual_direction == 0) return;
+    // if (actual_direction == 0) return;
 
     g_currentFrequency += actual_direction * COMPENSATION_KHZ;
     g_si4735.setFrequency(g_currentFrequency);
@@ -1588,7 +1607,7 @@ static void doBandwidth(uint8_t v) {
 }
 
 // ------------------------------------------
-// --- Input: Button & Event Handling -----
+// --- Input: Button & Event Handling -------
 // ------------------------------------------
 
 // Handle encoder direction (ISR context)
@@ -1600,13 +1619,21 @@ static void rotaryEncoder() {
     }
 }
 
-// Safely reads the accumulated encoder value from the interrupt context.
+// Safely reads accumulated encoder value from the interrupt context
+// Since have a cheap encoder which am tired of replacing because of rattling
+// I had to add a little code to it :)
+// So  this function can remove some rattle of lamellae when rotating the encoder
+// Added software debounce (10ms) here to avoid bloating ISR
+// noInterrupts() for atomic access without requiring extra #includes
 static void updateEncoderState() {
-    if (g_encoderCount) {
-        noInterrupts();
+    static uint32_t lastEncoderTime = 0;                // uint32 for precise debounce timing (moved from ISR)
+    if (g_encoderCount) {                               // process only if ISR detected a change
+        if (millis() - lastEncoderTime < 10) return;    // debounce 10ms (ignore if too soon)
+        lastEncoderTime = millis();
+        noInterrupts();                                 //  disable interrupts for atomic access
         g_safeEncoderMovement += g_encoderCount;
         g_encoderCount = 0;
-        interrupts();
+        interrupts();                                   // re-enable interrupts
     }
 }
 
