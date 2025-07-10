@@ -277,15 +277,19 @@ This version introduces the ability to save your favorite FM stations.
 ------------------------------------------------------------------------------------------------------------
 
 
-### **MOD_NO_RDS v4.6**
+
+### **MOD_NO_RDS v4.6 (Final Release)**
 
 `(!) Attention: Settings have been re-ordered. An EEPROM reset will occur on first boot.`
 
 *   **[New] Quick Sync Toggle:** Long-pressing the `MODE` button in any SSB/CW mode now toggles the `Sync` setting, 
-	providing fast access to this key feature without entering the menu as was early realised in AGC button.
+	providing fast access to this key feature without entering the menu, as was previously realized in AGC button.
+
+*   **[New] Robust Seeking:** Seek function timeout has been extended to its maximum practical value (~32 seconds) 
+	to ensure complete band scans without premature termination on quiet bands. User action is now the only way to stop a seek.
 
 *   **[Reworked] Main Screen UI & Rendering:**
-    *   Volume indicator is now right-aligned and includes an integrated separator (`'|'`) for more consistent layout with step param
+    *   Volume indicator is now right-aligned and includes an integrated separator (`'|'`) for a more consistent layout with the step parameter.
     *   Fixed a bug where the separator was not cleared correctly after changing tuning steps.
     *   Corrected an issue where only the volume value, not the separator, was highlighted (inverted) during editing.
 
@@ -293,11 +297,38 @@ This version introduces the ability to save your favorite FM stations.
     *   Re-ordered and sorted all settings into logical groups (like General, SSB/CW, Hardware) for faster navigation.
 
 *   **[Fixed] Stale RSSI Display:**
-    *   RSSI value now correctly cleared on mode switch (e.g., from FM to AM), preventing "ghost" values from being displayed.
+    *   RSSI value is now correctly cleared on mode switch (e.g., from FM to AM), preventing "ghost" values from being displayed.
 
 *   **[Optimized] `showStep` Function (-20 bytes):**
     *   Rewrote step display logic, which also fixed a bug with incorrect CW steps and resulted in a **20-byte flash saving.**
+
+------------------------------------------------------------------------------------------------------------
+
+### **MOD_NO_RDS v4.7**
+
+*   **[Optimized] `calculateRawPercent` Function (-14 bytes):**
+    *   Rewritten for maximum flash efficiency using a compressed data `struct` (8-bit offsets).
+    *   Hardcoded min/max edge-case values to eliminate runtime calculations.
+    *   Downgraded interpolation math to `uint16_t`, achieving a **14-byte total saving.**
+
+*   **[Fixed] IIR Filter Initialization:**
+    *   Corrected the IIR filter logic for battery ADC readings to properly handle its uninitialized state (`-1`) on first boot, 
+		ensuring stable and predictable readings from the start.
+
+*   **[Optimized] AM Mode Step Handling (-4 bytes):**
+    *   Refactored the `doStep` function to eliminate a redundant array lookup when setting the frequency and seek spacing for AM modes.
+    *   This optimization streamlines register usage and results in a **4-byte flash saving.**
+
+*   **[Fixed] VFO Tuning Logic at Band Edges:**
+    *   Refactored `doFrequencyTune()`, `bandSwitch()`, and `performBfoRolloverWithBandCheck()` to prevent frequency jumps when tuning across band boundaries with the encoder.
+    *   Tuning now rolls over seamlessly (e.g., 3200->3201 kHz like before v4.x), ensuring continuous VFO operation in all modes (AM/SSB/CW). 
+		Jumping to a band's stored frequency is now isolated to the `Band+` function.
 	
+*   [Fixed/Optimized] `showFrequency()` Rendering (-20 bytes): Stabilized the display rendering during rapid tuning to prevent freezes. 
+	This was achieved by refactoring core logic into helper functions, which also improves code clarity.
+	
+*   [Optimized] Step & Volume UI (-30 bytes): Replaced dynamic step generation with a PROGMEM lookup table (`step_lookup_table`), 
+	saving flash space. Volume display was updated for consistent UI style.
 
 ------------------------------------------------------------------------------------------------------------
 
