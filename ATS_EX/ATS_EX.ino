@@ -9,7 +9,7 @@
 // 02.2024
 // http://github.com/goshante
 // ----------------------------------------------------------------------
-// MOD_NO_RDS_v4.6 by diqezit
+// MOD_NO_RDS_v4.7 by diqezit
 // More info for this mod you can get below
 // https://github.com/diqezit/ats20_ats_ex
 // ----------------------------------------------------------------------
@@ -38,7 +38,7 @@
 #include "globals.h"
 #include "Utils.h"
 
-constexpr auto APP_VERSION = 46;
+constexpr auto APP_VERSION = 47;
 
 // ------------------------------------------
 // ------- Utility & Helper Functions -------
@@ -60,26 +60,6 @@ static ModeContext getModeContext() {
 static void getBandName(char* buffer, uint8_t band_idx) {
     memcpy(buffer, g_bandList[band_idx].name, 4);
     buffer[4] = '\0'; // ensure null
-}
-
-// formats a raw step value into a human-readable string for the display
-// conversions to "kHz", "Hz", and a special "1M" case for 1000 kHz
-static void formatStepValue(char* buf, int stepValue, bool isKhz) {
-    if (isKhz && stepValue == 1000) {
-        strcpy_P(buf, PSTR("  1M"));
-    } else if (isKhz) {
-        convertToChar(buf, stepValue, 3);
-        buf[3] = 'k';
-        buf[4] = '\0';
-    } else { // Hz for SSB
-        if (stepValue >= 1000) {
-            convertToChar(buf, stepValue / 1000, 3);
-            buf[3] = 'k';
-            buf[4] = '\0';
-        } else {
-            convertToChar(buf, stepValue, 4);
-        }
-    }
 }
 
 // most state is already in the band list
@@ -123,7 +103,6 @@ static bool checkStopSeeking() {
 // see: https://github.com/goshante/ats20_ats_ex/issues/42#issuecomment-3015265184
 static inline bool performBfoRolloverWithBandCheck(uint16_t* freq, int32_t* bfo) {
     const int32_t BFOMax = 13000;
-    Band& current_band = g_bandList[g_bandIndex];
 
     // clamp bfo to the maximum allowed range first for stability
     if (*bfo > BFOMax) *bfo = BFOMax;
@@ -132,18 +111,16 @@ static inline bool performBfoRolloverWithBandCheck(uint16_t* freq, int32_t* bfo)
     // then perform the reliable rollover with integrated "emergency brake" checks
     while (*bfo >= 1000) {
         (*freq)++;
-        if (*freq >= current_band.maximumFreq) {
-            bandSwitch(true);
-            return true;
+        if (*freq >= g_bandList[g_bandIndex].maximumFreq) {
+            bandSwitch(true, false);
         }
         *bfo -= 1000;
     }
 
     while (*bfo <= -1000) {
         (*freq)--;
-        if (*freq < current_band.minimumFreq) {
-            bandSwitch(false);
-            return true;
+        if (*freq < g_bandList[g_bandIndex].minimumFreq) {
+            bandSwitch(false, false);
         }
         *bfo += 1000;
     }
@@ -325,11 +302,13 @@ static void saveAllReceiverInformation(bool full_save = true) {
 // for loading all receiver state from EEPROM
 static void readAllReceiverInformation() {
     if (EEPROM.read(EEPROM_APP_ID_ADDRESS) != EEPROM_APP_ID || EEPROM.read(EEPROM_VERSION_ADDRESS) != APP_VERSION) {
+#if ENABLE_EEPROM_RESET_MSG
         oled.clear();
         oled.setFont(DEFAULT_FONT);
         oled.setCursor(0, 2);
         oled.print(F("  EEPROM RESET"));
         delay(2000);
+#endif
         initializeDefaultModeSettings();
         g_totalFavorites = 0;
         saveAllReceiverInformation(true);
@@ -378,27 +357,43 @@ uint8_t g_stableBatteryPercent = 100;
 static uint8_t g_percentChangeCounter = 0;
 static int16_t g_averageADC = -1;
 
+// saving FLASH memory (1-byte offset)
+struct BatteryPointCompressed {
+    uint8_t voltage_offset;
+    uint8_t percent;
+};
+
+// keep original voltage table from Goshante firmware
+static const BatteryPointCompressed battery_table[] PROGMEM = {
+    {155, 100}, {132, 95}, {116, 90}, {93, 80}, {85, 60},
+    {70, 40},   {54, 20},  {15, 15},  {8, 5},   {0, 0}
+};
+
 // Calculates the "raw" battery percentage from an ADC value using interpolation.
 // It uses the original lookup table for consistency.
 static uint8_t calculateRawPercent(uint16_t adc_value) {
-    constexpr const uint8_t rows = 10;
-    // Original voltage table from Goshante's firmware.
-    static const PROGMEM uint16_t voltages[rows] = { 643, 620, 604, 581, 573, 558, 542, 503, 496, 488 };
-    static const PROGMEM uint8_t percents[rows] = { 100, 95, 90, 80, 60, 40, 20, 15, 5, 0 };
+    constexpr uint16_t base_voltage = 488;
 
-    if (adc_value >= pgm_read_word(&voltages[0])) return 100;
-    if (adc_value <= pgm_read_word(&voltages[rows - 1])) return 0;
+    // hardcode min/max value for saving bytess
+    if (adc_value >= 643) return 100;
+    if (adc_value <= base_voltage) return 0;
 
+    constexpr uint8_t rows = sizeof(battery_table) / sizeof(battery_table[0]);
     for (uint8_t i = 0; i < rows - 1; ++i) {
-        uint16_t v_upper = pgm_read_word(&voltages[i]);
-        uint16_t v_lower = pgm_read_word(&voltages[i + 1]);
-        if (adc_value >= v_lower && adc_value <= v_upper) {
-            uint8_t p_upper = pgm_read_byte(&percents[i]);
-            uint8_t p_lower = pgm_read_byte(&percents[i + 1]);
-            return p_lower + ((uint32_t)(adc_value - v_lower) * (p_upper - p_lower)) / (v_upper - v_lower);
+        uint16_t v_lower = (uint16_t)pgm_read_byte(&battery_table[i + 1].voltage_offset) + base_voltage;
+        if (adc_value > v_lower) {
+            uint16_t v_upper = (uint16_t)pgm_read_byte(&battery_table[i].voltage_offset) + base_voltage;
+            uint8_t p_lower = pgm_read_byte(&battery_table[i + 1].percent);
+            uint8_t p_upper = pgm_read_byte(&battery_table[i].percent);
+            return p_lower + (uint16_t)(adc_value - v_lower) * (p_upper - p_lower) / (v_upper - v_lower);
         }
     }
     return 0;
+}
+
+static void applyPercentUpdate(uint8_t newPercent) {
+    g_stableBatteryPercent = newPercent;
+    g_percentChangeCounter = 0;
 }
 
 // Updates the internal stable battery percentage. Applies an IIR filter to ADC
@@ -407,31 +402,31 @@ static void updateStablePercent() {
     if (!g_voltagePinConnnected) return;
 
     int sample = analogRead(BATTERY_VOLTAGE_PIN);
-    if (g_averageADC == -1) {
+
+    if (g_averageADC == -1)
         g_averageADC = sample > 0 ? sample : 550;
-    }
+
+    // simple IIR filter (3/4 old, 1/4 new) - stabilize ADC reading
     g_averageADC = (3 * g_averageADC + sample) >> 2;
 
     uint8_t currentRawPercent = calculateRawPercent(g_averageADC);
 
-    // Hysteresis threshold to prevent flicker between adjacent percentage values.
     const uint8_t PERCENT_HYSTERESIS_THRESHOLD = 2;
     const uint8_t CONFIRMATION_COUNT = 5;
 
     int8_t diff = currentRawPercent - g_stableBatteryPercent;
 
-    // сheck if the change is significant (outside hysteresis threshold)
-    if ((diff > 0 ? diff : -diff) > PERCENT_HYSTERESIS_THRESHOLD) {
-        g_stableBatteryPercent = currentRawPercent;
+    // hysteresis logic
+    if (diff == 0) {
         g_percentChangeCounter = 0;
-
-    } else if (diff != 0) {
-        if (++g_percentChangeCounter >= CONFIRMATION_COUNT) {
-            g_stableBatteryPercent = currentRawPercent;
-            g_percentChangeCounter = 0;
-        }
+    } else if (diff > PERCENT_HYSTERESIS_THRESHOLD || diff < -PERCENT_HYSTERESIS_THRESHOLD) {
+        // significant change = update immediately
+        applyPercentUpdate(currentRawPercent);
     } else {
-        g_percentChangeCounter = 0;
+        // for small changes requires multiple confirmations, avoid flicker
+        if (++g_percentChangeCounter >= CONFIRMATION_COUNT) {
+            applyPercentUpdate(currentRawPercent);
+        }
     }
 }
 
@@ -718,7 +713,7 @@ void showSplashScreen() {
     oled.setFont(DEFAULT_FONT);
 
     oled.setCursor(26, 1);
-    oled.print(F("ATS-20+ v4.6"));
+    oled.print(F("ATS-20+ v4.7"));
 
     oled.setCursor(32, 3);
     oled.print(F("Mod No RDS"));
@@ -733,74 +728,94 @@ void showSplashScreen() {
     oled.clear();
 }
 
-//Draw frequency.
-static void showFrequency(bool cleanDisplay = false) {
-    if (g_settingsActive)
-        return;
-
-    char freqDisplay[7];
-    static uint8_t prevLen = 0;
-    uint16_t khzBFO, tailBFO;
-    bool ssbMode = isSSB();
-    uint8_t off = (ssbMode ? -5 : 4) + 8;
-    const char* unit = "kHz";
-    uint8_t displayMode = 0;
-    BandType currentBandType = g_bandList[g_bandIndex].bandType;
+// display mode, dot position, units based on current band
+static void prepareDisplayConfig(bool ssbMode, BandType band, uint8_t& outMode, uint8_t& outDotPos, const char*& outUnit) {
+    outMode = 0;
+    outDotPos = 0;
+    outUnit = "kHz";
 
     if (ssbMode) {
-        displayMode = 2;
-    } else if (currentBandType == FM_BAND_TYPE) {
-        displayMode = 1;
+        outMode = 2;
+    } else if (band == FM_BAND_TYPE) {
+        outMode = 1;
+        outDotPos = 3;
+        outUnit = "MHz";
+    } else if (band == SW_BAND_TYPE && g_Settings[SettingsIndex::SWUnits].param == 1) {
+        outDotPos = 2;
+        outUnit = "MHz";
     }
+}
 
-    switch (displayMode) {
-    case 2: // SSB
+// format main part frequency string and get SSB value
+static void prepareMainFreq(uint8_t displayMode, char* freqDisplay, uint16_t& khzBFO, uint16_t& tailBFO, uint8_t dotPos) {
+    if (displayMode == 2) { // SSB
         splitFreq(khzBFO, tailBFO);
         convertToChar(freqDisplay, khzBFO, ilen(khzBFO), 0, '.', ' ');
-        break;
-
-    case 1: // FM
-        convertToChar(freqDisplay, g_currentFrequency, 5, 3, '.', '/');
-        unit = "MHz";
-        break;
-
-    case 0: // AM-like modes SW, MW, LW
-    default:
-        uint8_t dot_pos = 0;
-
-        // applies MHz format ONLY to the SW band
-        // MW/LW, this check is always false, leaving dot_pos at 0
-        if (currentBandType == SW_BAND_TYPE && g_Settings[SettingsIndex::SWUnits].param == 1) {
-            dot_pos = 2;
-            unit = "MHz";
-        }
-        convertToChar(freqDisplay, g_currentFrequency, 5, dot_pos, '.', '/');
-        break;
+    } else { // AM / FM
+        convertToChar(freqDisplay, g_currentFrequency, 5, dotPos, '.', '/');
     }
+}
 
-    uint8_t len = ssbMode ? ilen(khzBFO) : ilen(g_currentFrequency);
-
+// clean background when frequency length changes
+static void renderClearOrBlink(bool cleanDisplay, bool ssbMode, uint8_t len, uint8_t prevLen) {
     if (cleanDisplay) {
         oledPrint("/////////", 0, 3, FONT14X24SEVENSEG);
-    } else if (ssbMode && len > prevLen && len == 5)
+    } else if (ssbMode && (len == 5) && (prevLen < 5)) {
         oledPrint("   ", 102, 4, DEFAULT_FONT);
+    }
+}
+
+// SSB tail with save flash mem
+static void renderSSBTail(bool ssbMode, uint16_t tailBFO, uint8_t len, uint8_t prevLen) {
+    if (!ssbMode) return;
+    char buf[5];
+    uint8_t n = 0;
+    buf[n++] = '.';
+    buf[n++] = '0' + (tailBFO / 10);
+    buf[n++] = '0' + (tailBFO % 10);
+    if (len < prevLen) {
+        buf[n++] = '/';
+    }
+    oled.write(buf, n);
+}
+
+// renders measurement units (kHz/MHz)
+static void renderUnit(bool ssbMode, uint8_t len, const char* unit) {
+    if (g_Settings[SettingsIndex::UnitsSwitch].param == 1 && (!ssbMode || len < 5)) {
+        oledPrint(unit, 102, 4, DEFAULT_FONT);
+    }
+}
+
+//Draw frequency on display.
+static void showFrequency(bool cleanDisplay = false) {
+    if (g_settingsActive) return;
+
+    // previous frequency length for update
+    static uint8_t prevLen = 0;
+
+    char     freqDisplay[7];
+    uint16_t khzBFO = 0, tailBFO = 0;
+    bool     ssbMode = isSSB();
+    BandType band = g_bandList[g_bandIndex].bandType;
+
+    // offset for text alignment depending on mode
+    uint8_t  off = (ssbMode ? 3 : 12);
+
+    uint8_t displayMode, dotPos;
+    const char* unit;
+    prepareDisplayConfig(ssbMode, band, displayMode, dotPos, unit);
+    prepareMainFreq(displayMode, freqDisplay, khzBFO, tailBFO, dotPos);
+
+    uint8_t len = ssbMode ? ilen(khzBFO) : ilen(g_currentFrequency);
+    renderClearOrBlink(cleanDisplay, ssbMode, len, prevLen);
 
     oledPrint(freqDisplay, off, 3, FONT14X24SEVENSEG);
 
-    if (ssbMode) {
-        oled.print('.');
-        if (tailBFO < 10)
-            oled.print('0');
-        oled.print(tailBFO);
-
-        if (len != prevLen && len < prevLen)
-            oledPrint("/");
-    }
-
-    if (g_Settings[SettingsIndex::UnitsSwitch].param == 1 && (!ssbMode || len < 5))
-        oledPrint(unit, 102, 4, DEFAULT_FONT);
+    renderSSBTail(ssbMode, tailBFO, len, prevLen);
+    renderUnit(ssbMode, len, unit);
 
     prevLen = len;
+    oledSetFont(DEFAULT_FONT);
 }
 
 //This function is called by station seek logic
@@ -839,17 +854,16 @@ static void showModulation() {
 static void showVolume() {
     if (g_settingsActive) return;
 
-    char buf[4];
-    buf[0] = '|';
+    char buf[3];
 
     if (g_muteVolume == 0) {
-        convertToChar(buf + 1, g_si4735.getCurrentVolume(), 2, 0, 0);
+        convertToChar(buf, g_si4735.getCurrentVolume(), 2, 0, 0);
     } else {
-        buf[1] = ' ';
-        buf[2] = 'M';
-        buf[3] = '\0';
+        buf[0] = ' ';
+        buf[1] = 'M';
+        buf[2] = '\0';
     }
-    oledPrint(buf, 104, 0, DEFAULT_FONT, g_activeCommand == CMD_VOLUME);
+    oledPrint(buf, 108, 0, DEFAULT_FONT, g_activeCommand == CMD_VOLUME);
 }
 
 // Displays the current signal quality value (RSSI)
@@ -907,19 +921,23 @@ static inline void getStepInfo(int& value, bool& isKhz) {
 
 // display the step on the screen
 static void showStep() {
-    int stepValue;
-    bool isKhz;
-    getStepInfo(stepValue, isKhz);
-
-    char buf[5];
-    formatStepValue(buf, stepValue, isKhz);
-
-    oledSetFont(DEFAULT_FONT);
     bool invert = (g_activeCommand == CMD_STEP);
     if (invert) oled.invertOutput(true);
 
+    oledSetFont(DEFAULT_FONT);
+
     oled.setCursor(34, 0);
-    oled.print("Step:");
+    oled.print(F("Step:"));
+
+    const Band& current_band = g_bandList[g_bandIndex];
+    uint8_t index = (g_currentMode == FM)
+        ? (4 + current_band.stepIdxFM)
+        : (isSSB() ? (SSB_STEP_OFFSET + current_band.stepIdxSSB)
+            : current_band.stepIdxAM);
+
+    char buf[5];
+    strcpy_P(buf, step_lookup_table[index]);
+
     oled.print(buf);
 
     if (invert) oled.invertOutput(false);
@@ -1105,11 +1123,11 @@ static void showSettings() {
 }
 
 // ------------------------------------------
-// --- State & Band Management Subsystem --==
+// --- State & Band Management Subsystem ----
 // ------------------------------------------
 
 // switches band index and immediately applies the new band's default state
-static void bandSwitch(bool up) {
+static void bandSwitch(bool up, bool loadStoredFreq = true) {
     syncActiveStateToBand(); // Save current frequency to RAM
     markStateAsDirty();
 
@@ -1122,7 +1140,8 @@ static void bandSwitch(bool up) {
         g_bandIndex = (g_bandIndex == 0) ? (g_bandCount - 1) : (g_bandIndex - 1);
     }
 
-    loadActiveStateFromBand();
+    // load stored frequency ONLY if requested (for manual band switching BAND+)
+    if (loadStoredFreq) loadActiveStateFromBand();
 
     g_lastSavedFrequency = g_currentFrequency;
 
@@ -1193,14 +1212,11 @@ static void doFrequencyTune() {
     temp_freq += (int16_t)step * g_encoderCount;
     g_encoderCount = 0;
 
-    // calculate then check
-    if (temp_freq > current_band.maximumFreq) {
-        bandSwitch(true);
-        return;
-    }
-    if (temp_freq < current_band.minimumFreq) {
-        bandSwitch(false);
-        return;
+    if (temp_freq >= current_band.maximumFreq) {
+        bandSwitch(true, false);
+        // snap-to-grid logic below will use the OLD step for one turn to compromise 
+    } else if (temp_freq < current_band.minimumFreq) {
+        bandSwitch(false, false);
     }
 
     // if safe, commit the new frequency and align it to the grid (snap)
@@ -1235,10 +1251,8 @@ static void doFrequencyTuneSSB() {
     temp_bfo += (int32_t)g_tabStep[SSB_STEP_OFFSET + g_bandList[g_bandIndex].stepIdxSSB] * g_encoderCount;
     g_encoderCount = 0;
 
-    if (performBfoRolloverWithBandCheck(&temp_freq, &temp_bfo)) {
-        return;
-    }
-
+    if (performBfoRolloverWithBandCheck(&temp_freq, &temp_bfo)) return;
+    
     g_currentFrequency = temp_freq;
     g_currentBFO = temp_bfo;
 
@@ -1376,7 +1390,11 @@ static void doStep(int8_t v) {
     } else if (isSSB()) {
         doSwitchLogic(current_band.stepIdxSSB, 0, SSB_STEPS_COUNT - 1, v);
     } else { // AM
-        const uint8_t max_am_idx = (current_band.bandType == LW_BAND_TYPE || current_band.bandType == MW_BAND_TYPE) ? 3 : (AM_STEPS_COUNT - 1);
+        // LW/MW maximum step index is limited
+        // in SW full range of steps
+        bool is_lw_mw = (current_band.bandType == LW_BAND_TYPE || current_band.bandType == MW_BAND_TYPE);
+        const uint8_t max_am_idx = is_lw_mw ? 3 : (AM_STEPS_COUNT - 1);
+
         doSwitchLogic(current_band.stepIdxAM, 0, max_am_idx, v);
         g_si4735.setFrequencyStep(g_tabStep[current_band.stepIdxAM]);
         g_si4735.setSeekAmSpacing(g_tabStep[current_band.stepIdxAM]);
@@ -1526,6 +1544,7 @@ void doScanSwitch(int8_t v) {
 void doCWSwitch(int8_t v) {
     constexpr int16_t COMPENSATION_KHZ = (2 * CW_PITCH_OFFSET_HZ) / 1000; // 1 kHz if CW_PITCH_OFFSET_HZ = 500
     const int8_t old_param = g_Settings[CWSwitch].param;
+    uint16_t original_freq = g_currentFrequency;
 
     toggleSetting(CWSwitch);
     if (g_currentMode != CW) return;
@@ -1536,6 +1555,7 @@ void doCWSwitch(int8_t v) {
     g_currentFrequency += actual_direction * COMPENSATION_KHZ;
     g_si4735.setFrequency(g_currentFrequency);
     updateBFO();
+    g_currentFrequency = original_freq;
     showFrequency(true);
 }
 

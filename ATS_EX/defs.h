@@ -68,6 +68,9 @@ constexpr auto STEREO_STATUS_BIT = 0;
 #define ENCODER_BUTTON   14
 
 // For test only (don`t edit)
-#define ENABLE_SPLASH_SCREEN 1
+
+// Display options
+#define ENABLE_SPLASH_SCREEN 1       // Set to 1 to show splash screen, 0 to disable
+#define ENABLE_EEPROM_RESET_MSG 1    // Set to 1 to show "EEPROM RESET" message, 0 to disable
 
 #define buttonEvent                NULL

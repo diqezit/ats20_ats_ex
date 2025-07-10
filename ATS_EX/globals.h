@@ -5,6 +5,7 @@
 // =================================================================================================
 
 void applyBandConfiguration(bool extraSSBReset = false);
+void bandSwitch(bool up, bool loadStoredFreq = true);
 void doAttenuation(int8_t v);
 void doSoftMute(int8_t v);
 void doBrightness(int8_t v);
@@ -375,6 +376,15 @@ const uint8_t g_bwAMIdx[] = { 4, 5, 3, 6, 2, 1, 0 };
 // -------------------------------------------------------------------------------------------------
 // Tuning Step Tables
 // -------------------------------------------------------------------------------------------------
+
+// step strings padded to 4 chars to reduce mem usage
+static const char step_lookup_table[][5] PROGMEM = {
+    // AM Steps (indices 0-6)
+    "1kHz", "5kHz", "9kHz", "10k ", "50k ", "100k", "1MHz",
+    // SSB Steps (indices 7-15)
+    "10Hz", "25Hz", "50Hz", "100H", "500H", "1kHz", "5kHz", "9kHz", "10k "
+};
+
 // Array with tuning steps. The structure is defined like - AM (in kHz), then SSB (in Hz)
 int g_tabStep[] =
 {
