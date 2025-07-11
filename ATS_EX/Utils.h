@@ -123,3 +123,62 @@ static void toggleSetting(uint8_t settingIndex) {
     g_Settings[settingIndex].param = 1 - g_Settings[settingIndex].param;
 }
 
+
+#if DEBUG_MODE
+
+
+// --------------------------------------------------------
+// ------- Lighweight debbuger instead SerialPrint --------
+// --------------------------------------------------------
+
+
+// UART (baud 9600)
+void initDebugUART() {
+    UBRR0H = 0;
+    UBRR0L = 103;
+    UCSR0A = 0;
+    UCSR0B = (1 << TXEN0);
+    UCSR0C = (1 << UCSZ01) | (1 << UCSZ00);
+}
+
+// PROGMEM strings oup for debug - for debug use - debugPrint_P(PSTR("Hello World!"));
+void debugPrint_P(const char* str) {
+    char c;
+    while ((c = pgm_read_byte(str++))) {
+        while (!(UCSR0A & (1 << UDRE0)));
+        UDR0 = c;
+    }
+}
+
+// for char buffer (fix garbage in names)
+void debugPrintBuf(const char* buf, uint8_t len) {
+    for (uint8_t i = 0; i < len; i++) {
+        while (!(UCSR0A & (1 << UDRE0)));
+        UDR0 = buf[i];
+    }
+}
+
+// uint16_t num to UART
+void debugPrintNum(int16_t num) {
+    if (num == 0) {
+        debugPrint_P(PSTR("0"));
+        return;
+    }
+    bool negative = (num < 0);
+    if (negative) {
+        while (!(UCSR0A & (1 << UDRE0))); UDR0 = '-';
+        num = -num;
+    }
+    char buf[6];
+    uint8_t i = 0;
+    while (num > 0) {
+        buf[i++] = '0' + (num % 10);
+        num /= 10;
+    }
+    while (i--) {
+        while (!(UCSR0A & (1 << UDRE0))); UDR0 = buf[i];
+    }
+}
+
+#endif
+

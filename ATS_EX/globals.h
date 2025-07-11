@@ -37,7 +37,11 @@ void updateStereoIndicator();
 
 const uint8_t g_SettingsMaxPages = 3;
 const int16_t CW_PITCH_OFFSET_HZ = 500;     // 500 Hz pitch for CW tone generation
+
+#if ENABLE_FM_FAV
 const uint8_t MAX_FM_FAVORITES = 10;
+#endif
+
 const uint8_t g_bandCount = 28;             // Number of bands for seamless coverage
 const uint8_t g_lastBand = g_bandCount - 1;
 
@@ -156,9 +160,11 @@ struct Band {
     int8_t bwIdxFM;
 };
 
+#if ENABLE_FM_FAV
 struct FMFavorite {
     uint16_t frequency;
 };
+#endif
 
 // Defines how a setting's parameter is converted into a text index
 struct SwitchMapEntry {
@@ -178,7 +184,7 @@ bool g_voltagePinConnnected = false;
 bool g_ssbLoaded = false;
 bool g_stereoStatus = false;
 bool g_displayOn = true;
-bool g_seekStop = false;
+volatile bool g_seekStop = false;    // violatile important here!
 uint32_t g_lastAdjustmentTime = 0;
 uint32_t g_lastUserActivityTime = 0; // time of the last user frequency change
 bool g_stateIsDirty = false;         // indicate if the state needs saving on idle
@@ -192,10 +198,13 @@ bool g_settingsDirty = false;
 int8_t g_SettingSelected = 0;
 int8_t g_SettingsPage = 1;
 bool g_SettingEditing = false;
+
+#if ENABLE_FM_FAV
 bool g_favoritesActive = false;
 bool g_favoritesDirty = false;
 uint8_t g_favoriteSelected = 0;
 uint8_t g_totalFavorites = 0;
+#endif
 
 // -------------------------------------------------------------------------------------------------
 // Radio State
@@ -219,6 +228,7 @@ uint8_t g_seekDirection = 1;
 //Special logic for fast and responsive frequency surfing
 uint32_t g_lastFreqChange = 0;
 bool g_processFreqChange = 0;
+uint32_t g_lastSetFreqTime = 0;
 
 // -------------------------------------------------------------------------------------------------
 // Encoder & Buttons
@@ -315,6 +325,11 @@ const PROGMEM SwitchMapEntry switch_setting_map[] = {
 // -------------------------------------------------------------------------------------------------
 // Band Definitions
 // -------------------------------------------------------------------------------------------------
+
+// SW sub band limits for seek
+constexpr uint16_t SW_MIN_FREQ = 1710;
+constexpr uint16_t SW_MAX_FREQ = 30000;
+
 // we use an index to track the current band. band index 1 is mw.
 int8_t g_bandIndex = 1;
 
@@ -415,4 +430,6 @@ const char PROGMEM paramTexts[][4] = {
 
 const char g_bandModeDesc[][4] = { "AM ", "LSB", "USB", "CW ", "FM " };
 
+#if ENABLE_FM_FAV
 FMFavorite g_fmFavorites[MAX_FM_FAVORITES];
+#endif

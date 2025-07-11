@@ -35,6 +35,8 @@ constexpr auto ADJUSTMENT_ACTIVE_TIMEOUT = 3000;
 #define VOLUME_DELAY              1 
 constexpr auto MIN_ELAPSED_TIME = 100;
 constexpr auto MIN_ELAPSED_RSSI_TIME = 150;
+constexpr auto SEEK_TIME = 65535UL;         // 65535 ms = 65.535 seconds
+constexpr auto AM_STEP_SPACING = 5;         // AM step spacing in kHz (1, 5, 9, 10) only supported values. 5 kHz is optimal
 
 // Display
 #define DEFAULT_FONT FONT8X16POB
@@ -51,6 +53,20 @@ constexpr auto MIN_ELAPSED_RSSI_TIME = 150;
 #define AMP_BIT   3
 
 constexpr auto STEREO_STATUS_BIT = 0;
+
+// delay (in ms) to wait after the encoder stops turning before sending
+// final frequency to the chip
+// shorter delay feels more responsive but can increase I2C traffic if tuning slowly
+constexpr auto FREQ_UPDATE_DELAY_MS = 30UL;
+
+// if the frequency change (delta) since chip update exceeds this threshold in kHz,
+// send the update immediately without waiting for the delay
+// This prevents the receiver from "lagging" behind during fast tuning
+constexpr auto FREQ_FORCE_UPDATE_THRESHOLD_KHZ = 50;
+
+// protect the I2C bus from being flooded with commands, this sets the absolute minimum
+// time that must pass between any two setFrequency calls ( safety rate limit)
+constexpr auto MIN_SETFREQ_INTERVAL_MS = 25UL;
 
 // Encoder Pins
 #define ENCODER_PIN_A 2
@@ -70,8 +86,19 @@ constexpr auto STEREO_STATUS_BIT = 0;
 // For test only (don`t edit)
 
 // Display options
-#define ENABLE_SPLASH_SCREEN 1       // Set to 1 to show splash screen, 0 to disable
-#define ENABLE_EEPROM_RESET_MSG 1    // Set to 1 to show "EEPROM RESET" message, 0 to disable
-#define ANIMATE_SPLASH 0             // Set to 1 to animate splash screen, 0 to disable
+#define ENABLE_SPLASH_SCREEN 0              // Set to 1 to show splash screen, 0 to disable
+#define ENABLE_EEPROM_RESET_MSG 1           // Set to 1 to show "EEPROM RESET" message, 0 to disable
+#define ANIMATE_SPLASH 0                    // Set to 1 to animate splash screen, 0 to disable
+
+// IC options
+#define ENABLE_FM_FAV 1                     // Set to 1 to use FM favorites, 0 to disable (must disable some other features to compile & work)
+#define DISABLE_FM 0                        // not implemented yet
+
+#define ENABLE_ADVANCED_BATTERY_LOGIC 0     // Set to 1 to enable advanced battery logic, 0 to disable (must disable some other features to compile & work)
+#define ENABLE_BATTERY_MONITOR 1            // Set to 1 to enable battery monitoring, 0 to disable
+
+// Debugging options
+#define DEBUG_MODE 0                        // Set to 1 to enable debug mode, 0 to disable, (This use serial speed 9600)
+
 
 #define buttonEvent                NULL
