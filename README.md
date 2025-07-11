@@ -3,7 +3,7 @@
 This repository is a fork of the original `goshante/ats20_ats_ex` firmware, dedicated to custom modifications, bug fixes, and new features. All discussion regarding these new versions should take place here.
 
 Your feedback and suggestions are welcome!
-Please put star to raise the firmware higher up on the list, thanks :)
+**Please**, put star to raise the firmware higher up on the global list, **thanks :)**
 
 You can find the original project here: [goshante/ats20_ats_ex](https://github.com/goshante/ats20_ats_ex)
 
@@ -333,5 +333,32 @@ This version introduces the ability to save your favorite FM stations.
 
 ------------------------------------------------------------------------------------------------------------
 
+### **MOD_NO_RDS v4.8**
+
+*   [Optimized] `getModeContext` Function (-4 bytes):**
+    *   Removed redundant `|| g_currentMode == CW` condition, as it is already covered by `isSSB()` (CW is included in LSB/USB/CW range per enum Modulations).
+    *   Simplifies logic without changing behavior, reducing branching in assembly.
+
+*   [Optimized] `doCWSwitch` Function (-2 bytes):**
+    *   Removed dead condition `if (actual_direction == 0) return;`, as `toggleSetting` always changes the parameter (0->1 or 1->0), making `actual_direction` always +/-1.
+    *   Preserves seamless CW sideband switching and frequency compensation.
+
+*   [Added] Software Debounce to Encoder Handling:**
+    *   Introduced 10ms debounce in `updateEncoderState` to filter out rattling from cheap encoders, improving reliability without bloating ISR.
+    *   Uses `millis()` for timing, ensuring atomic access with `noInterrupts()`.
+
+*   [Optimized] Refactored `bandSwitch` with delta for DRY up/down logic, saving 8 bytes Flash while preserving wrap-around and config behavior.
+
+*   [Optimized] Removed redundant rounding in showFrequencySeek for FM seek, saving 36 bytes Flash while preserving frequency display and seek logic.
+
+*   [Improved] Enhanced `doFrequencyTune` and `performBfoRolloverWithBandCheck` for seamless continuous tuning across bands on encoder rotation, 
+	setting freq to new band edge without loading saved value.
+	
+*   [Optimized] Refactored `bandSwitch` with delta for DRY up/down logic, saving 8 bytes.
+*   [Optimized] Removed redundant rounding in `showFrequencySeek` for FM seek, saving 36 bytes.
+*   [Improved] Added `snapToNewStep` helper with ternary for continuous rollover without jump on up/down, fixing bug in SSB tuning
+
+
+------------------------------------------------------------------------------------------------------------
 
 Thank you all for your participation and feedback
