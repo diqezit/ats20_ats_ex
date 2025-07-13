@@ -87,7 +87,7 @@ constexpr auto MIN_SETFREQ_INTERVAL_MS = 25UL;
 
 // Display options
 #define ENABLE_SPLASH_SCREEN 0              // Set to 1 to show splash screen, 0 to disable
-#define ENABLE_EEPROM_RESET_MSG 1           // Set to 1 to show "EEPROM RESET" message, 0 to disable
+#define ENABLE_EEPROM_RESET_MSG 0           // Set to 1 to show "EEPROM RESET" message, 0 to disable
 #define ANIMATE_SPLASH 0                    // Set to 1 to animate splash screen, 0 to disable
 
 // IC options
