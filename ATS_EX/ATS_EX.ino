@@ -9,7 +9,7 @@
 // 02.2024
 // http://github.com/goshante
 // ----------------------------------------------------------------------
-// MOD_NO_RDS_v4.9 by diqezit
+// MOD_NO_RDS_v4.10 by diqezit
 // More info for this mod you can get below
 // https://github.com/diqezit/ats20_ats_ex
 // ----------------------------------------------------------------------
@@ -105,12 +105,17 @@ static bool checkStopSeeking() {
     return result;
 }
 
-// for snap to new step after switch 
+// snaps frequency to the step grid after a band switch
+// steps <1 kHz skipped to maintain smooth tuning
+// for larger steps calculates in kHz
 static inline void snapToNewStep(uint16_t* freq, bool isUp) {
     uint16_t new_step = g_tabStep[SSB_STEP_OFFSET + g_bandList[g_bandIndex].stepIdxSSB];
-    uint16_t remainder = *freq % new_step;
-    if (remainder != 0) {
-        *freq += isUp ? (new_step - remainder) : -remainder;
+    if (new_step < 1000) return;
+    uint16_t step_khz = new_step / 1000;
+    uint16_t remainder = *freq % step_khz;
+    if (remainder) {
+        if (isUp) *freq += step_khz - remainder;
+        else if (*freq >= remainder) *freq -= remainder;
     }
 }
 
@@ -565,7 +570,7 @@ static void configureFMMode() {
     g_si4735.setProperty(0x1404, 9);  // FM_SEEK_TUNE_RSSI_THRESHOLD (Default: 20)
 
     g_ssbLoaded = false;
-    g_si4735.setFifoCount(1);
+    // g_si4735.setFifoCount(1);
     g_si4735.setFmBandwidth(current_band.bwIdxFM);
     g_si4735.setFMDeEmphasis(
         (g_Settings[DeEmp].param == 0) ? 1 : 2);
@@ -743,7 +748,7 @@ void showSplashScreen() {
     oled.setFont(DEFAULT_FONT);
 
     oled.setCursor(26, 1);
-    oled.print(F("ATS-20+ v4.9"));
+    oled.print(F("ATS-20+ v4.10"));
 
     oled.setCursor(32, 3);
     oled.print(F("Mod No RDS"));

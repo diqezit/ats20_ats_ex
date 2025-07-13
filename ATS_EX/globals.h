@@ -4,6 +4,12 @@
 // Function Prototypes
 // =================================================================================================
 
+#if DEBUG_MODE
+void initDebugUART();
+void debugPrint_P(const char* str);
+void debugPrintNum(int16_t num);
+#endif
+
 void applyBandConfiguration(bool extraSSBReset = false);
 void bandSwitch(bool up, bool loadStoredFreq = true);
 void doAttenuation(int8_t v);
