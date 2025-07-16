@@ -1,57 +1,6 @@
 #pragma once
 
 // =================================================================================================
-// Function Prototypes
-// =================================================================================================
-
-#if DEBUG_MODE
-void initDebugUART();
-void debugPrint_P(const char* str);
-void debugPrintNum(int16_t num);
-#endif
-
-void applyBandConfiguration(bool extraSSBReset = false);
-void bandSwitch(bool up, bool loadStoredFreq = true);
-void doAttenuation(int8_t v);
-void doSoftMute(int8_t v);
-void doBrightness(int8_t v);
-void doSSBAVC(int8_t v = 0);
-void doAvc(int8_t v);
-void doSync(int8_t v = 0);
-void doDeEmp(int8_t v = 0);
-void doSWUnits(int8_t v = 0);
-void doSSBSoftMuteMode(int8_t v = 0);
-void doCutoffFilter(int8_t v);
-void doCPUSpeed(int8_t v = 0);
-void doBFOCalibration(int8_t v);
-void doUnitsSwitch(int8_t v = 0);
-void doScanSwitch(int8_t v = 0);
-void doRSSIAMOff(int8_t v = 0);
-void doCWSwitch(int8_t v = 0);
-void doAntennaCapacitor(int8_t v = 0);
-void showSplashScreen();
-void showStatus(bool cleanFreq = false);
-void updateAndShowBattery(bool forceShow);
-void updateStereoIndicator();
-
-// =================================================================================================
-// Macros & Constants
-// =================================================================================================
-
-// A macro to convert a 4-character string literal into a char array without a null terminator
-#define PACK_STR4(s) {s[0], s[1], s[2], s[3]}
-
-const uint8_t g_SettingsMaxPages = 3;
-const int16_t CW_PITCH_OFFSET_HZ = 500;     // 500 Hz pitch for CW tone generation
-
-#if ENABLE_FM_FAV
-const uint8_t MAX_FM_FAVORITES = 10;
-#endif
-
-const uint8_t g_bandCount = 28;             // Number of bands for seamless coverage
-const uint8_t g_lastBand = g_bandCount - 1;
-
-// =================================================================================================
 // Enumerations
 // =================================================================================================
 
@@ -127,6 +76,63 @@ enum Modulations : uint8_t {
     CW,
     FM
 };
+
+// =================================================================================================
+// Function Prototypes
+// =================================================================================================
+
+#if DEBUG_MODE
+void initDebugUART();
+void debugPrint_P(const char* str);
+void debugPrintNum(int16_t num);
+#endif
+
+void applyBandConfiguration(bool extraSSBReset = false);
+void bandSwitch(bool up, bool loadStoredFreq = true);
+void doAttenuation(int8_t v);
+void doSoftMute(int8_t v);
+void doBrightness(int8_t v);
+void doSSBAVC(int8_t v = 0);
+void doAvc(int8_t v);
+void doSync(int8_t v = 0);
+void doDeEmp(int8_t v = 0);
+void doSWUnits(int8_t v = 0);
+void doSSBSoftMuteMode(int8_t v = 0);
+void doCutoffFilter(int8_t v);
+void doCPUSpeed(int8_t v = 0);
+void doBFOCalibration(int8_t v);
+void doUnitsSwitch(int8_t v = 0);
+void doScanSwitch(int8_t v = 0);
+void doRSSIAMOff(int8_t v = 0);
+void doCWSwitch(int8_t v = 0);
+void doAntennaCapacitor(int8_t v = 0);
+void showSplashScreen();
+void showStatus(bool cleanFreq = false);
+void updateAndShowBattery(bool forceShow);
+void updateStereoIndicator();
+void applyBrightness();
+void loadSSBPatch();
+void showChargeOnDisplay();
+void showFrequencySeek(uint16_t freq);
+void resetCommandMode();
+void switchCommand(CommandMode mode);
+
+// =================================================================================================
+// Macros & Constants
+// =================================================================================================
+
+// A macro to convert a 4-character string literal into a char array without a null terminator
+#define PACK_STR4(s) {s[0], s[1], s[2], s[3]}
+
+const uint8_t g_SettingsMaxPages = 3;
+const int16_t CW_PITCH_OFFSET_HZ = 500;     // 500 Hz pitch for CW tone generation
+
+#if ENABLE_FM_FAV
+const uint8_t MAX_FM_FAVORITES = 10;
+#endif
+
+const uint8_t g_bandCount = 28;             // Number of bands for seamless coverage
+const uint8_t g_lastBand = g_bandCount - 1;
 
 // =================================================================================================
 // Data Structures
