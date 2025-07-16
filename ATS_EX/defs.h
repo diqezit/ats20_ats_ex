@@ -36,7 +36,8 @@ constexpr auto ADJUSTMENT_ACTIVE_TIMEOUT = 3000;
 constexpr auto MIN_ELAPSED_TIME = 100;
 constexpr auto MIN_ELAPSED_RSSI_TIME = 150;
 constexpr auto SEEK_TIME = 65535UL;         // 65535 ms = 65.535 seconds
-constexpr auto AM_STEP_SPACING = 5;         // AM step spacing in kHz (1, 5, 9, 10) only supported values. 5 kHz is optimal
+constexpr auto SW_STEP_SPACING = 5;         // SW step spacing in kHz (1, 5, 9, 10) only supported values. 5 kHz is optimal
+constexpr auto LW_MW_STEP_SPACING = 1;      // for LW/MW a small step of 1kHz for grid alignment
 
 // Display
 #define DEFAULT_FONT FONT8X16POB

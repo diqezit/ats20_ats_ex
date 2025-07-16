@@ -530,7 +530,9 @@ static inline uint16_t executeHardwareSeek() {
 
     if (g_bandList[g_bandIndex].bandType != FM_BAND_TYPE) {
         g_si4735.setSeekAmLimits(minLimit, maxLimit);
-        g_si4735.setSeekAmSpacing(AM_STEP_SPACING); // fixed small step for AM - check in defs.h
+        g_si4735.setSeekAmSpacing((g_bandList[g_bandIndex].bandType == MW_BAND_TYPE
+            || g_bandList[g_bandIndex].bandType == LW_BAND_TYPE)
+            ? LW_MW_STEP_SPACING : SW_STEP_SPACING);
     } else {
         g_si4735.setSeekFmLimits(minLimit, maxLimit);
         g_si4735.setSeekFmSpacing(10);
@@ -932,29 +934,6 @@ static void showChargeOnDisplay() {
     }
 }
 
-// computes the current step value and format
-static inline void getStepInfo(int& value, bool& isKhz) {
-    const Band& current_band = g_bandList[g_bandIndex];
-
-    if (g_currentMode == FM) {
-        // FM step logic (50k/100k/1M)
-        value = (g_tabStepFM[current_band.stepIdxFM] == 100)
-            ? 1000
-            : g_tabStepFM[current_band.stepIdxFM] * 10;
-
-        isKhz = true;
-    } else {
-        // isSSB() correctly includes LSB/USB/CW
-        const bool use_ssb_steps = isSSB();
-        const uint8_t index = use_ssb_steps
-            ? (SSB_STEP_OFFSET + current_band.stepIdxSSB)
-            : current_band.stepIdxAM;
-
-        value = g_tabStep[index];
-        isKhz = !use_ssb_steps;
-    }
-}
-
 // display the step on the screen
 static void showStep() {
     bool invert = (g_activeCommand == CMD_STEP);
@@ -1271,20 +1250,25 @@ static void doFrequencyTune() {
     markStateAsDirty();
 }
 
-// handles ssb tuning using the definitive "atomic step with integrated checks" architecture
-static void doFrequencyTuneSSB() {
-    if (g_encoderCount == 0) return;
+// prepare SSB tune by checking count and calculating temp values
+static inline bool SSBTune(uint16_t& temp_freq, int32_t& temp_bfo) {
+    if (g_encoderCount == 0) return false;
 
     // store frequency before changes to detect a rollover event
-    uint16_t old_freq = g_currentFrequency;
-    uint16_t temp_freq = g_currentFrequency;
+    uint16_t old_freq = g_currentFrequency;  // not used here, but to keep structure
+    temp_freq = g_currentFrequency;
 
     // 32-bit integer to prevent overflow during fast encoder spins
-    int32_t temp_bfo = g_currentBFO;
+    temp_bfo = g_currentBFO;
 
     temp_bfo += (int32_t)g_tabStep[SSB_STEP_OFFSET + g_bandList[g_bandIndex].stepIdxSSB] * g_encoderCount;
     g_encoderCount = 0;
 
+    return true;
+}
+
+// performs SSB rollover and chip update
+static inline void SSBRollover(uint16_t& temp_freq, int32_t& temp_bfo, uint16_t old_freq) {
     performBfoRolloverWithBandCheck(&temp_freq, &temp_bfo);
 
     g_currentFrequency = temp_freq;
@@ -1296,7 +1280,10 @@ static void doFrequencyTuneSSB() {
         g_si4735.setFrequency(g_currentFrequency);
         applyAgcSettings();
     }
+}
 
+// finalize SSB tune - updating BFO, state, and display
+static inline void SSBTuneFinalize() {
     updateBFO();
     syncActiveStateToBand();
     g_lastFreqChange = millis();
@@ -1305,17 +1292,33 @@ static void doFrequencyTuneSSB() {
     markStateAsDirty();
 }
 
-// handles the complex logic of cycling through AM, LSB, USB, and CW modes
-static inline void cycleAmSsbCwModes() {
+// handles ssb tuning using the definitive "atomic step with integrated checks" architecture
+static void doFrequencyTuneSSB() {
+    uint16_t temp_freq;
+    int32_t temp_bfo;
+    uint16_t old_freq = g_currentFrequency;
+
+    if (SSBTune(temp_freq, temp_bfo)) {
+        SSBRollover(temp_freq, temp_bfo, old_freq);
+        SSBTuneFinalize();
+    }
+}
+
+// prepare mode switch by storing bandwidth and handling initial state
+static inline void prepareModeSwitch(int8_t& bw) {
     Band& current_band = g_bandList[g_bandIndex];
     // store the bandwidth index to carry it over between am/ssb
-    int8_t bw = (g_currentMode == AM) ? current_band.bwIdxAM : current_band.bwIdxSSB;
+    bw = (g_currentMode == AM) ? current_band.bwIdxAM : current_band.bwIdxSSB;
     syncActiveStateToBand();
 
-    //saveAllReceiverInformation(false); // Save the state of the departing mode to EEPROM
     markStateAsDirty();
 
     if (g_currentMode == CW) safeAmpOff();
+}
+
+// mode cycling logic
+static inline void performModeCycle(int8_t bw) {
+    Band& current_band = g_bandList[g_bandIndex];
 
     // when switching from am to ssb for the first time, the patch must be loaded
     if (g_currentMode == AM) {
@@ -1331,10 +1334,21 @@ static inline void cycleAmSsbCwModes() {
         g_ssbLoaded = false;
         current_band.bwIdxAM = bw;
     }
+}
 
+// finalize mode switch by applying configuration and handling amp
+static inline void finalizeModeSwitch() {
     applyBandConfiguration();
 
     if (!g_ssbLoaded && g_currentMode == AM) safeAmpOn();
+}
+
+// handles the complex logic of cycling through AM, LSB, USB, and CW modes
+static inline void cycleAmSsbCwModes() {
+    int8_t bw;
+    prepareModeSwitch(bw);
+    performModeCycle(bw);
+    finalizeModeSwitch();
 }
 
 // ------------------------------------------
@@ -1967,23 +1981,28 @@ static void handleFavoritesMenu() {
 }
 #endif
 
+// Helper for navigating settings page
+static inline void navigateSettingsPage(int encoder_delta) {
+    int8_t prev = g_SettingSelected;
+    g_SettingSelected += encoder_delta;
+    uint8_t page = g_SettingsPage - 1;
+
+    // for flash savings
+    uint8_t a = (page * 6) + 5;
+    uint8_t b = SettingsIndex::SETTINGS_MAX - 1;
+    uint8_t max = (a < b) ? a : b;
+
+    if (g_SettingSelected < page * 6) g_SettingSelected = max;
+    else if (g_SettingSelected > max) g_SettingSelected = page * 6;
+
+    DrawSetting(prev, true);
+    DrawSetting(g_SettingSelected, true);
+}
+
 // handles encoder movement within the settings menu
 static inline void processEncoderForSettings(int encoder_delta) {
     if (!g_SettingEditing) {
-        int8_t prev = g_SettingSelected;
-        g_SettingSelected += encoder_delta;
-        uint8_t page = g_SettingsPage - 1;
-
-        // for flash savings
-        uint8_t a = (page * 6) + 5;
-        uint8_t b = SettingsIndex::SETTINGS_MAX - 1;
-        uint8_t max = (a < b) ? a : b;
-
-        if (g_SettingSelected < page * 6) g_SettingSelected = max;
-        else if (g_SettingSelected > max) g_SettingSelected = page * 6;
-
-        DrawSetting(prev, true);
-        DrawSetting(g_SettingSelected, true);
+        navigateSettingsPage(encoder_delta);
     } else {
         (*g_Settings[g_SettingSelected].manipulateCallback)(encoder_delta);
         DrawSetting(g_SettingSelected, false);
@@ -2046,19 +2065,8 @@ static bool processEncoderActions() {
 // --- Timed & Periodic Tasks ---------------
 // ------------------------------------------
 
-// Handles the delayed frequency update for AM/FM to prevent flooding the chip
-static void handleDelayedFrequencyUpdate() {
-    if (!g_processFreqChange || isSSB()) return;
-
-    uint32_t now = millis();
-
-    if (g_safeEncoderMovement) {
-        g_encoderCount = g_safeEncoderMovement;
-        g_safeEncoderMovement = 0;
-        doFrequencyTune();
-        return;
-    }
-
+// Helper for performing frequency update check
+static inline void performFrequencyUpdateCheck(uint32_t now) {
     // calculate delta from the LAST frequency sent to the chip!
     int32_t freq_delta = abs((int32_t)g_currentFrequency - g_previousFrequency);
 
@@ -2075,6 +2083,22 @@ static void handleDelayedFrequencyUpdate() {
         // sync previous frequency ONLY after a successful command send
         g_previousFrequency = g_currentFrequency;
     }
+}
+
+// Handles the delayed frequency update for AM/FM to prevent flooding the chip
+static void handleDelayedFrequencyUpdate() {
+    if (!g_processFreqChange || isSSB()) return;
+
+    uint32_t now = millis();
+
+    if (g_safeEncoderMovement) {
+        g_encoderCount = g_safeEncoderMovement;
+        g_safeEncoderMovement = 0;
+        doFrequencyTune();
+        return;
+    }
+
+    performFrequencyUpdateCheck(now);
 }
 
 static inline uint8_t getAmSignalValue() {
@@ -2184,11 +2208,11 @@ static void handlePeriodicTasks() {
 }
 
 // ------------------------------------------
-// ------- Main Logic (setup and loop) ------
+// ------------ Main Init Logic  ------------
 // ------------------------------------------
 
-//Initialize controller
-void setup() {
+// Helper to initialize hardware pins and battery check
+static inline void initHardwarePins() {
     safeAmpOff();
 
     DDRB |= (1 << DDB5);
@@ -2196,12 +2220,18 @@ void setup() {
     PORTD |= (1 << ENCODER_PIN_A) | (1 << ENCODER_PIN_B);
 
     g_voltagePinConnnected = analogRead(BATTERY_VOLTAGE_PIN) > 300;
+}
 
+// Helper to initialize OLED display
+static inline void initOLED() {
     oled.begin(128, 64, sizeof(tiny4koled_init_128x64br), tiny4koled_init_128x64br);
     oled.clear();
     oled.on();
     oled.setFont(DEFAULT_FONT);
+}
 
+// Helper to handle EEPROM reset on button press
+static inline void handleEEPROMReset() {
 #if DEBUG_MODE
     initDebugUART();
     debugPrint_P(PSTR("Debug started\n"));
@@ -2216,8 +2246,10 @@ void setup() {
         showSplashScreen();
 #endif
     }
+}
 
-    // The rest of the setup is common for both paths
+// Helper to initialize interrupts and Si4735 chip
+static inline void initSi4735() {
     attachInterrupt(digitalPinToInterrupt(ENCODER_PIN_A), rotaryEncoder, CHANGE);
     attachInterrupt(digitalPinToInterrupt(ENCODER_PIN_B), rotaryEncoder, CHANGE);
 
@@ -2226,14 +2258,20 @@ void setup() {
     g_si4735.setMaxSeekTime(SEEK_TIME);
 
     delay(500);
+}
 
+// Helper to load receiver configuration from EEPROM
+static inline void loadReceiverConfig() {
     // Load configuration from EEPROM or initialize with defaults
     readAllReceiverInformation();
 
 #if ENABLE_FM_FAV
     loadFMFav();
 #endif
+}
 
+// Helper to apply initial configuration and show status
+static inline void applyInitialConfiguration() {
     noInterrupts();
     CLKPR = 0x80;
     CLKPR = g_Settings[SettingsIndex::CPUSpeed].param;
@@ -2245,6 +2283,16 @@ void setup() {
 
     oled.clear();
     showStatus();
+}
+
+// Initialize controller
+void setup() {
+    initHardwarePins();
+    initOLED();
+    handleEEPROMReset();
+    initSi4735();
+    loadReceiverConfig();
+    applyInitialConfiguration();
 
     safeAmpOn();
     g_previousFrequency = g_currentFrequency;
