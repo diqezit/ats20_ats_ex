@@ -9,7 +9,7 @@
 // 02.2024
 // http://github.com/goshante
 // ----------------------------------------------------------------------
-// MOD_NO_RDS_v4.11 by diqezit
+// MOD_NO_RDS_v5.0 by diqezit
 // More info for this mod you can get below
 // https://github.com/diqezit/ats20_ats_ex
 // ----------------------------------------------------------------------
@@ -26,14 +26,15 @@
 
 #include <SI4735.h>
 #include <EEPROM.h>
-#include <Tiny4kOLED.h>
-#include <PixelOperatorBold.h>
+
+#include "CustomFonts.h"        // custom font data
+#include "GyverOLED.h"
+GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 
 #if DEBUG_MODE
 #include <avr/pgmspace.h>
 #endif
 
-#include "font14x24sevenSeg.h"
 #include "Rotary.h"
 #include "SimpleButton.h"
 #include "patch_ssb_compressed.h"
@@ -42,7 +43,7 @@
 #include "globals.h"
 #include "Utils.h"
 
-constexpr auto APP_VERSION = 49;
+constexpr auto APP_VERSION = 50;
 
 // ------------------------------------------
 // ------- Utility & Helper Functions -------
@@ -320,7 +321,6 @@ static void readAllReceiverInformation() {
     if (EEPROM.read(EEPROM_APP_ID_ADDRESS) != EEPROM_APP_ID || EEPROM.read(EEPROM_VERSION_ADDRESS) != APP_VERSION) {
 #if ENABLE_EEPROM_RESET_MSG
         oled.clear();
-        oled.setFont(DEFAULT_FONT);
         oled.setCursor(0, 2);
         oled.print(F("  EEPROM RESET"));
         delay(2000);
@@ -747,10 +747,9 @@ static void applyBrightness() {
 // Startup screen
 void showSplashScreen() {
     oled.clear();
-    oled.setFont(DEFAULT_FONT);
 
     oled.setCursor(26, 1);
-    oled.print(F("ATS-20+ v4.11"));
+    oled.print(F("ATS-20+ v5.0"));
 
     oled.setCursor(32, 3);
     oled.print(F("Mod No RDS"));
@@ -796,33 +795,54 @@ static void prepareMainFreq(uint8_t displayMode, char* freqDisplay, uint16_t& kh
 }
 
 // clean background when frequency length changes
-static void renderClearOrBlink(bool cleanDisplay, bool ssbMode, uint8_t len, uint8_t prevLen) {
+static void renderClearOrBlink(bool cleanDisplay, bool ssbMode, uint8_t len, uint8_t prevLen, uint8_t off, int pixelY) {
     if (cleanDisplay) {
-        oledPrint("/////////", 0, 3, FONT14X24SEVENSEG);
+        oled.clear(0, pixelY, 128, pixelY + 23);
     } else if (ssbMode && (len == 5) && (prevLen < 5)) {
-        oledPrint("   ", 102, 4, DEFAULT_FONT);
+        oled.setCursor(102, 4);
+        oled.print(F("   "));
+    } else if (len != prevLen) {
+        // Clear the entire possible frequency area to handle any length change (max ~86px for 5 digits + dot)
+        uint8_t maxW = 86;
+        oled.partialUpdate(off, pixelY, maxW, 24, NULL);
     }
 }
 
 // SSB tail with save flash mem
-static void renderSSBTail(bool ssbMode, uint16_t tailBFO, uint8_t len, uint8_t prevLen) {
+static void renderSSBTail(bool ssbMode, uint16_t tailBFO, uint8_t len, uint8_t prevLen, int mainEndX, int pixelY) {
     if (!ssbMode) return;
-    char buf[5];
-    uint8_t n = 0;
-    buf[n++] = '.';
-    buf[n++] = '0' + (tailBFO / 10);
-    buf[n++] = '0' + (tailBFO % 10);
-    if (len < prevLen) {
-        buf[n++] = '/';
-    }
-    oled.write(buf, n);
+
+    // shift for tight alignment to main freq
+    int curX = mainEndX - 2;  
+
+    oled.drawDigit('.', curX, pixelY);
+    curX += 6;  // width for '.' 
+    oled.drawDigit('0' + (tailBFO / 10), curX, pixelY);
+    curX += 16;  // width for digit
+    oled.drawDigit('0' + (tailBFO % 10), curX, pixelY);
+    curX += 16;
+
+    // If len < prevLen - clear space like a blank digit position
+    if (len < prevLen) oled.clear(curX, pixelY, curX + 13, pixelY + 23);  // clear area 14x24 
 }
 
 // renders measurement units (kHz/MHz)
 static void renderUnit(bool ssbMode, uint8_t len, const char* unit) {
     if (g_Settings[SettingsIndex::UnitsSwitch].param == 1 && (!ssbMode || len < 5)) {
-        oledPrint(unit, 102, 4, DEFAULT_FONT);
+        oled.setCursor(102, 4);
+        oled.print(unit);
     }
+}
+
+// Helper function to render each character in the frequency string using drawDigit
+static int renderFrequencyString(const char* freqDisplay, int startX, int pixelY) {
+    int curX = startX;
+    for (uint8_t i = 0; freqDisplay[i] != '\0'; i++) {
+        char ch = freqDisplay[i];
+        oled.drawDigit(ch, curX, pixelY);
+        curX += (ch == '.') ? 6 : 16;
+    }
+    return curX;
 }
 
 //Draw frequency on display.
@@ -846,15 +866,23 @@ static void showFrequency(bool cleanDisplay = false) {
     prepareMainFreq(displayMode, freqDisplay, khzBFO, tailBFO, dotPos);
 
     uint8_t len = ssbMode ? ilen(khzBFO) : ilen(g_currentFrequency);
-    renderClearOrBlink(cleanDisplay, ssbMode, len, prevLen);
 
-    oledPrint(freqDisplay, off, 3, FONT14X24SEVENSEG);
+    // Сrutch that prevents optimization by forcing the compiler to calculate the value in runtime
+    // Without it, the data is written with a shift, breaking pages. Don`t remove it!
+    // Violatile here adds + 80 bytes!
 
-    renderSSBTail(ssbMode, tailBFO, len, prevLen);
+    // Set cursor position for frequency display
+    int pixelY = 24 * 1;
+
+    renderClearOrBlink(cleanDisplay, ssbMode, len, prevLen, off, pixelY);
+
+    // Render main frequency and get its end X position
+    int mainEndX = renderFrequencyString(freqDisplay, off, pixelY);
+
+    renderSSBTail(ssbMode, tailBFO, len, prevLen, mainEndX, pixelY);
     renderUnit(ssbMode, len, unit);
 
     prevLen = len;
-    oledSetFont(DEFAULT_FONT);
 }
 
 //This function is called by station seek logic
@@ -873,13 +901,19 @@ static void showBandTag() {
     static char name_buffer[5];
     getBandName(name_buffer, g_bandIndex);
 
-    oledPrint(name_buffer, 0, 0, DEFAULT_FONT, invert);
+    oled.setCursor(0, 0);
+    if (invert) oled.invertText(true);
+    oled.print(name_buffer);
+    if (invert) oled.invertText(false);
 }
 
 //Draw current modulation (AM/LSB/USB/CW/FM) and stereo indicator
 static void showModulation() {
-    oledPrint(g_bandModeDesc[g_currentMode], 0, 6, DEFAULT_FONT,
-        g_activeCommand == CMD_BAND && g_bandList[g_bandIndex].bandType == FM_BAND_TYPE);
+    bool invert = (g_activeCommand == CMD_BAND && g_bandList[g_bandIndex].bandType == FM_BAND_TYPE);
+    oled.setCursor(0, 7);
+    if (invert) oled.invertText(true);
+    oled.print(g_bandModeDesc[g_currentMode]);
+    if (invert) oled.invertText(false);
 
     oled.print(' ');
     updateStereoIndicator();
@@ -899,7 +933,11 @@ static void showVolume() {
         buf[1] = 'M';
         buf[2] = '\0';
     }
-    oledPrint(buf, 108, 0, DEFAULT_FONT, g_activeCommand == CMD_VOLUME);
+    bool invert = (g_activeCommand == CMD_VOLUME);
+    oled.setCursor(114, 0);
+    if (invert) oled.invertText(true);
+    oled.print(buf);
+    if (invert) oled.invertText(false);
 }
 
 // Displays the current signal quality value (RSSI)
@@ -909,7 +947,7 @@ static void showSignalQuality() {
         || g_favoritesActive
 #endif
         ) return;
-    oled.setCursor(78, 6);
+    oled.setCursor(90, 7);
     if (g_signalQualityValue == 255) {
         oled.print("   ");
     } else {
@@ -923,8 +961,7 @@ static void showSignalQuality() {
 static void showChargeOnDisplay() {
     if (g_settingsActive) return;
 
-    oled.setCursor(102, 6);
-    oled.setFont(DEFAULT_FONT);
+    oled.setCursor(108, 7);
 
     if (g_stableBatteryPercent >= 100) {
         oled.print("100");
@@ -937,12 +974,10 @@ static void showChargeOnDisplay() {
 // display the step on the screen
 static void showStep() {
     bool invert = (g_activeCommand == CMD_STEP);
-    if (invert) oled.invertOutput(true);
-
-    oledSetFont(DEFAULT_FONT);
+    if (invert) oled.invertText(true);
 
     oled.setCursor(34, 0);
-    oled.print(F("Step:"));
+    oled.print(F("STEP: "));
 
     const Band& current_band = g_bandList[g_bandIndex];
     uint8_t index = (g_currentMode == FM)
@@ -951,13 +986,12 @@ static void showStep() {
             : current_band.stepIdxAM);
 
     oled.print((__FlashStringHelper*)step_lookup_table[index]);
-    if (invert) oled.invertOutput(false);
+    if (invert) oled.invertText(false);
 }
 
 // displays the current bandwidth
 static void showBandwidth() {
-    char bw[5];
-    bw[4] = '\0';
+    char bw[8];
     const Band& current_band = g_bandList[g_bandIndex];
     const uint8_t* table_ptr = nullptr;
     uint8_t index;
@@ -979,20 +1013,25 @@ static void showBandwidth() {
 
     if (table_ptr) {
         uint8_t offset = pgm_read_byte(&table_ptr[index]);
-        for (uint8_t i = 0; i < 4; i++) {
+        for (uint8_t i = 0; i < 7; i++) {
             bw[i] = pgm_read_byte(&bw_all_data[offset + i]);
         }
+        bw[7] = '\0';
     } else { // for CW
         bw[0] = '\0';
     }
-    oledPrint(bw, 40, 6, DEFAULT_FONT, g_activeCommand == CMD_BW);
+    bool invert = (g_activeCommand == CMD_BW);
+    if (invert) oled.invertText(true);
+    oled.setCursor(40, 7);
+    oled.print(bw);
+    if (invert) oled.invertText(false);
 }
 
 void updateStereoIndicator() {
     char c = (isSSB() && g_Settings[SettingsIndex::Sync].param == 1) ? 'S' :
         ((g_currentMode == FM && g_stereoStatus) ? '*' : ' ');
 
-    oled.setCursor(24, 6);
+    oled.setCursor(24, 7);
     oled.print(c);
 }
 
@@ -1039,9 +1078,10 @@ static inline void drawFavItem(uint8_t index, uint8_t y_pos, bool selected) {
 // Display favorites menu
 static void showFav() {
     oled.setCursor(0, 0);
-    oled.invertOutput(true);
-    oled.print(F("  FM FAVORITES  "));
-    oled.invertOutput(false);
+    oled.invertText(true);
+    oled.print(F("  FM FAVORITES"));
+    oled.print(F("         "));
+    oled.invertText(false);
 
     if (!g_totalFavorites) {
         oled.setCursor(30, 3);
@@ -1059,7 +1099,7 @@ static void showFav() {
 
     if (end == start + 1) {
         oled.setCursor(0, 4);
-        for (uint8_t j = 16; j; j--) oled.print(' ');
+        oled.print(F("                "));
     }
 
     oled.setCursor(0, 6);
@@ -1067,7 +1107,7 @@ static void showFav() {
     oled.print(g_favoriteSelected + 1);
     oled.print('/');
     oled.print(g_totalFavorites);
-    oled.print(F("DEL:BW"));
+    oled.print(F(" DEL:BW"));
 }
 #endif
 
@@ -1115,27 +1155,47 @@ static void SettingParamToUI(char* buf, uint8_t idx) {
 
 // Draw a single setting item in the settings menu
 static void DrawSetting(uint8_t idx, bool full) {
-    if (!g_settingsActive)
-        return;
+    if (!g_settingsActive) return;
 
     char buf[5];
+
+    // Calculate position in the page (0-5) for 2-column layout
     uint8_t place = idx - ((g_SettingsPage - 1) * 6);
-    uint8_t yOffset = place > 2 ? (place - 3) * 2 : place * 2;
-    uint8_t xOffset = place > 2 ? 60 : 0;
-    if (full)
-        oledPrint(g_Settings[idx].name, 5 + xOffset, 2 + yOffset, DEFAULT_FONT, idx == g_SettingSelected && !g_SettingEditing);
+
+    // Determine row (yOffset) and column (xOffset)
+    // - Items 0-2 in left column (x=0), 3-5 in right (x=60)
+    // - yOffset = row * 2 (line spacing)
+    uint8_t yOffset = (place > 2) ? (place - 3) * 2 : place * 2;
+    uint8_t xOffset = (place > 2) ? 60 : 0;
+
+    // Draw setting name if full redraw requested
+    if (full) {
+        bool invert = (idx == g_SettingSelected && !g_SettingEditing);
+        oled.setCursor(5 + xOffset, 2 + yOffset);
+        if (invert) oled.invertText(true);
+        oled.print(g_Settings[idx].name);
+        if (invert) oled.invertText(false);
+    }
+
+    // Convert param to string and draw value (aligned to name)
     SettingParamToUI(buf, idx);
-    oledPrint(buf, 35 + xOffset, 2 + yOffset, DEFAULT_FONT, idx == g_SettingSelected && g_SettingEditing);
+    bool invert = (idx == g_SettingSelected && g_SettingEditing);
+    oled.setCursor(35 + xOffset, 2 + yOffset);
+    if (invert) oled.invertText(true);
+    oled.print(buf);
+    if (invert) oled.invertText(false);
 }
 
 // Draw the title of the settings menu
 static void showSettingsTitle() {
-    oledPrint("   SETTINGS  ", 0, 0, DEFAULT_FONT, true);
-    oled.invertOutput(true);
-    oled.print(uint8_t(g_SettingsPage));
-    oled.print("/");
-    oled.print(uint8_t(g_SettingsMaxPages));
-    oled.invertOutput(false);
+    oled.setCursor(0, 0);
+    oled.invertText(true);
+    oled.print(F("  SETTINGS "));
+    oled.print((uint8_t)g_SettingsPage);
+    oled.print('/');
+    oled.print((uint8_t)g_SettingsMaxPages);
+    oled.print(F("         "));
+    oled.invertText(false);
 }
 
 // Draw the complete settings screen (all visible items)
@@ -1818,7 +1878,7 @@ static inline void handleAgcButton() {
 
     setCpuPrescaler(new_prescaler);
 
-    g_displayOn ? oled.on() : oled.off();
+    g_displayOn ? oled.setPower(true) : oled.setPower(false);
 }
 
 static inline void handleStepButton() {
@@ -1861,7 +1921,7 @@ static inline void handleModeButton() {
             oled.setCursor(45, 3);
             oled.print(F("SAVED"));
             delay(500);
-            showFrequency(true);
+            showStatus(true);
         } else
 #endif
             if (isSSB()) {
@@ -2224,10 +2284,10 @@ static inline void initHardwarePins() {
 
 // Helper to initialize OLED display
 static inline void initOLED() {
-    oled.begin(128, 64, sizeof(tiny4koled_init_128x64br), tiny4koled_init_128x64br);
+    oled.init();
     oled.clear();
-    oled.on();
-    oled.setFont(DEFAULT_FONT);
+    oled.setPower(true);
+    oled.setScale(1);
 }
 
 // Helper to handle EEPROM reset on button press

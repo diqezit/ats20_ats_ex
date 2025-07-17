@@ -290,7 +290,7 @@ SettingsItem g_Settings[] =
     { "SCN", 1,  SettingType::Switch,     doScanSwitch      },
     { "AVC", 90, SettingType::Num,        doAvc             },
     { "SM ", 0,  SettingType::Num,        doSoftMute        },
-    { "DE",  1,  SettingType::Switch,     doDeEmp           },
+    { "DE ", 1,  SettingType::Switch,     doDeEmp           },
     { "SCR", 4,  SettingType::Num,        doBrightness      },
 
     // Page 2
@@ -386,13 +386,13 @@ Band g_bandList[g_bandCount] = {
 // -------------------------------------------------------------------------------------------------
 // single string array in PROGMEM holds all bandwidth labels to save Flash
 const char bw_all_data[] PROGMEM =
-"0.5k" "1.0k" "1.2k" "1.8k" "2.0k" "2.2k" "2.5k" "3.0k"
-"4.0k" "6.0k" "AUTO" "110k" " 84k" " 60k" " 40k";
+"0.5 kHz" "1.0 kHz" "1.2 kHz" "1.8 kHz" "2.0 kHz" "2.2 kHz" "2.5 kHz" "3.0 kHz"
+"4.0 kHz" "6.0 kHz" "AUTO   " "110 kHz" "84 kHz " "60 kHz " "40 kHz ";
 
 // more compact (1 byte per entry) than a early table of pointers (2 bytes per entry)
-const uint8_t bw_ssb_map[] PROGMEM = { 0 * 4, 1 * 4, 2 * 4, 5 * 4, 7 * 4, 8 * 4 };
-const uint8_t bw_am_map[] PROGMEM = { 1 * 4, 3 * 4, 4 * 4, 6 * 4, 7 * 4, 8 * 4, 9 * 4 };
-const uint8_t bw_fm_map[] PROGMEM = { 10 * 4, 11 * 4, 12 * 4, 13 * 4, 14 * 4 };
+const uint8_t bw_ssb_map[] PROGMEM = { 0 * 7, 1 * 7, 2 * 7, 5 * 7, 7 * 7, 8 * 7 };
+const uint8_t bw_am_map[] PROGMEM = { 1 * 7, 3 * 7, 4 * 7, 6 * 7, 7 * 7, 8 * 7, 9 * 7 };
+const uint8_t bw_fm_map[] PROGMEM = { 10 * 7, 11 * 7, 12 * 7, 13 * 7, 14 * 7 };
 
 // arrays for chip configuration. They map the our UI index to configure IC Si473x
 const uint8_t g_bwSSBIdx[] = { 4, 5, 0, 1, 2, 3 };
@@ -405,11 +405,11 @@ const uint8_t g_bwAMIdx[] = { 4, 5, 3, 6, 2, 1, 0 };
 // -------------------------------------------------------------------------------------------------
 
 // step strings padded to 4 chars to reduce mem usage
-static const char step_lookup_table[][5] PROGMEM = {
+static const char step_lookup_table[][7] PROGMEM = {
     // AM Steps (indices 0-6)
-    "1kHz", "5kHz", "9kHz", "10k ", "50k ", "100k", "1MHz",
+    "1 kHz ", "5 kHz ", "9 kHz ", "10 kHz", "50 kHz", "100kHz", "1 MHz ",
     // SSB Steps (indices 7-15)
-    "10Hz", "25Hz", "50Hz", "100H", "500H", "1kHz", "5kHz", "9kHz", "10k "
+    "10 Hz ", "25 Hz ", "50 Hz ", "100 Hz", "500 Hz", "1 kHz ", "5 kHz ", "9 kHz ", "10 kHz"
 };
 
 // Array with tuning steps. The structure is defined like - AM (in kHz), then SSB (in Hz)

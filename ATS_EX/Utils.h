@@ -1,28 +1,5 @@
 #pragma once
 
-const DCfont* LastFont = DEFAULT_FONT;
-
-void oledSetFont(const DCfont* font) {
-    if (font && LastFont != font) {
-        LastFont = font;
-        oled.setFont(font);
-    }
-}
-
-template <typename T>
-void oledPrint(T value, int offX = -1, int offY = -1, const DCfont* font = LastFont, bool invert = false) {
-    oledSetFont(font);
-    if (invert)
-        oled.invertOutput(invert);
-    if (offX >= 0 && offY >= 0)
-        oled.setCursor(offX, offY);
-
-    oled.print(value);
-
-    if (invert)
-        oled.invertOutput(false);
-}
-
 //Faster alternative for convertToChar
 // not used in the code
 /* void utoa(char* out, uint16_t num)
