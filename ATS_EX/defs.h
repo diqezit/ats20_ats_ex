@@ -87,15 +87,15 @@ constexpr auto MIN_SETFREQ_INTERVAL_MS = 25UL;
 // For test only (don`t edit)
 
 // Display options
-#define ENABLE_SPLASH_SCREEN 0              // Set to 1 to show splash screen, 0 to disable
-#define ENABLE_EEPROM_RESET_MSG 0           // Set to 1 to show "EEPROM RESET" message, 0 to disable
-#define ANIMATE_SPLASH 0                    // Set to 1 to animate splash screen, 0 to disable
+#define ENABLE_SPLASH_SCREEN 1              // Set to 1 to show splash screen, 0 to disable
+#define ENABLE_EEPROM_RESET_MSG 1           // Set to 1 to show "EEPROM RESET" message, 0 to disable
+#define ANIMATE_SPLASH 1                    // Set to 1 to animate splash screen, 0 to disable
 
 // IC options
 #define ENABLE_FM_FAV 1                     // Set to 1 to use FM favorites, 0 to disable (must disable some other features to compile & work)
 #define DISABLE_FM 0                        // not implemented yet
 
-#define ENABLE_ADVANCED_BATTERY_LOGIC 0     // Set to 1 to enable advanced battery logic, 0 to disable (must disable some other features to compile & work)
+#define ENABLE_ADVANCED_BATTERY_LOGIC 1     // Set to 1 to enable advanced battery logic, 0 to disable (must disable some other features to compile & work)
 #define ENABLE_BATTERY_MONITOR 1            // Set to 1 to enable battery monitoring, 0 to disable
 
 // Debugging options
