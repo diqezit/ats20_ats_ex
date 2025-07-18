@@ -1,5 +1,18 @@
 #pragma once
 
+// function to print text with optional inversion
+// cleans up repetitive if/else blocks in the UI drawing code
+template <typename T>
+void printInverted(const T& text, bool invert) {
+    if (invert) {
+        oled.invertText(true);
+        oled.print(text);
+        oled.invertText(false);
+    } else {
+        oled.print(text);
+    }
+}
+
 //Faster alternative for convertToChar
 // not used in the code
 /* void utoa(char* out, uint16_t num)

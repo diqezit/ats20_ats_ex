@@ -40,7 +40,6 @@ constexpr auto SW_STEP_SPACING = 5;         // SW step spacing in kHz (1, 5, 9, 
 constexpr auto LW_MW_STEP_SPACING = 1;      // for LW/MW a small step of 1kHz for grid alignment
 
 // Display
-#define DEFAULT_FONT FONT8X16POB
 #define RST_PIN -1
 #define RESET_PIN 12
 
