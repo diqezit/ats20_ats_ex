@@ -9,7 +9,7 @@
 // 02.2024
 // http://github.com/goshante
 // ----------------------------------------------------------------------
-// MOD_NO_RDS_v5.0 by diqezit
+// MOD_NO_RDS_v5.1 by diqezit
 // More info for this mod you can get below
 // https://github.com/diqezit/ats20_ats_ex
 // ----------------------------------------------------------------------
@@ -43,7 +43,7 @@ GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 #include "globals.h"
 #include "Utils.h"
 
-constexpr auto APP_VERSION = 50;
+constexpr auto APP_VERSION = 51;
 
 // ------------------------------------------
 // ------- Utility & Helper Functions -------
@@ -375,6 +375,16 @@ static void readAllReceiverInformation() {
 // ------- Battery Monitoring Subsystem -----
 // ------------------------------------------
 
+// --- HARDWARE REQUIREMENT ---
+// For battery level display, the BATTERY_VOLTAGE_PIN (look in defs.h) must be
+// connected to the midpoint of a voltage divider made of two 10kΩ resistors
+//
+//   VCC (PREFER after power switch!) --- [10kΩ] --- (BATTERY_VOLTAGE_PIN) --- [10kΩ] --- GND
+//
+// The firmware is calibrated specifically for this 1:2 divider
+// Using other resistor values will result in inaccurate battery readings
+
+
 #if ENABLE_BATTERY_MONITOR
 uint8_t g_stableBatteryPercent = 100;
 
@@ -384,25 +394,49 @@ struct BatteryPointCompressed {
     uint8_t percent;
 };
 
-// keep original voltage table from Goshante firmware
+// To save PROGMEM, values are 8-bit offsets from a base of 491,
+// which corresponds to the safe 3.15V cutoff
 static const BatteryPointCompressed battery_table[] PROGMEM = {
-    {155, 100}, {132, 95}, {116, 90}, {93, 80}, {85, 60},
-    {70, 40},   {54, 20},  {15, 15},  {8, 5},   {0, 0}
+    // Offset, Percent, (ADC -> Approx. Voltage)
+    {156, 100}, // 647 -> 4.15V
+    {148, 90},  // 639 -> 4.10V
+    {141, 85},  // 632 -> 4.05V
+    {132, 80},  // 623 -> 4.00V
+    {125, 75},  // 616 -> 3.95V
+    {117, 70},  // 608 -> 3.90V
+    {109, 65},  // 600 -> 3.85V
+    {101, 60},  // 592 -> 3.80V
+    { 93, 55},  // 584 -> 3.75V
+    { 86, 50},  // 577 -> 3.70V
+    { 78, 45},  // 569 -> 3.65V
+    { 70, 40},  // 561 -> 3.60V
+    { 62, 35},  // 553 -> 3.55V
+    { 55, 30},  // 546 -> 3.50V
+    { 47, 25},  // 538 -> 3.45V
+    { 39, 20},  // 530 -> 3.40V
+    { 31, 15},  // 522 -> 3.35V
+    { 23, 10},  // 514 -> 3.30V
+    { 15,  5},  // 506 -> 3.25V
+    {  7,  2},  // 498 -> 3.20V
+    {  0,  0}   // 491 -> 3.15V (Safe cut-off)
 };
 
-// Calculates the "raw" battery percentage from an ADC value using interpolation.
-// It uses the original lookup table for consistency.
+// Calculates raw battery percentage from an ADC value using interpolation
 static uint8_t calculateRawPercent(uint16_t adc_value) {
-    if (adc_value >= 643) return 100;
-    if (adc_value <= 488) return 0;
+    if (adc_value >= 647) return 100;
+    if (adc_value <= 491) return 0;
 
-    for (uint8_t i = 0; i < 9; ++i) {
-        uint16_t v_lower = pgm_read_byte(&battery_table[i + 1].voltage_offset) + 488;
+    // The loop limit '21' is hardcoded as 'TABLE_POINTS - 1' for 22-point table
+    for (uint8_t i = 0; i < 20; ++i) {
+        // Reconstruct full ADC value from the stored 8-bit offset and base (491)
+        uint16_t v_lower = pgm_read_byte(&battery_table[i + 1].voltage_offset) + 491;
+
         if (adc_value > v_lower) {
-            uint16_t v_upper = pgm_read_byte(&battery_table[i].voltage_offset) + 488;
+            uint16_t v_upper = pgm_read_byte(&battery_table[i].voltage_offset) + 491;
             uint8_t p_lower = pgm_read_byte(&battery_table[i + 1].percent);
             uint8_t p_upper = pgm_read_byte(&battery_table[i].percent);
-            return p_lower + ((adc_value - v_lower) * (p_upper - p_lower)) / (v_upper - v_lower);
+
+            return p_lower + ((uint32_t)(adc_value - v_lower) * (p_upper - p_lower)) / (v_upper - v_lower);
         }
     }
     return 0;
@@ -418,35 +452,29 @@ static void applyPercentUpdate(uint8_t newPercent) {
 }
 #endif
 
-// Updates the internal stable battery percentage. Applies an IIR filter to ADC
-// readings and uses hysteresis logic to prevent display flicker.
+// Update internal stable battery percentage
 static void updateStablePercent() {
     if (!g_voltagePinConnnected) return;
 
     int sample = analogRead(BATTERY_VOLTAGE_PIN);
 
-#if ENABLE_ADVANCED_BATTERY_LOGIC
-    if (g_averageADC == -1)
-        g_averageADC = sample > 0 ? sample : 550;
+    if (sample <= 0) sample = 491; // Default if disconnected
 
-    // simple IIR filter (3/4 old, 1/4 new) - stabilize ADC reading
+#if ENABLE_ADVANCED_BATTERY_LOGIC
+    if (g_averageADC == -1) g_averageADC = sample;
+
+    // simple IIR filter (3/4 old, 1/4 new)
     g_averageADC = (3 * g_averageADC + sample) >> 2;
 
     uint8_t currentRawPercent = calculateRawPercent(g_averageADC);
-
     int8_t diff = currentRawPercent - g_stableBatteryPercent;
 
-    // hysteresis logic (simplified: hardcoded values)
-    if (diff == 0) {
-        g_percentChangeCounter = 0;
-    } else if (diff > 2 || diff < -2) {
-        applyPercentUpdate(currentRawPercent);
-    } else if (++g_percentChangeCounter >= 5) {
-        applyPercentUpdate(currentRawPercent);
-    }
+    // hysteresis logic
+    if (diff == 0) g_percentChangeCounter = 0;
+    else if (diff > 2 || diff < -2) applyPercentUpdate(currentRawPercent);
+    else if (++g_percentChangeCounter >= 5) applyPercentUpdate(currentRawPercent);
 #else
-    // no IIR, no hysteresis (ultra-minimal direct calculation)
-    g_stableBatteryPercent = calculateRawPercent(sample > 0 ? sample : 550);
+    g_stableBatteryPercent = calculateRawPercent(sample);
 #endif
 }
 
@@ -454,11 +482,8 @@ static void updateStablePercent() {
 // state and shows it on the display if the timer has elapsed or if forced.
 void updateAndShowBattery(bool forceShow) {
     if (!g_voltagePinConnnected) return;
-
     updateStablePercent();
-
     static uint32_t lastChargeShow = 0;
-
     if ((millis() - lastChargeShow) > 10000 || forceShow) {
         showChargeOnDisplay();
         lastChargeShow = millis();
@@ -471,15 +496,16 @@ void updateAndShowBattery(bool forceShow) {
 // ---- Sensitive logic is here -----------------
 // ----------------------------------------------
 
-// off amplifier md8002a
-static void safeAmpOff() {
-    AMP_DDR |= (1 << AMP_BIT);   // OUTPUT
-    AMP_PORT |= (1 << AMP_BIT);  // HIGH
-}
-
-// on amplifier md8002a
-static void safeAmpOn() {
-    AMP_PORT &= ~(1 << AMP_BIT); // LOW
+// Controls the MD8002A amplifier state (on/off)
+// Always sets the pin to OUTPUT mode for safety
+// If TRUE = on, FALSE = off
+static void __attribute__((always_inline)) setAmpState(bool on) {
+    AMP_DDR |= (1 << AMP_BIT);        // Set as OUTPUT
+    if (on) {
+        AMP_PORT &= ~(1 << AMP_BIT);  // LOW (on)
+    } else {
+        AMP_PORT |= (1 << AMP_BIT);   // HIGH (off)
+    }
 }
 
 //Saves more flash image size
@@ -495,7 +521,7 @@ static void updateSSBCutoffFilter() {
 // But we can patch internal RAM of Si473x with special patch to make it work in SSB mode.
 // Patch must be applied every time we enable SSB after AM or FM.
 static void loadSSBPatch() {
-    safeAmpOff();
+    setAmpState(false);
 
     g_si4735.setI2CFastModeCustom(500000);
 
@@ -514,7 +540,7 @@ static void loadSSBPatch() {
     // line that reset the step here with index has been removed
     // allows the step setting for SSB to persist for each band individually for now
 
-    safeAmpOn();
+    setAmpState(true);
 }
 
 // Handles the low-level interaction with the Si4735 chip to perform a seek
@@ -690,7 +716,7 @@ void applyBandConfiguration(bool extraSSBReset) {
     bool switchingBetweenFMandAM = isSwitchingBetweenFmAndAm();
 
     if (switchingBetweenFMandAM)
-        safeAmpOff();
+        setAmpState(false);
 
     loadActiveStateFromBand();
 
@@ -724,7 +750,7 @@ void applyBandConfiguration(bool extraSSBReset) {
     resetEepromDelay();
 
     if (switchingBetweenFMandAM)
-        safeAmpOn();
+        setAmpState(true);
 
     g_previousFrequency = g_currentFrequency;
 }
@@ -734,13 +760,14 @@ void applyBandConfiguration(bool extraSSBReset) {
 // ------------------------------------------
 
 // helper for brightness calculating the value by using integer (low flash consume)
-// on edit have a white display, so don`t know what it will look like for you
+// on edit have a white color display (non default blue), so don`t know what it will look like for you
 static void applyBrightness() {
     uint8_t s = g_Settings[Brightness].param;
 
-    // f(s) = 0.75*s^2 + 2.0*s. coefficients are scaled by 256 here
-    uint8_t contrast_value = ((uint32_t)s * ((uint16_t)s * 192 + 512)) >> 8;
-    // add the base value of 1 to map to the final contrast range [1, 80]
+    // non-linear formula to map s=[0,9] to a contrast value of [1,255]
+    uint8_t contrast_value = (((uint32_t)s * ((uint16_t)s * 130 + 6060)) >> 8);
+
+    // add 1 to shift the final range to [1, 255]
     oled.setContrast(contrast_value + 1);
 }
 
@@ -749,7 +776,7 @@ void showSplashScreen() {
     oled.clear();
 
     oled.setCursor(26, 1);
-    oled.print(F("ATS-20+ v5.0"));
+    oled.print(F("ATS-20+ v5.1"));
 
     oled.setCursor(32, 3);
     oled.print(F("Mod No RDS"));
@@ -812,24 +839,21 @@ static void renderClearOrBlink(bool cleanDisplay, bool ssbMode, uint8_t len, uin
 static void renderSSBTail(bool ssbMode, uint16_t tailBFO, uint8_t len, uint8_t prevLen, int mainEndX, int pixelY) {
     if (!ssbMode) return;
 
-    // shift for tight alignment to main freq
-    int curX = mainEndX - 2;  
+    // Tightly align and draw the decimal part. Font widths: '.'=6px, digit=16px
+    int curX = mainEndX - 2;
+    oled.drawDigit('.', curX, pixelY);                  curX += 6;
+    oled.drawDigit('0' + (tailBFO / 10), curX, pixelY); curX += 16;
+    oled.drawDigit('0' + (tailBFO % 10), curX, pixelY); curX += 16;
 
-    oled.drawDigit('.', curX, pixelY);
-    curX += 6;  // width for '.' 
-    oled.drawDigit('0' + (tailBFO / 10), curX, pixelY);
-    curX += 16;  // width for digit
-    oled.drawDigit('0' + (tailBFO % 10), curX, pixelY);
-    curX += 16;
-
-    // If len < prevLen - clear space like a blank digit position
-    if (len < prevLen) oled.clear(curX, pixelY, curX + 13, pixelY + 23);  // clear area 14x24 
+    // If main frequency shortens (e.g. 14MHz -> 7MHz), clear the now-empty space
+    // left by the disappearing digit from the main part
+    if (len < prevLen) oled.clear(curX, pixelY, curX + 13, pixelY + 23);
 }
 
 // renders measurement units (kHz/MHz)
 static void renderUnit(bool ssbMode, uint8_t len, const char* unit) {
     if (g_Settings[SettingsIndex::UnitsSwitch].param == 1 && (!ssbMode || len < 5)) {
-        oled.setCursor(102, 4);
+        oled.setCursor(108, 4);
         oled.print(unit);
     }
 }
@@ -902,18 +926,14 @@ static void showBandTag() {
     getBandName(name_buffer, g_bandIndex);
 
     oled.setCursor(0, 0);
-    if (invert) oled.invertText(true);
-    oled.print(name_buffer);
-    if (invert) oled.invertText(false);
+    printInverted(name_buffer, invert);
 }
 
 //Draw current modulation (AM/LSB/USB/CW/FM) and stereo indicator
 static void showModulation() {
     bool invert = (g_activeCommand == CMD_BAND && g_bandList[g_bandIndex].bandType == FM_BAND_TYPE);
     oled.setCursor(0, 7);
-    if (invert) oled.invertText(true);
-    oled.print(g_bandModeDesc[g_currentMode]);
-    if (invert) oled.invertText(false);
+    printInverted(g_bandModeDesc[g_currentMode], invert);
 
     oled.print(' ');
     updateStereoIndicator();
@@ -935,9 +955,7 @@ static void showVolume() {
     }
     bool invert = (g_activeCommand == CMD_VOLUME);
     oled.setCursor(114, 0);
-    if (invert) oled.invertText(true);
-    oled.print(buf);
-    if (invert) oled.invertText(false);
+    printInverted(buf, invert);
 }
 
 // Displays the current signal quality value (RSSI)
@@ -947,37 +965,34 @@ static void showSignalQuality() {
         || g_favoritesActive
 #endif
         ) return;
+
     oled.setCursor(90, 7);
+
     if (g_signalQualityValue == 255) {
-        oled.print("   ");
-    } else {
-        if (g_signalQualityValue < 10) oled.print(' ');
-        oled.print(g_signalQualityValue);
-        oled.print('|');
+        oled.print(F("   "));
+        return;
     }
+
+    if (g_signalQualityValue < 10) oled.print(' ');
+    oled.print(g_signalQualityValue);
+    oled.print('|');
 }
 
 // Renders the stable battery percentage value on the display.
 static void showChargeOnDisplay() {
     if (g_settingsActive) return;
-
+    int charge = min(g_stableBatteryPercent, 100);
     oled.setCursor(108, 7);
-
-    if (g_stableBatteryPercent >= 100) {
-        oled.print("100");
-    } else {
-        oled.print(g_stableBatteryPercent);
-        oled.print('%');
-    }
+    oled.print(charge);
+    if (charge < 100) oled.print('%');
 }
 
 // display the step on the screen
 static void showStep() {
     bool invert = (g_activeCommand == CMD_STEP);
-    if (invert) oled.invertText(true);
 
     oled.setCursor(34, 0);
-    oled.print(F("STEP: "));
+    printInverted(F("STEP: "), invert);
 
     const Band& current_band = g_bandList[g_bandIndex];
     uint8_t index = (g_currentMode == FM)
@@ -985,8 +1000,7 @@ static void showStep() {
         : (isSSB() ? (SSB_STEP_OFFSET + current_band.stepIdxSSB)
             : current_band.stepIdxAM);
 
-    oled.print((__FlashStringHelper*)step_lookup_table[index]);
-    if (invert) oled.invertText(false);
+    printInverted((__FlashStringHelper*)step_lookup_table[index], invert);
 }
 
 // displays the current bandwidth
@@ -1021,10 +1035,8 @@ static void showBandwidth() {
         bw[0] = '\0';
     }
     bool invert = (g_activeCommand == CMD_BW);
-    if (invert) oled.invertText(true);
     oled.setCursor(40, 7);
-    oled.print(bw);
-    if (invert) oled.invertText(false);
+    printInverted(bw, invert);
 }
 
 void updateStereoIndicator() {
@@ -1078,10 +1090,8 @@ static inline void drawFavItem(uint8_t index, uint8_t y_pos, bool selected) {
 // Display favorites menu
 static void showFav() {
     oled.setCursor(0, 0);
-    oled.invertText(true);
-    oled.print(F("  FM FAVORITES"));
-    oled.print(F("         "));
-    oled.invertText(false);
+    printInverted(F("  FM FAVORITES"), true);
+    printInverted(F("         "), true);
 
     if (!g_totalFavorites) {
         oled.setCursor(30, 3);
@@ -1163,39 +1173,31 @@ static void DrawSetting(uint8_t idx, bool full) {
     uint8_t place = idx - ((g_SettingsPage - 1) * 6);
 
     // Determine row (yOffset) and column (xOffset)
-    // - Items 0-2 in left column (x=0), 3-5 in right (x=60)
-    // - yOffset = row * 2 (line spacing)
     uint8_t yOffset = (place > 2) ? (place - 3) * 2 : place * 2;
-    uint8_t xOffset = (place > 2) ? 60 : 0;
+    uint8_t xOffset = (place > 2) ? 68 : 0;
 
     // Draw setting name if full redraw requested
     if (full) {
-        bool invert = (idx == g_SettingSelected && !g_SettingEditing);
         oled.setCursor(5 + xOffset, 2 + yOffset);
-        if (invert) oled.invertText(true);
+        oled.print((idx == g_SettingSelected && !g_SettingEditing) ? '>' : ' ');
         oled.print(g_Settings[idx].name);
-        if (invert) oled.invertText(false);
     }
 
     // Convert param to string and draw value (aligned to name)
     SettingParamToUI(buf, idx);
-    bool invert = (idx == g_SettingSelected && g_SettingEditing);
     oled.setCursor(35 + xOffset, 2 + yOffset);
-    if (invert) oled.invertText(true);
+    oled.print((idx == g_SettingSelected && g_SettingEditing) ? '>' : ' ');
     oled.print(buf);
-    if (invert) oled.invertText(false);
 }
 
 // Draw the title of the settings menu
 static void showSettingsTitle() {
     oled.setCursor(0, 0);
-    oled.invertText(true);
-    oled.print(F("  SETTINGS "));
-    oled.print((uint8_t)g_SettingsPage);
-    oled.print('/');
-    oled.print((uint8_t)g_SettingsMaxPages);
-    oled.print(F("         "));
-    oled.invertText(false);
+    printInverted(F("  SETTINGS "), true);
+    printInverted((uint8_t)g_SettingsPage, true);
+    printInverted('/', true);
+    printInverted((uint8_t)g_SettingsMaxPages, true);
+    printInverted(F("         "), true);
 }
 
 // Draw the complete settings screen (all visible items)
@@ -1373,26 +1375,32 @@ static inline void prepareModeSwitch(int8_t& bw) {
 
     markStateAsDirty();
 
-    if (g_currentMode == CW) safeAmpOff();
+    if (g_currentMode == CW) setAmpState(false);
 }
 
-// mode cycling logic
+// mode cycling logic (AM -> SSB -> CW -> AM)
 static inline void performModeCycle(int8_t bw) {
     Band& current_band = g_bandList[g_bandIndex];
 
-    // when switching from am to ssb for the first time, the patch must be loaded
-    if (g_currentMode == AM) {
-        loadSSBPatch();
-        current_band.bwIdxSSB = bw;
-        g_processFreqChange = false;
-    }
+    switch (g_currentMode) {
+    case LSB:
+    case USB:
+        g_lastSsbMode = g_currentMode; // remember sideband
+        g_currentMode = CW;
+        break;
 
-    // cycle through am -> lsb -> usb -> cw -> am
-    g_currentMode = (g_currentMode + 1) % 4;
-
-    if (g_currentMode == AM) {
+    case CW:
+        g_currentMode = AM;
         g_ssbLoaded = false;
         current_band.bwIdxAM = bw;
+        break;
+
+    case AM:
+        g_currentMode = g_lastSsbMode; // restore sideband
+        loadSSBPatch();
+        current_band.bwIdxSSB = bw;
+        g_processFreqChange = false;   // prevent frequency jump
+        break;
     }
 }
 
@@ -1400,7 +1408,7 @@ static inline void performModeCycle(int8_t bw) {
 static inline void finalizeModeSwitch() {
     applyBandConfiguration();
 
-    if (!g_ssbLoaded && g_currentMode == AM) safeAmpOn();
+    if (!g_ssbLoaded && g_currentMode == AM) setAmpState(true);
 }
 
 // handles the complex logic of cycling through AM, LSB, USB, and CW modes
@@ -1763,7 +1771,7 @@ static uint8_t volumeEvent(uint8_t event, uint8_t pin) {
 }
 
 static uint8_t simpleEvent(uint8_t event, uint8_t pin) {
-    if (pin != MODE_SWITCH && event == BUTTONEVENT_FIRSTLONGPRESS) {
+    if (pin != MODE_SWITCH && pin != STEP_BUTTON && event == BUTTONEVENT_FIRSTLONGPRESS) {
         return BUTTONEVENT_SHORTPRESS;
     }
     return event;
@@ -1881,15 +1889,23 @@ static inline void handleAgcButton() {
     g_displayOn ? oled.setPower(true) : oled.setPower(false);
 }
 
+// step button handler
 static inline void handleStepButton() {
-    // step button handler
     uint8_t evt = btn_Step.checkEvent(simpleEvent);
-    if (BUTTONEVENT_SHORTPRESS == evt && !g_settingsActive
+
+    // do nothing if any menu is active
 #if ENABLE_FM_FAV
-        && !g_favoritesActive
+    if (g_settingsActive || g_favoritesActive) return;
+#else
+    if (g_settingsActive) return;
 #endif
-        ) {
+
+    if (BUTTONEVENT_SHORTPRESS == evt) {
         switchCommand(CMD_STEP);
+    } else if (BUTTONEVENT_LONGPRESSDONE == evt && (g_currentMode == LSB || g_currentMode == USB)) {
+        // use long press to toggle sideband
+        g_currentMode = (g_currentMode == LSB) ? USB : LSB;
+        applyBandConfiguration();
     }
 }
 
@@ -2273,7 +2289,7 @@ static void handlePeriodicTasks() {
 
 // Helper to initialize hardware pins and battery check
 static inline void initHardwarePins() {
-    safeAmpOff();
+    setAmpState(false);
 
     DDRB |= (1 << DDB5);
     DDRD &= ~((1 << ENCODER_PIN_A) | (1 << ENCODER_PIN_B));
@@ -2354,7 +2370,7 @@ void setup() {
     loadReceiverConfig();
     applyInitialConfiguration();
 
-    safeAmpOn();
+    setAmpState(true);
     g_previousFrequency = g_currentFrequency;
 }
 

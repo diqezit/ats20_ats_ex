@@ -230,6 +230,7 @@ volatile uint8_t g_currentMode = FM;
 volatile uint8_t g_prevMode = FM;
 int g_currentBFO = 0;
 extern uint8_t g_stableBatteryPercent; // store table percentage for display
+uint8_t g_lastSsbMode = LSB;        // Remember the last used sideband (LSB or USB)
 
 //Frequency tracking
 uint16_t g_currentFrequency;
@@ -313,25 +314,25 @@ SettingsItem g_Settings[] =
 // it is indexed here by the SettingsIndex enum
 const PROGMEM SwitchMapEntry switch_setting_map[] = {
     // Page 1
-    [ATT] = {0, false},
-    [ScanSwitch] = {2, true},
-    [AutoVolControl] = {0, false},
-    [SoftMute] = {0, false},
-    [DeEmp] = {3, false},
-    [Brightness] = {0, false},
+    [ATT] =                 {0, false},
+    [ScanSwitch] =          {2, true},
+    [AutoVolControl] =      {0, false},
+    [SoftMute] =            {0, false},
+    [DeEmp] =               {3, false},
+    [Brightness] =          {0, false},
     // Page 2
-    [BFO] = {0, false},
-    [SSM] = {7, false},
-    [SVC] = {2, true},
-    [CutoffFilter] = {0, false},
-    [CWSwitch] = {9, false},
-    [Sync] = {2, true},
+    [BFO] =                 {0, false},
+    [SSM] =                 {7, false},
+    [SVC] =                 {2, true},
+    [CutoffFilter] =        {0, false},
+    [CWSwitch] =            {9, false},
+    [Sync] =                {2, true},
     // Page 3
-    [AntennaCap] = {1, false},
-    [UnitsSwitch] = {2, true},
-    [CPUSpeed] = {11, false},
-    [SWUnits] = {5, false},
-    [RSSI_AM_Off] = {1, true},
+    [AntennaCap] =          {1, false},
+    [UnitsSwitch] =         {2, true},
+    [CPUSpeed] =            {11, false},
+    [SWUnits] =             {5, false},
+    [RSSI_AM_Off] =         {1, true},
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -387,7 +388,7 @@ Band g_bandList[g_bandCount] = {
 // single string array in PROGMEM holds all bandwidth labels to save Flash
 const char bw_all_data[] PROGMEM =
 "0.5 kHz" "1.0 kHz" "1.2 kHz" "1.8 kHz" "2.0 kHz" "2.2 kHz" "2.5 kHz" "3.0 kHz"
-"4.0 kHz" "6.0 kHz" "AUTO   " "110 kHz" "84 kHz " "60 kHz " "40 kHz ";
+"4.0 kHz" "6.0 kHz" " AUTO  " "110 kHz" "84 kHz " "60 kHz " "40 kHz ";
 
 // more compact (1 byte per entry) than a early table of pointers (2 bytes per entry)
 const uint8_t bw_ssb_map[] PROGMEM = { 0 * 7, 1 * 7, 2 * 7, 5 * 7, 7 * 7, 8 * 7 };
@@ -436,7 +437,7 @@ const int8_t g_lastStepFM = (sizeof(g_tabStepFM) / sizeof(int8_t)) - 1;
 // -------------------------------------------------------------------------------------------------
 // used by SettingParamToUI function to convert parameter values to display strings
 const char PROGMEM paramTexts[][4] = {
-  "AUT", "On ", "Off", "50u", "75u", "kHz", "MHz",
+  "AUT", " On", "Off", "50u", "75u", "kHz", "MHz",
   "RSS", "SNR", "LSB", "USB", "100", "50%"
 };
 

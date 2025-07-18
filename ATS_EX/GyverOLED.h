@@ -10,7 +10,7 @@
     (!) Minimal features for only main functionality with ATS_EX receiver
 
     Manual generation of segments 14x24 resolution (7-segment display) use SSD1306 minimal library
-    By diqezit v1.4 
+    By diqezit v1.5 
     Charset: '.', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
 
     My repos: https://github.com/diqezit/TestDisplay
@@ -199,14 +199,14 @@ public:
 
     // Sets a single pixel in the local buffer (bitwise)
     void local_setPixel(unsigned char* buf, uint8_t curr_x, uint8_t curr_y, uint8_t pages) {
-        uint8_t page = curr_y / 8;
-        uint8_t bit = curr_y % 8;
+        uint8_t page = curr_y >> 3;
+        uint8_t bit = curr_y & 7;
         int idx = curr_x * pages + page;
         buf[idx] |= (1 << bit);
     }
 
     // Renders horizontal segment in buffer (2px thick)
-    void draw_horizontal_line(unsigned char* buf, uint8_t s_x, uint8_t s_y, uint8_t s_len, uint8_t digitW, uint8_t pages) {
+    void draw_horizontal_line(unsigned char* buf, uint8_t s_x, uint8_t s_y, uint8_t s_len, uint8_t pages) {
         for (uint8_t i = 0; i < s_len; i++) {
             uint8_t curr_x = s_x + i;
             local_setPixel(buf, curr_x, s_y, pages);
@@ -215,18 +215,11 @@ public:
     }
 
     // Renders vertical segment in buffer (2px thick)
-    void draw_vertical_line(unsigned char* buf, uint8_t s_x, uint8_t s_y, uint8_t s_len, uint8_t digitW, uint8_t pages) {
+    void draw_vertical_line(unsigned char* buf, uint8_t s_x, uint8_t s_y, uint8_t s_len, uint8_t pages) {
         for (uint8_t i = 0; i < s_len; i++) {
             local_setPixel(buf, s_x, s_y + i, pages);
             local_setPixel(buf, s_x + 1, s_y + i, pages);
         }
-    }
-
-    // Clears the area for a single character (digit or dot)
-    void clearCharArea(char c, uint8_t px, uint8_t py) {
-        uint8_t digitW = (c == '.') ? 6 : 14;
-        uint8_t digitH = (c == '.') ? 2 : 24;
-        partialUpdate(px, py, digitW, digitH, NULL);
     }
 
     // Partial update of a rectangular area (sends window commands and data)
@@ -246,14 +239,8 @@ public:
         uint16_t len = (uint16_t)w * pages;
 
         beginData();
-        if (data != NULL) {
-            for (uint16_t i = 0; i < len; i++) {
-                sendByte(data[i]);
-            }
-        } else {
-            for (uint16_t i = 0; i < len; i++) {
-                sendByte(0x00);
-            }
+        for (uint16_t i = 0; i < len; i++) {
+            sendByte(data != NULL ? data[i] : 0x00);
         }
         endTransm();
     }
@@ -263,7 +250,7 @@ public:
         if ((c < '0' || c > '9') && (c != '.')) return;
 
         uint8_t digitW = (c == '.') ? 4 : 14;            // Smaller width for dot
-        uint8_t digitH = (c == '.') ? 24 : 24;           // Full height for dot to position at bottom
+        uint8_t digitH = 24;                             // Full height for dot to position at bottom
 
         uint8_t pages = (digitH + 7) / 8;                // Number of pages (3-4 for 24 height)
         unsigned char localBuf[digitW * pages] = { 0 };  // Local buffer (minimal size)
@@ -273,16 +260,17 @@ public:
 
         for (uint8_t b = 0; b < 8; b++) {
             if (mask & (1 << b)) {
-                uint8_t base = b * 4;  // Offset in PROGMEM array (sizeof(SegDef) = 4)
-                uint8_t s_x = pgm_read_byte((const uint8_t*)&segs[0] + base);
-                uint8_t s_y = pgm_read_byte((const uint8_t*)&segs[0] + base + 1);
-                uint8_t s_len = pgm_read_byte((const uint8_t*)&segs[0] + base + 2);
-                uint8_t s_isHoriz = pgm_read_byte((const uint8_t*)&segs[0] + base + 3);
+                // more compact read from PROGMEM
+                const SegDef* seg_ptr = &segs[b];
+                uint8_t s_x = pgm_read_byte((const uint8_t*)seg_ptr + offsetof(SegDef, x));
+                uint8_t s_y = pgm_read_byte((const uint8_t*)seg_ptr + offsetof(SegDef, y));
+                uint8_t s_len = pgm_read_byte((const uint8_t*)seg_ptr + offsetof(SegDef, len));
+                uint8_t s_isHoriz = pgm_read_byte((const uint8_t*)seg_ptr + offsetof(SegDef, isHoriz));
 
                 if (s_isHoriz) {
-                    draw_horizontal_line(localBuf, s_x, s_y, s_len, digitW, pages);
+                    draw_horizontal_line(localBuf, s_x, s_y, s_len, pages);
                 } else {
-                    draw_vertical_line(localBuf, s_x, s_y, s_len, digitW, pages);
+                    draw_vertical_line(localBuf, s_x, s_y, s_len, pages);
                 }
             }
         }
@@ -388,13 +376,6 @@ public:
     uint8_t _shift = 0;
     uint8_t _writes = 0;
 
-private:
-    // Exchanges values of two integers using temporary variable
-    void _swap(int& x, int& y) {
-        int z = x;
-        x = y;
-        y = z;
-    }
 };
 
 // ===== Static Member Definitions (outside class for linkage) =====
