@@ -9,7 +9,7 @@
 // 02.2024
 // http://github.com/goshante
 // ----------------------------------------------------------------------
-// MOD_NO_RDS_v5.1 by diqezit
+// MOD_NO_RDS_v5.2 by diqezit
 // More info for this mod you can get below
 // https://github.com/diqezit/ats20_ats_ex
 // ----------------------------------------------------------------------
@@ -43,7 +43,7 @@ GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 #include "globals.h"
 #include "Utils.h"
 
-constexpr auto APP_VERSION = 51;
+constexpr auto APP_VERSION = 52;
 
 // ------------------------------------------
 // ------- Utility & Helper Functions -------
@@ -122,34 +122,49 @@ static inline void snapToNewStep(uint16_t* freq, bool isUp) {
 
 // performs bfo rollover with integrated boundary checks and a max bfo limit
 // this is the core of the stability system for ssb tuning
-// returns true if a band switch occurred, false otherwise
 // see: https://github.com/goshante/ats20_ats_ex/issues/42#issuecomment-3015265184
 static inline void performBfoRolloverWithBandCheck(uint16_t* freq, int32_t* bfo) {
     const int32_t BFOMax = 13000;
 
-    // clamp bfo to the maximum allowed range first for stability
+    // Clamp bfo to the maximum allowed range first for stability
     if (*bfo > BFOMax) *bfo = BFOMax;
     if (*bfo < -BFOMax) *bfo = -BFOMax;
 
-    // then perform the reliable rollover with integrated "emergency brake" checks
+    // Handle upward tuning
     while (*bfo >= 1000) {
         (*freq)++;
         if (*freq >= g_bandList[g_bandIndex].maximumFreq) {
             bandSwitch(true, false);
             *freq = g_bandList[g_bandIndex].minimumFreq;
-            snapToNewStep(freq, true); // snap for up
+            snapToNewStep(freq, true);
         }
         *bfo -= 1000;
     }
 
-    while (*bfo <= -1000) {
-        (*freq)--;
-        if (*freq < g_bandList[g_bandIndex].minimumFreq) {
+    // SSB band edge tuning - standard `while` loop below only triggers after a full 1 kHz BFO rollover,
+    // causing a step delay.
+    // Pre-check handles boundary crossing immediately when freq is at the band minimum and BFO becomes negative.
+    // It forces the band switch and manually rolls over the BFO (e.g., 7000 kHz, BFO -100 -> 6999 kHz, BFO +900)
+    // for a seamless transition
+    if (*bfo < 0) {
+        // First, handle the specific band edge case to prevent a one-step delay
+        if (*freq == g_bandList[g_bandIndex].minimumFreq) {
             bandSwitch(false, false);
             *freq = g_bandList[g_bandIndex].maximumFreq;
-            snapToNewStep(freq, false); // snap for down
+            (*freq)--;
+            *bfo += 1000;
         }
-        *bfo += 1000;
+
+        // Then, handle any remaining standard rollovers
+        while (*bfo <= -1000) {
+            (*freq)--;
+            if (*freq < g_bandList[g_bandIndex].minimumFreq) {
+                bandSwitch(false, false);
+                *freq = g_bandList[g_bandIndex].maximumFreq;
+                snapToNewStep(freq, false);
+            }
+            *bfo += 1000;
+        }
     }
 }
 
@@ -644,8 +659,15 @@ static void configureSSBMode(uint16_t minFreq, uint16_t maxFreq, bool extraSSBRe
         (g_currentMode == CW) ? (g_Settings[CWSwitch].param + 1) : g_currentMode);
 
     updateSSBCutoffFilter();
-    g_si4735.setSSBDspAfc(g_Settings[Sync].param == 1 ? 0 : 1);
-    g_si4735.setSSBAvcDivider(g_Settings[Sync].param == 0 ? 0 : 3);
+
+    // disable Sync (DSP AFC) functionality when in CW mode
+    if (g_currentMode == CW) {
+        g_si4735.setSSBDspAfc(1);
+        g_si4735.setSSBAvcDivider(0);
+    } else { // LSB or USB
+        g_si4735.setSSBDspAfc(g_Settings[Sync].param == 1 ? 0 : 1);
+        g_si4735.setSSBAvcDivider(g_Settings[Sync].param == 0 ? 0 : 3);
+    }
 
     // Use SoftMute setting from storage for SSB
     g_si4735.setAmSoftMuteMaxAttenuation(g_modeSettings[MODE_SETTING_SOFT_MUTE][MODE_CONTEXT_SSB]);
@@ -776,7 +798,7 @@ void showSplashScreen() {
     oled.clear();
 
     oled.setCursor(26, 1);
-    oled.print(F("ATS-20+ v5.1"));
+    oled.print(F("ATS-20+ v5.2"));
 
     oled.setCursor(32, 3);
     oled.print(F("Mod No RDS"));
@@ -825,12 +847,9 @@ static void prepareMainFreq(uint8_t displayMode, char* freqDisplay, uint16_t& kh
 static void renderClearOrBlink(bool cleanDisplay, bool ssbMode, uint8_t len, uint8_t prevLen, uint8_t off, int pixelY) {
     if (cleanDisplay) {
         oled.clear(0, pixelY, 128, pixelY + 23);
-    } else if (ssbMode && (len == 5) && (prevLen < 5)) {
-        oled.setCursor(102, 4);
-        oled.print(F("   "));
     } else if (len != prevLen) {
-        // Clear the entire possible frequency area to handle any length change (max ~86px for 5 digits + dot)
-        uint8_t maxW = 86;
+        // if frequency length changes - clear from its starting position to the end of the screen
+        uint8_t maxW = 128 - off;
         oled.partialUpdate(off, pixelY, maxW, 24, NULL);
     }
 }
@@ -1039,9 +1058,11 @@ static void showBandwidth() {
     printInverted(bw, invert);
 }
 
+// determine the indicator character based on mode
 void updateStereoIndicator() {
-    char c = (isSSB() && g_Settings[SettingsIndex::Sync].param == 1) ? 'S' :
-        ((g_currentMode == FM && g_stereoStatus) ? '*' : ' ');
+    char c = (g_currentMode == CW) ? (g_Settings[CWSwitch].param == 0 ? 'L' : 'U') :
+        (isSSB() && g_Settings[Sync].param == 1) ? 'S' :
+        (g_currentMode == FM && g_stereoStatus) ? '*' : ' ';
 
     oled.setCursor(24, 7);
     oled.print(c);
@@ -1211,7 +1232,7 @@ static void showSettings() {
 // ------------------------------------------
 
 // switches band index and immediately applies the new band's default state
-static void bandSwitch(bool up, bool loadStoredFreq = true) {
+static void bandSwitch(bool up, bool loadStoredFreq) {
     syncActiveStateToBand(); // Save current frequency to RAM
     markStateAsDirty();
 
@@ -1279,31 +1300,45 @@ static void doSeek() {
 // handles frequency tuning for am/fm
 static void doFrequencyTune() {
     g_seekDirection = g_encoderCount > 0;
-    Band& current_band = g_bandList[g_bandIndex];
+    const Band& old_band = g_bandList[g_bandIndex];
+    uint16_t step = (old_band.bandType == FM_BAND_TYPE)
+        ? g_tabStepFM[old_band.stepIdxFM]
+        : g_tabStep[old_band.stepIdxAM];
 
-    uint16_t step = (current_band.bandType == FM_BAND_TYPE)
-        ? g_tabStepFM[current_band.stepIdxFM]
-        : g_tabStep[current_band.stepIdxAM];
-
-    // 32 integer need here for calculations to prevent underflow on band edges!
+    // 32-bit integer is needed here for calculations to prevent underflow on band edges
     int32_t temp_freq = g_currentFrequency + (int16_t)step * g_encoderCount;
     g_encoderCount = 0;
 
-    if (temp_freq >= current_band.maximumFreq) {
-        bandSwitch(true, false);
-        temp_freq = g_bandList[g_bandIndex].minimumFreq; // continuous to new min
-    } else if (temp_freq < current_band.minimumFreq) {
-        bandSwitch(false, false);
-        temp_freq = g_bandList[g_bandIndex].maximumFreq; // continuous to new max
+    // > for the upper bound to include the maximum frequency value within the band
+    bool needs_switch_up = (temp_freq > old_band.maximumFreq);
+    bool needs_switch_down = (temp_freq < old_band.minimumFreq);
+
+    if (needs_switch_up || needs_switch_down) {
+        // band boundary has been crossed
+        bandSwitch(needs_switch_up, false);
+
+        // This block differentiates between two types of band transitions:
+        // - Seamless Crossover (e.g., AM<->SW) - keep temp_freq for smooth tuning
+        // - Wrap-Around (involving FM) - reset frequency to the new band edge
+        // Presence of FM_BAND_TYPE is a proxy for wrap-around behavior
+        bool is_wrap_around = (old_band.bandType == FM_BAND_TYPE || g_bandList[g_bandIndex].bandType == FM_BAND_TYPE);
+
+        if (is_wrap_around) {
+            g_currentFrequency = needs_switch_up ? g_bandList[g_bandIndex].minimumFreq : g_bandList[g_bandIndex].maximumFreq;
+        } else {
+            g_currentFrequency = (uint16_t)temp_freq;
+        }
+    } else {
+        // standard intra-band tuning path
+        g_currentFrequency = (uint16_t)temp_freq;
+
+        // snap frequency to the current step grid
+        // intentionally skipped during a band switch to prevent frequency distortion
+        uint16_t remainder = g_currentFrequency % step;
+        if (remainder) g_currentFrequency += g_seekDirection
+            ? (step - remainder)
+            : -remainder;
     }
-
-    // if safe, commit the new frequency and align it to the grid (snap)
-    g_currentFrequency = (uint16_t)temp_freq;
-    uint16_t remainder = g_currentFrequency % step;
-
-    if (remainder) g_currentFrequency += g_seekDirection
-        ? (step - remainder)
-        : -remainder;
 
     g_processFreqChange = true;
     g_lastFreqChange = millis();
@@ -1579,8 +1614,12 @@ void doAvc(int8_t v) {
 
 //Settings: Sync switch
 void doSync(int8_t v) {
+    // Sync is not need in CW mode
+    if (g_currentMode == CW) return;
+
     bool wasSettingsActive = g_settingsActive;
     toggleSetting(Sync);
+
     if (isSSB()) {
         g_si4735.setSSBDspAfc(g_Settings[Sync].param == 1 ? 0 : 1);
         g_si4735.setSSBAvcDivider(g_Settings[Sync].param == 0 ? 0 : 3);
@@ -1673,6 +1712,7 @@ void doCWSwitch(int8_t v) {
     updateBFO();
     g_currentFrequency = original_freq;
     showFrequency(true);
+    updateStereoIndicator();
 }
 
 //Settings: Auto Antenna Capacitor
@@ -1902,10 +1942,15 @@ static inline void handleStepButton() {
 
     if (BUTTONEVENT_SHORTPRESS == evt) {
         switchCommand(CMD_STEP);
-    } else if (BUTTONEVENT_LONGPRESSDONE == evt && (g_currentMode == LSB || g_currentMode == USB)) {
-        // use long press to toggle sideband
-        g_currentMode = (g_currentMode == LSB) ? USB : LSB;
-        applyBandConfiguration();
+    } else if (BUTTONEVENT_LONGPRESSDONE == evt) {
+        // long press to toggle sideband, also for CW
+        if (g_currentMode == LSB || g_currentMode == USB) {
+            g_currentMode = (g_currentMode == LSB) ? USB : LSB;
+            applyBandConfiguration();
+        } else if (g_currentMode == CW) {
+            // in CW call handle with frequency compensation
+            doCWSwitch(0);
+        }
     }
 }
 
