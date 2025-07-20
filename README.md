@@ -16,6 +16,12 @@ This fork introduces two main branches of improvements over the original firmwar
 1.  **Audio Pop/Click Elimination (Hardware & Software Mod):** A modification that completely removes pops and clicks when switching modes. It requires a minor physical change to the receiver's circuit.
 2.  **`MOD_NO_RDS` Firmware Series:** An alternative firmware branch where the RDS feature was removed to free up space for new functionality, including an FM Favorites menu, along with dozens of other fixes and improvements.
 
+**Important:** Pops`s issue improvement only affects the speaker output, as the headphone jack is connected before the amplifier.
+
+`I strongly recommend to connect the voltage divider as close to the pin as possible - use for this a two - 10kOm resistors.
+In order to eliminate possible interference with ADC readout distortion`
+
+![Diagram showing how to connect the pins](https://github.com/user-attachments/assets/681c515e-bbb1-4213-845b-1d2d178f52b2)
 
 **Font, moving elements on the screen have been changed since version 5.0 - if you want to use the old mapping - use version 4.11 without long term support.**
 
