@@ -130,6 +130,20 @@ static inline void performBfoRolloverWithBandCheck(uint16_t* freq, int32_t* bfo)
     if (*bfo > BFOMax) *bfo = BFOMax;
     if (*bfo < -BFOMax) *bfo = -BFOMax;
 
+
+    // following code fixes an issue where tuning past 30.000MHz or 150kHz in SSB
+    // BFO can accumulate (30000.50 kHz), causing a incorect logic before the band switch
+    // fix is commented out because it adds 240 bytes in inline here - minor trade-off
+    /*
+    if ((*freq == 30000 && *bfo > 0) || (*freq == 150 && *bfo < 0)) {
+        bandSwitch((*bfo > 0), false);
+        *freq = (*bfo > 0) ? g_bandList[g_bandIndex].minimumFreq : g_bandList[g_bandIndex].maximumFreq;
+        snapToNewStep(freq, (*bfo > 0));
+        *bfo = 0;
+        return;
+    }
+    */
+    
     // This loop "rolls over" BFO by subtracting 1000 Hz each time and adding 1 kHz to the base frequency
     // If we hit band upper limit, it switches to next band and resets frequency to the new minimum
     // Unlike downward tuning below, there no special "pre-check" here for small positive BFO at the band max
@@ -710,8 +724,8 @@ static void configureAMCommon(uint16_t minFreq, uint16_t maxFreq) {
     g_si4735.setSeekAmLimits(minFreq, maxFreq);
 
     // Custom seek thresholds to improve seek on weak stations
-    g_si4735.setProperty(AM_SEEK_SNR_THRESHOLD, 0);     // AM_SEEK_TUNE_SNR_THRESHOLD (Default: 5)
-    g_si4735.setProperty(AM_SEEK_RSSI_THRESHOLD, 25);   // AM_SEEK_TUNE_RSSI_THRESHOLD (Default: 25)
+    //g_si4735.setProperty(AM_SEEK_SNR_THRESHOLD, 0);     // AM_SEEK_TUNE_SNR_THRESHOLD (Default: 5)
+    //g_si4735.setProperty(AM_SEEK_RSSI_THRESHOLD, 25);   // AM_SEEK_TUNE_RSSI_THRESHOLD (Default: 25)
 }
 
 // AGC hardware control
