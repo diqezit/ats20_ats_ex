@@ -358,6 +358,167 @@ This version introduces the ability to save your favorite FM stations.
 *   [Optimized] Removed redundant rounding in `showFrequencySeek` for FM seek, saving 36 bytes.
 *   [Improved] Added `snapToNewStep` helper with ternary for continuous rollover without jump on up/down, fixing bug in SSB tuning
 
+------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v4.9**
+
+* 	**[Improved/Optimized] AM Seek Logic with Fixed 1 kHz Step (-40–50 bytes):**
+	Eliminated `seekAmMapping()` entirely; seek spacing is now fixed at 1 kHz for all AM modes (including SW/LW/MW), 
+	decoupling it from `stepIdxAM` for consistent, fine-grained scanning and reduced complexity. 
+	Integrated directly into `executeHardwareSeek()` via `setSeekAmSpacing(1)`. 
+	FM remains unchanged.
+
+* 	**[Optimized] Refactored doStep Function (-20–30 bytes):**
+	Removed seek spacing updates (`setSeekFmSpacing(10)` for FM and `seekAmMapping()` for AM), as spacing is now fixed in `executeHardwareSeek()`. 
+	Simplified LW/MW max index check with a ternary operator, reducing branching while maintaining step limits across bands.
+
+* 	**[Optimized] Refactored configureAMCommon Function (-10–15 bytes):**
+	Dropped `seekAmMapping()` call, as spacing is fixed; uncommented AM-specific thresholds (SNR=0, RSSI=25) to enhance sensitivity for weak signals, 
+	aligning with FM behavior without introducing new code.
+
+* 	**[Improved] Enhanced doSeek Function for Reliability:**
+	Retained bounds checking and SW sub-band update loop, optimized for fixed-step operation to prevent edge-case stalls. 
+	FM rounding logic preserved for compatibility. Added ternary-based step grid alignment to correct off-grid frequencies (e.g., 610 %9 !=0), 
+	skipped on encoder interrupt to avoid resets (e.g., 4551 preserved). Implemented ternary wrap-around for seamless SW scanning (min to max on down, max to min on up), 
+	resolving edge stalls (e.g., 30000 down to 1710).
+
+* 	**[Optimized Group] Refactored SSB/CW and Band Handling Functions (-30–50 bytes):**
+	Refactored `configureSSBMode` by commenting out `// g_currentBFO = 0;`, avoiding unnecessary BFO reset on SSB mode entry. 
+	Simplified `bandEvent` by removing rate-limiting counter and modulo operations; band switching now occurs on every long-press. 
+	Optimized `performBfoRolloverWithBandCheck` and `doFrequencyTuneSSB` by eliminating always-false return values, inlining boundary conditions into loops, 
+	and streamlining variable handling and encoder reset.
+
+* 	**[Optimized Group] Refactored FM Favorites Handling (-15–25 bytes):**
+	Simplified `saveFMFav` loop to write only active favorites (up to g_totalFavorites), eliminating the else-branch for unused slots 
+	and reducing branching/EEPROM.update calls while preserving data integrity. 
+	Refactored `loadFMFav` by removing per-frequency validation (range checks) in the loop, relying on firmware-written data validity; 
+	retained outer count validation for safety, cutting comparisons, branching, and inner reset/save operations.
+
+* 	**[Optimized] Refactored Battery Monitoring Subsystem (-50–100 bytes):**
+	Wrapped advanced features (IIR filter, hysteresis, counters) in #if ENABLE_ADVANCED_BATTERY_LOGIC for conditional compilation, 
+	defaulting to a minimal direct-calculation mode to save space. Inlined base_voltage (488) and 
+	hardcoded thresholds (e.g., diff > 2, count=5) in the loop, reducing declarations and sizeof usage while keeping PROGMEM table intact.
+
+* 	**[Optimized] Replaced strcpy_P with direct PROGMEM print in showStep for minor flash savings.**
+  
+*   **[Fixed] Resolved critical tuning lag by re-architecting the frequency update system to be adaptive and robust.** 
+	The new logic eliminates station skipping during fast encoder rotation by implementing a `force_update` trigger that sends 
+	the frequency to the chip whenever the UI delta exceeds 50 kHz. To ensure stability during these aggressive updates, 
+	a 25ms I2C rate-limiter now protects the bus from flooding. This is made possible by a core fix to state management, 
+	where `g_previousFrequency` is now correctly synchronized only after a command is sent, making the delta calculation 
+	for the force-update mechanism accurate and reliable. The necessary flash space for this improved logic was freed by 
+	optimizing and removing non-essential features, such as the animated splash screen and unused global variables.
+
+------------------------------------------------------------------------------------------------------------
+
+
+
+### **MOD_NO_RDS v4.10**
+
+*   **[Fixed] Critical SSB Tuning Jump at Band Edges due to Faulty Snap Logic:**
+    Resolved a critical bug that caused an abrupt frequency jump when tuning downwards in SSB mode across a band boundary. 
+	Was a logical flaw in the `snapToNewStep` function, where a unit mismatch (comparing the frequency in `kHz` with the step value in `Hz`) 
+	led to an incorrect remainder calculation and a massive, erroneous frequency adjustment. 
+	
+	The function has been re-architected to be robust and context-aware: it now correctly **skips snapping for steps < 1 kHz** (preserving smooth tuning),
+	**scales larger steps to kHz** before calculation, and includes an **underflow check** to prevent `uint16_t` wrap-around. 
+	
+
+
+------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v4.11**
+
+* **[Refactored] Modularized functions into static inline helpers for readability (no size impact):**
+  - `processEncoderForSettings` -> `navigateSettingsPage`.
+  - `handleDelayedFrequencyUpdate` -> `performFrequencyUpdateCheck`.
+  - `setup()` -> `initHardwarePins`, `initOLED`, etc.
+  - `cycleAmSsbCwModes` -> `prepareModeSwitch`, `performModeCycle`, `finalizeModeSwitch`.
+  - `doFrequencyTuneSSB` -> `prepareSSBTune`, `performSSBRollover`, `finalizeSSBTune`.
+  Verified no changes or regressions via boundary tests.
+
+* **[Optimized] SSB tuning refactor saved 6 bytes via modular optimization.**
+
+* **[Improved] Dynamic Seek Spacing in AM Modes:**
+  Updated `executeHardwareSeek` to use band-specific spacing: 
+  LW/MW -> `LW_MW_STEP_SPACING`, SW -> `SW_STEP_SPACING`, replacing fixed `AM_STEP_SPACING` for accurate seeking on LW/MW using 1kHz step.
+
+
+------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v5.0**
+
+`(!) Attention:  This release only impacts the rendering UI / Display workflow components; all receiver logic functions remain untouched.`
+
+* **[Optimized] Significant memory optimization achieved by disabling unnecessary fonts (thanks to den3rats) and transitioning to a custom implementation instead of tiny4koled.**
+
+* **[Improved] The library now utilizes a common custom 6x8 font, striking a balance between readability and freeing up additional space for notifications.**
+
+* **[Refactored] Replaced the heavy 3-page font with buffer-based segmental frequency rendering, resulting in a substantial increase in available memory.**
+
+------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v5.1**
+
+
+	`GyverOLED.h`
+*   **[Optimized]** Refined rendering code with faster bitwise math and more compact `offsetof` 
+	data access to reduce flash size and increase speed
+*   **[Refactored]** Removed dead code and unused function parameters 
+
+
+	`Utils.h`
+*   [Added] Introduced a printInverted templated helper function to centralize text inversion logic, simplifying UI code.
+	
+	
+	`ATS_EX.ino`
+*   [Optimized] This refactoring resulted in a measurable decrease in the final flash memory footprint, freeing up crucial space
+
+*   **[Improved] Enhanced brightness control:** The adjustment now uses a non-linear curve across the full 1-255 contrast range
+
+*   [Improved] Reworked mode button logic for a more intuitive AM -> SSB -> CW cycle. The receiver now remembers the last used SSB mode (LSB/USB)
+
+*   [Added] Implemented a long-press on the STEP button to toggle between LSB and USB when in SSB mode, providing quick sideband selection
+
+*   [Optimized] Refactored the battery monitoring subsystem by eliminating a duplicated code path, resulting in a smaller flash memory footprint
+
+*   [Improved] The battery indicator is now much more accurate. 0% level is set to a safe 3.15V 
+
+*   [Optimized] Merged amplifier control functions (`safeAmpOff` and `safeAmpOn`) into a single 
+	`setAmpState(bool on)` with `attribute((always_inline))` cutting FLASH by 20 bytes via reduced call overhead
+	
+*   **[Enhancement] Menu selection:** Text inversion replaced by > indicator, which preserves font appearance and eliminates visual distortion.
+	
+------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v5.2**
+
+`ATS_EX.ino`
+*   **[Fixed] Resolved a critical SSB tuning bug at band edges.** 
+	BFO rollover logic has been refactored for immediate and seamless band switching, eliminating the "stuck" frequency issue when tuning down.
+	
+*   **[Fixed] Fixed a tuning loop in AM mode at band boundaries.** 
+	The frequency no longer gets stuck when tuning across band edges (e.g., from MW to LW).
+	
+*   **[Improved] AM/FM tuning logic is now more robust.** 
+	The "snap to step" feature is disabled during a band switch to prevent frequency distortion, ensuring a smooth and predictable transition.
+
+*   **[Added] Enabled long-press on the STEP button to toggle the sideband in CW mode,** 
+	mirroring the functionality in SSB for a more consistent experience.
+
+*   **[Improved] CW mode behavior now aligns with true receivers:** 
+	the SYNC feature is fully disabled (functionally and visually) when in CW mode.
+
+*   **[Added] CW mode now displays the active sideband (L/U)** on the main screen, providing clear visual feedback for the operator.
+
+*   **[Fixed] Eliminated a visual artifact** where parts of the "kHz" unit would remain on screen when tuning from a 4-digit to a 5-digit frequency in SSB mode.
+
+
 
 ------------------------------------------------------------------------------------------------------------
 

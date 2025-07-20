@@ -130,7 +130,14 @@ static inline void performBfoRolloverWithBandCheck(uint16_t* freq, int32_t* bfo)
     if (*bfo > BFOMax) *bfo = BFOMax;
     if (*bfo < -BFOMax) *bfo = -BFOMax;
 
-    // Handle upward tuning
+    // This loop "rolls over" BFO by subtracting 1000 Hz each time and adding 1 kHz to the base frequency
+    // If we hit band upper limit, it switches to next band and resets frequency to the new minimum
+    // Unlike downward tuning below, there no special "pre-check" here for small positive BFO at the band max
+    // Based on tests and logs, any small delay (needing a full 1000 Hz buildup) is usually not noticeable
+    // (e.g., it might take a few encoder turns, but sound stays smooth)
+    // If you experience "stuck" tuning upward, consider adding a symmetric pre-check for perfect balance
+
+    // Handle tuning upward
     while (*bfo >= 1000) {
         (*freq)++;
         if (*freq >= g_bandList[g_bandIndex].maximumFreq) {
