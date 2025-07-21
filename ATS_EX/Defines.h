@@ -8,8 +8,8 @@
 // 0           | 1 B  | EEPROM_APP_ID_ADDRESS      | Custom ID to validate firmware data structure
 // 1-6         | 6 B  | EEPROM_DATA_START_ADDRESS  | Global state header (volume, mode, BFO, etc.)
 // 7-230       | 224B | -                          | State for all 28 bands (28 bands * 8 bytes each)
-// 231-246     | 16 B | -                          | Global settings array `g_Settings`
-// 247-252     | 6 B  | -                          | Mode-dependent settings `g_modeSettings`
+// 231-247     | 17 B | -                          | Global settings array `g_Settings`
+// 248-253     | 6 B  | -                          | Mode-dependent settings `g_modeSettings`
 //
 // 260-279     | 20 B | EEPROM_FM_FAVORITES_START  | FM favorite station data (10 slots * 2 bytes/slot)
 // 280         | 1 B  | EEPROM_FM_FAVORITES_COUNT  | Address storing the number of saved FM favorites (0-10)
@@ -100,5 +100,9 @@ constexpr auto MIN_SETFREQ_INTERVAL_MS = 25UL;
 // Debugging options
 #define DEBUG_MODE 0                        // Set to 1 to enable debug mode, 0 to disable, (This use serial speed 9600)
 
+// Set to 1 to enable compilation of the SSB patch loading functions overridden in SI4735_fixed.h
+// These functions may offer better performance than the original library.
+// Set to 0 to disable them and fall back to the base library methods
+#define PATCH_EX_SSB 1
 
 #define buttonEvent                NULL

@@ -9,7 +9,7 @@
 // 02.2024
 // http://github.com/goshante
 // ----------------------------------------------------------------------
-// MOD_NO_RDS_v5.2 by diqezit
+// MOD_NO_RDS_v5.3 by diqezit
 // More info for this mod you can get below
 // https://github.com/diqezit/ats20_ats_ex
 // ----------------------------------------------------------------------
@@ -24,11 +24,12 @@
 // https://github.com/G8PTN/ATS_MINI
 // ----------------------------------------------------------------------
 
-#include <SI4735.h>
+#include "Defines.h"
+#include "SI4735_fixed.h"
 #include <EEPROM.h>
 
 #include "CustomFonts.h"        // custom font data
-#include "GyverOLED.h"
+#include "SSD1306_OLED.h"
 GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 
 #if DEBUG_MODE
@@ -39,11 +40,11 @@ GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 #include "SimpleButton.h"
 #include "patch_ssb_compressed.h"
 
-#include "defs.h"
-#include "globals.h"
+#include "Globals.h"
 #include "Utils.h"
+#include "Battery.h"
 
-constexpr auto APP_VERSION = 52;
+constexpr auto APP_VERSION = 53;
 
 // ------------------------------------------
 // ------- Utility & Helper Functions -------
@@ -93,7 +94,7 @@ static void resetEepromDelay() {
 
 // register user activity and mark the state as dirty before save in EEPROM
 static inline void markStateAsDirty() {
-    g_lastUserActivityTime = millis();
+    g_lastUserActivityTime = millis() / 1000;
     g_stateIsDirty = true;
     g_forceRssiUpdate = true;
 }
@@ -143,7 +144,7 @@ static inline void performBfoRolloverWithBandCheck(uint16_t* freq, int32_t* bfo)
         return;
     }
     */
-    
+
     // This loop "rolls over" BFO by subtracting 1000 Hz each time and adding 1 kHz to the base frequency
     // If we hit band upper limit, it switches to next band and resets frequency to the new minimum
     // Unlike downward tuning below, there no special "pre-check" here for small positive BFO at the band max
@@ -406,127 +407,6 @@ static void readAllReceiverInformation() {
     g_lastSavedFrequency = g_currentFrequency;
 }
 
-
-// ------------------------------------------
-// ------- Battery Monitoring Subsystem -----
-// ------------------------------------------
-
-// --- HARDWARE REQUIREMENT ---
-// For battery level display, the BATTERY_VOLTAGE_PIN (look in defs.h) must be
-// connected to the midpoint of a voltage divider made of two 10kΩ resistors
-//
-//   VCC (PREFER after power switch!) --- [10kΩ] --- (BATTERY_VOLTAGE_PIN) --- [10kΩ] --- GND
-//
-// The firmware is calibrated specifically for this 1:2 divider
-// Using other resistor values will result in inaccurate battery readings
-
-
-#if ENABLE_BATTERY_MONITOR
-uint8_t g_stableBatteryPercent = 100;
-
-// saving FLASH memory (1-byte offset)
-struct BatteryPointCompressed {
-    uint8_t voltage_offset;
-    uint8_t percent;
-};
-
-// To save PROGMEM, values are 8-bit offsets from a base of 491,
-// which corresponds to the safe 3.15V cutoff
-static const BatteryPointCompressed battery_table[] PROGMEM = {
-    // Offset, Percent, (ADC -> Approx. Voltage)
-    {156, 100}, // 647 -> 4.15V
-    {148, 90},  // 639 -> 4.10V
-    {141, 85},  // 632 -> 4.05V
-    {132, 80},  // 623 -> 4.00V
-    {125, 75},  // 616 -> 3.95V
-    {117, 70},  // 608 -> 3.90V
-    {109, 65},  // 600 -> 3.85V
-    {101, 60},  // 592 -> 3.80V
-    { 93, 55},  // 584 -> 3.75V
-    { 86, 50},  // 577 -> 3.70V
-    { 78, 45},  // 569 -> 3.65V
-    { 70, 40},  // 561 -> 3.60V
-    { 62, 35},  // 553 -> 3.55V
-    { 55, 30},  // 546 -> 3.50V
-    { 47, 25},  // 538 -> 3.45V
-    { 39, 20},  // 530 -> 3.40V
-    { 31, 15},  // 522 -> 3.35V
-    { 23, 10},  // 514 -> 3.30V
-    { 15,  5},  // 506 -> 3.25V
-    {  7,  2},  // 498 -> 3.20V
-    {  0,  0}   // 491 -> 3.15V (Safe cut-off)
-};
-
-// Calculates raw battery percentage from an ADC value using interpolation
-static uint8_t calculateRawPercent(uint16_t adc_value) {
-    if (adc_value >= 647) return 100;
-    if (adc_value <= 491) return 0;
-
-    // The loop limit '21' is hardcoded as 'TABLE_POINTS - 1' for 22-point table
-    for (uint8_t i = 0; i < 20; ++i) {
-        // Reconstruct full ADC value from the stored 8-bit offset and base (491)
-        uint16_t v_lower = pgm_read_byte(&battery_table[i + 1].voltage_offset) + 491;
-
-        if (adc_value > v_lower) {
-            uint16_t v_upper = pgm_read_byte(&battery_table[i].voltage_offset) + 491;
-            uint8_t p_lower = pgm_read_byte(&battery_table[i + 1].percent);
-            uint8_t p_upper = pgm_read_byte(&battery_table[i].percent);
-
-            return p_lower + ((uint32_t)(adc_value - v_lower) * (p_upper - p_lower)) / (v_upper - v_lower);
-        }
-    }
-    return 0;
-}
-
-#if ENABLE_ADVANCED_BATTERY_LOGIC
-static uint8_t g_percentChangeCounter = 0;
-static int16_t g_averageADC = -1;
-
-static void applyPercentUpdate(uint8_t newPercent) {
-    g_stableBatteryPercent = newPercent;
-    g_percentChangeCounter = 0;
-}
-#endif
-
-// Update internal stable battery percentage
-static void updateStablePercent() {
-    if (!g_voltagePinConnnected) return;
-
-    int sample = analogRead(BATTERY_VOLTAGE_PIN);
-
-    if (sample <= 0) sample = 491; // Default if disconnected
-
-#if ENABLE_ADVANCED_BATTERY_LOGIC
-    if (g_averageADC == -1) g_averageADC = sample;
-
-    // simple IIR filter (3/4 old, 1/4 new)
-    g_averageADC = (3 * g_averageADC + sample) >> 2;
-
-    uint8_t currentRawPercent = calculateRawPercent(g_averageADC);
-    int8_t diff = currentRawPercent - g_stableBatteryPercent;
-
-    // hysteresis logic
-    if (diff == 0) g_percentChangeCounter = 0;
-    else if (diff > 2 || diff < -2) applyPercentUpdate(currentRawPercent);
-    else if (++g_percentChangeCounter >= 5) applyPercentUpdate(currentRawPercent);
-#else
-    g_stableBatteryPercent = calculateRawPercent(sample);
-#endif
-}
-
-// Public interface for the battery monitoring subsystem. Updates the internal
-// state and shows it on the display if the timer has elapsed or if forced.
-void updateAndShowBattery(bool forceShow) {
-    if (!g_voltagePinConnnected) return;
-    updateStablePercent();
-    static uint32_t lastChargeShow = 0;
-    if ((millis() - lastChargeShow) > 10000 || forceShow) {
-        showChargeOnDisplay();
-        lastChargeShow = millis();
-    }
-}
-#endif
-
 // ----------------------------------------------
 // ---- Hardware & Receiver Control Subsystem ---
 // ---- Sensitive logic is here -----------------
@@ -631,7 +511,7 @@ static void configureFMMode() {
 
     // Set custom seek thresholds to improve seek on weak stations
     g_si4735.setProperty(0x1403, 2);  // FM_SEEK_TUNE_SNR_THRESHOLD (Default: 3)
-    g_si4735.setProperty(0x1404, 9);  // FM_SEEK_TUNE_RSSI_THRESHOLD (Default: 20)
+    g_si4735.setProperty(0x1404, 5);  // FM_SEEK_TUNE_RSSI_THRESHOLD (Default: 20)
 
     g_ssbLoaded = false;
     // g_si4735.setFifoCount(1);
@@ -724,8 +604,8 @@ static void configureAMCommon(uint16_t minFreq, uint16_t maxFreq) {
     g_si4735.setSeekAmLimits(minFreq, maxFreq);
 
     // Custom seek thresholds to improve seek on weak stations
-    //g_si4735.setProperty(AM_SEEK_SNR_THRESHOLD, 0);     // AM_SEEK_TUNE_SNR_THRESHOLD (Default: 5)
-    //g_si4735.setProperty(AM_SEEK_RSSI_THRESHOLD, 25);   // AM_SEEK_TUNE_RSSI_THRESHOLD (Default: 25)
+    g_si4735.setProperty(AM_SEEK_SNR_THRESHOLD, 3);     // AM_SEEK_TUNE_SNR_THRESHOLD (Default: 5)
+    g_si4735.setProperty(AM_SEEK_RSSI_THRESHOLD, 10);   // AM_SEEK_TUNE_RSSI_THRESHOLD (Default: 25)
 }
 
 // AGC hardware control
@@ -819,7 +699,7 @@ void showSplashScreen() {
     oled.clear();
 
     oled.setCursor(26, 1);
-    oled.print(F("ATS-20+ v5.2"));
+    oled.print(F("ATS-20+ v5.3"));
 
     oled.setCursor(32, 3);
     oled.print(F("Mod No RDS"));
@@ -1167,34 +1047,38 @@ static void showFav() {
 // --- UI: Settings Menu Drawing ------------
 // ------------------------------------------
 
+// Maps a setting parameter to its UI display string
+// case handles DisplayOff due to non-sequential text indices,
+// while other types use direct or data-driven mapping from PROGMEM
 static inline void handleSwitchParam(char* buf, uint8_t idx, int8_t param, uint8_t type) {
-    uint8_t textIdx;
-    if (type == SettingType::SwitchAuto) {
-        textIdx = param;
-    } else {
-        uint8_t base = pgm_read_byte(&switch_setting_map[idx].baseIndex);
-        bool inv = pgm_read_byte(&switch_setting_map[idx].inverted);
-        textIdx = inv ? (base - param) : (base + param);
-    }
+    uint8_t base = pgm_read_byte(&switch_setting_map[idx].baseIndex);
+    uint8_t inverted = pgm_read_byte(&switch_setting_map[idx].inverted);
+
+    uint8_t textIdx = (idx == SettingsIndex::DisplayOff)
+        ? (param ? 12 + param : 2)
+        : (type == SettingType::SwitchAuto ? param
+            : (base + (inverted ? -param : param)));
+
     strcpy_P(buf, paramTexts[textIdx]);
 }
 
-// Converts setting parameter value to UI display string
+// Converts a setting parameter to its UI display string
 static void SettingParamToUI(char* buf, uint8_t idx) {
-    int8_t param = g_Settings[idx].param;
-    uint8_t type = g_Settings[idx].type;
+    const auto& s = g_Settings[idx];
+    int8_t param = s.param;
 
-    if (type == SettingType::Switch || type == SettingType::SwitchAuto) {
-        handleSwitchParam(buf, idx, param, type);
+    if (s.type >= SettingType::Switch) {
+        handleSwitchParam(buf, idx, param, s.type);
         return;
     }
 
-    if (type == SettingType::ZeroAuto && param == 0) {
-        strcpy_P(buf, paramTexts[0]); // "AUT"
+    if (s.type == SettingType::ZeroAuto && param == 0) {
+        strcpy_P(buf, paramTexts[0]); // AUT
     } else {
-        uint8_t val_to_convert = abs(param);
+        // handles numeric types (Num and ZeroAuto with non-zero param)
+        uint8_t val_to_convert = (param < 0) ? -param : param;
         if (idx == SettingsIndex::Brightness) {
-            val_to_convert += 1;
+            val_to_convert++;
         }
 
         convertToChar(buf, val_to_convert, 3);
@@ -1211,23 +1095,18 @@ static void DrawSetting(uint8_t idx, bool full) {
 
     char buf[5];
 
-    // Calculate position in the page (0-5) for 2-column layout
     uint8_t place = idx - ((g_SettingsPage - 1) * 6);
+    uint8_t xOffset = (place > 2) * 68;
+    uint8_t yOffset = ((place - (place > 2) * 3) << 1) + 2;
 
-    // Determine row (yOffset) and column (xOffset)
-    uint8_t yOffset = (place > 2) ? (place - 3) * 2 : place * 2;
-    uint8_t xOffset = (place > 2) ? 68 : 0;
-
-    // Draw setting name if full redraw requested
     if (full) {
-        oled.setCursor(5 + xOffset, 2 + yOffset);
+        oled.setCursor(5 + xOffset, yOffset);
         oled.print((idx == g_SettingSelected && !g_SettingEditing) ? '>' : ' ');
         oled.print(g_Settings[idx].name);
     }
 
-    // Convert param to string and draw value (aligned to name)
     SettingParamToUI(buf, idx);
-    oled.setCursor(35 + xOffset, 2 + yOffset);
+    oled.setCursor(35 + xOffset, yOffset);
     oled.print((idx == g_SettingSelected && g_SettingEditing) ? '>' : ' ');
     oled.print(buf);
 }
@@ -1244,7 +1123,7 @@ static void showSettingsTitle() {
 
 // Draw the complete settings screen (all visible items)
 static void showSettings() {
-    for (uint8_t i = 0; i < 6 && i + ((g_SettingsPage - 1) * 6) < SettingsIndex::SETTINGS_MAX; i++)
+    for (uint8_t i = 0; i < 6 && i + ((g_SettingsPage - 1) * 6) < SETTINGS_MAX; i++)
         DrawSetting(i + ((g_SettingsPage - 1) * 6), true);
 }
 
@@ -1331,34 +1210,33 @@ static void doFrequencyTune() {
     g_encoderCount = 0;
 
     // > for the upper bound to include the maximum frequency value within the band
-    bool needs_switch_up = (temp_freq > old_band.maximumFreq);
-    bool needs_switch_down = (temp_freq < old_band.minimumFreq);
+    bool needs_switch = (temp_freq > old_band.maximumFreq || temp_freq < old_band.minimumFreq);
 
-    if (needs_switch_up || needs_switch_down) {
+    if (needs_switch) {
         // band boundary has been crossed
-        bandSwitch(needs_switch_up, false);
+        bandSwitch(g_seekDirection, false);
 
         // This block differentiates between two types of band transitions:
         // - Seamless Crossover (e.g., AM<->SW) - keep temp_freq for smooth tuning
         // - Wrap-Around (involving FM) - reset frequency to the new band edge
         // Presence of FM_BAND_TYPE is a proxy for wrap-around behavior
-        bool is_wrap_around = (old_band.bandType == FM_BAND_TYPE || g_bandList[g_bandIndex].bandType == FM_BAND_TYPE);
+        bool is_wrap_around = (old_band.bandType == FM_BAND_TYPE);
+        const Band& new_band = g_bandList[g_bandIndex];
+        is_wrap_around |= (new_band.bandType == FM_BAND_TYPE);
 
-        if (is_wrap_around) {
-            g_currentFrequency = needs_switch_up ? g_bandList[g_bandIndex].minimumFreq : g_bandList[g_bandIndex].maximumFreq;
-        } else {
-            g_currentFrequency = (uint16_t)temp_freq;
-        }
+        g_currentFrequency = is_wrap_around
+            ? (g_seekDirection ? new_band.minimumFreq : new_band.maximumFreq)
+            : (uint16_t)temp_freq;
     } else {
         // standard intra-band tuning path
-        g_currentFrequency = (uint16_t)temp_freq;
+        uint16_t newFreq = (uint16_t)temp_freq;
 
         // snap frequency to the current step grid
         // intentionally skipped during a band switch to prevent frequency distortion
-        uint16_t remainder = g_currentFrequency % step;
-        if (remainder) g_currentFrequency += g_seekDirection
-            ? (step - remainder)
-            : -remainder;
+        uint16_t remainder = newFreq % step;
+        g_currentFrequency = remainder
+            ? (newFreq + (g_seekDirection ? step - remainder : -remainder))
+            : newFreq;
     }
 
     g_processFreqChange = true;
@@ -1746,6 +1624,11 @@ void doRSSIAMOff(int8_t v) {
     toggleSetting(RSSI_AM_Off);
 }
 
+//Settings: Display timeout switch
+void doDisplayOff(int8_t v) {
+    doSwitchLogic(g_Settings[DisplayOff].param, 0, 4, v);
+}
+
 // handles bandwidth adjustment and updates the current band's state
 static void doBandwidth(uint8_t v) {
     Band& current_band = g_bandList[g_bandIndex];
@@ -1948,6 +1831,8 @@ static inline void handleAgcButton() {
     setCpuPrescaler(new_prescaler);
 
     g_displayOn ? oled.setPower(true) : oled.setPower(false);
+
+    if (!g_displayOn) autoDisplayOff = false;
 }
 
 // step button handler
@@ -2183,6 +2068,17 @@ static inline bool processEncoderForCommands(int encoder_delta) {
     return false;
 }
 
+// wake up display on encoder rotation if auto-turned off by timeout (not manual)
+static inline void wakeUpDisplayIfNeeded() {
+    if (!g_displayOn && autoDisplayOff) {
+        g_displayOn = true;
+        setCpuPrescaler(g_Settings[SettingsIndex::CPUSpeed].param);
+        oled.setPower(true);
+        autoDisplayOff = false;
+        g_lastUserActivityTime = millis() / 1000;  // reset timer
+    }
+}
+
 // Handles encoder actions by dispatching to the appropriate handler
 static bool processEncoderActions() {
     if (g_activeCommand != CMD_NONE) {
@@ -2190,6 +2086,8 @@ static bool processEncoderActions() {
     }
 
     bool was_tuning_event = false;
+
+    wakeUpDisplayIfNeeded();
 
     if (g_settingsActive) {
         processEncoderForSettings(g_safeEncoderMovement);
@@ -2248,7 +2146,7 @@ static inline uint8_t getAmSignalValue() {
         return 255;
 
     // last value if frozen or during 1-sec quiet period to keep display stable
-    if (!g_forceRssiUpdate || (millis() - g_lastUserActivityTime < 1000))
+    if (!g_forceRssiUpdate || ((uint16_t)(millis() / 1000) - g_lastUserActivityTime < 1))
         return g_signalQualityValue;
 
     g_forceRssiUpdate = false;
@@ -2269,11 +2167,6 @@ static inline void updateSignalQuality() {
         : ((g_currentMode == AM)
             ? getAmSignalValue()
             : 255);
-
-    // value cap for 2 symbol
-    if (new_value > 99 && new_value != 255) {
-        new_value = 99;
-    }
 
     if (g_signalQualityValue != new_value) {
         g_signalQualityValue = new_value;
@@ -2336,6 +2229,25 @@ static inline void handleSettingsSave() {
         saveAllReceiverInformation(g_settingsDirty); // full_save if settings changed, partial if idle
         g_settingsDirty = false;
         g_stateIsDirty = false;
+    }
+}
+
+// Handles auto display-off timer
+// using a data-driven PROGMEM lookup instead of branching logic
+// and tracks time in seconds to keep all math within 16-bit operations
+static inline void checkDisplayTimeout() {
+    uint8_t p = g_Settings[DisplayOff].param;
+    // timeout values in seconds corresponding to parameter values 0-4
+    static const uint16_t T[5] PROGMEM = { 0, 600, 900, 1800, 3600 };
+    uint16_t timeout_s = pgm_read_word(&T[p]);
+
+    if (!g_displayOn || !timeout_s) return;
+
+    if ((uint16_t)(millis() / 1000) - g_lastUserActivityTime > timeout_s) {
+        g_displayOn = false;
+        setCpuPrescaler(1);
+        oled.setPower(false);
+        autoDisplayOff = true;
     }
 }
 
@@ -2443,6 +2355,7 @@ void setup() {
 // main loop program in process order
 void loop() {
     updateEncoderState();
+    checkDisplayTimeout();
 
 #if ENABLE_FM_FAV
     if (g_favoritesActive) {

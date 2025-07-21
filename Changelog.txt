@@ -500,3 +500,35 @@ This version introduces the ability to save your favorite FM stations.
 *   **[Added] CW mode now displays the active sideband (L/U)** on the main screen, providing clear visual feedback for the operator.
 
 *   **[Fixed] Eliminated a visual artifact** where parts of the "kHz" unit would remain on screen when tuning from a 4-digit to a 5-digit frequency in SSB mode.
+
+------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v5.3**
+
+`ATS_EX.ino`, `globals.h`
+*   **[Added] Added Auto Display-Off Timer.** A new "DIS" setting on page 3 of the menu allows configuring a timer (10, 15, 30, 60 min) 
+	automatically turn off the display and reduce CPU speed during inactivity, saving power
+
+*   **[Improved] Core architecture optimized for code size.** The inactivity tracking logic was switched from 32-bit milliseconds to 16-bit seconds.
+	Use of compact 16-bit arithmetic to minimizing the memory footprint of the add new feature
+
+*   **[Improved] Multiple core functions refactored.** Key UI functions (`SettingParamToUI`, `handleSwitchParam`, `DrawSetting`)
+	and the main tuning logic (`doFrequencyTune`) were rewritten to replace conditional branching with more efficient arithmetic and data-driven lookups,
+	resulting in a significantly more compact firmware.
+
+*   **[Refactored] Introduced `SI4735_fixed.h` Override Class for Non-Invasive Fixes.** Created a new class, `SI4735_fixed`, that inherits from the base `SI4735`
+	library to allow for clean performance improvements without modifying the original source code. 
+	As the primary fix, the inefficient `seekStationProgress` function was overridden. 
+	The logic was corrected to initiate the hardware seek only once and then poll for status, resulting in a much faster and more responsive station search.
+	 
+*   **[Improved] Band Limits for Universal 9/10 kHz Grid Alignment.** Adjusted LW to 150-521 kHz (default freq 300 kHz) and MW to 522-1710 kHz 
+	(default freq 522 kHz, stepIdxAM=2 for 9 kHz). 
+	This data-only change ensures better alignment with both 9 kHz and 10 kHz steps, supporting regional tuning without extra logic or seek impacts.
+	
+*   **[Improved] Battery Logic Refactored.** PROGMEM data table for battery monitoring was removed. 
+	Reduced firmware size and maintaining non-linear battery model. Battery logic moved to a separate file Battery.h
+	Adjusted ADC smoothing filter to be less sensitive to transient noise.
+	
+------------------------------------------------------------------------------------------------------------
+
