@@ -25,6 +25,8 @@ In order to eliminate possible interference with ADC readout distortion`
 
 **Font, moving elements on the screen have been changed since version 5.0 - if you want to use the old mapping - use version 4.11 without long term support.**
 
+[GET 4.11](https://github.com/diqezit/ats20_ats_ex/releases/tag/v4.11)
+
 ### `V4.11`
 
 <img width="1280" height="741" alt="image" src="https://github.com/user-attachments/assets/fcd30ee4-013e-4de6-a1a5-330c730b1e02" />

@@ -58,6 +58,7 @@ enum SettingsIndex {
     CPUSpeed,       // CPU
     SWUnits,        // SWU
     RSSI_AM_Off,    // RSI
+    DisplayOff,     // DIS (Display Off Timeout)
 
     SETTINGS_MAX
 };
@@ -106,6 +107,7 @@ void doScanSwitch(int8_t v = 0);
 void doRSSIAMOff(int8_t v = 0);
 void doCWSwitch(int8_t v = 0);
 void doAntennaCapacitor(int8_t v = 0);
+void doDisplayOff(int8_t v = 0);
 void showSplashScreen();
 void showStatus(bool cleanFreq = false);
 void updateAndShowBattery(bool forceShow);
@@ -195,10 +197,11 @@ long g_storeTime = millis();
 bool g_voltagePinConnnected = false;
 bool g_ssbLoaded = false;
 bool g_stereoStatus = false;
+bool autoDisplayOff = false;
 bool g_displayOn = true;
 volatile bool g_seekStop = false;    // violatile important here!
 uint32_t g_lastAdjustmentTime = 0;
-uint32_t g_lastUserActivityTime = 0; // time of the last user frequency change
+uint16_t g_lastUserActivityTime = 0; // time of the last user frequency change (IN SECONDS)
 bool g_stateIsDirty = false;         // indicate if the state needs saving on idle
 
 // -------------------------------------------------------------------------------------------------
@@ -260,7 +263,7 @@ SimpleButton  btn_Step(STEP_BUTTON);
 SimpleButton  btn_Mode(MODE_SWITCH);
 
 Rotary g_encoder = Rotary(ENCODER_PIN_A, ENCODER_PIN_B);
-SI4735 g_si4735;
+SI4735_fixed g_si4735;
 
 // -------------------------------------------------------------------------------------------------
 // Mode-Dependent Settings
@@ -308,6 +311,7 @@ SettingsItem g_Settings[] =
     { "CPU", 0,  SettingType::Switch,     doCPUSpeed        },
     { "SWU", 0,  SettingType::Switch,     doSWUnits         },
     { "RSI", 1,  SettingType::Switch,     doRSSIAMOff       },
+    { "DIS", 0,  SettingType::Switch,     doDisplayOff      },
 };
 
 // defines the text conversion rules ONLY for settings of type 'Switch'
@@ -350,8 +354,8 @@ int8_t g_bandIndex = 1;
 // it is defined here directly
 Band g_bandList[g_bandCount] = {
     // name,         min_freq,  max_freq, band_type,    current_freq, stepAM, stepSSB, stepFM, bwAM, bwSSB, bwFM
-    { PACK_STR4("LW  "),   150,       520, LW_BAND_TYPE,   300,        2,      4,       1,      4,    4,     0 },
-    { PACK_STR4("MW  "),   520,      1710, MW_BAND_TYPE,  1080,        3,      4,       1,      4,    4,     0 },
+    { PACK_STR4("LW  "),   150,       521, LW_BAND_TYPE,   300,        2,      4,       1,      4,    4,     0 },
+    { PACK_STR4("MW  "),   522,      1710, MW_BAND_TYPE,   522,        2,      4,       1,      4,    4,     0 },
     // --- SW sub bands ---
     { PACK_STR4("SW  "),  1710,      1810, SW_BAND_TYPE,  1750,        1,      4,       1,      4,    4,     0 },
     { PACK_STR4("160m"),  1810,      2000, SW_BAND_TYPE,  1850,        1,      4,       1,      4,    4,     0 },
@@ -438,7 +442,8 @@ const int8_t g_lastStepFM = (sizeof(g_tabStepFM) / sizeof(int8_t)) - 1;
 // used by SettingParamToUI function to convert parameter values to display strings
 const char PROGMEM paramTexts[][4] = {
   "AUT", " On", "Off", "50u", "75u", "kHz", "MHz",
-  "RSS", "SNR", "LSB", "USB", "100", "50%"
+  "RSS", "SNR", "LSB", "USB", "100", "50%",
+  "10m", "15m", "30m", "60m"
 };
 
 const char g_bandModeDesc[][4] = { "AM ", "LSB", "USB", "CW ", "FM " };
