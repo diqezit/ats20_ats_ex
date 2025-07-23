@@ -1,31 +1,35 @@
 #pragma once
 
+// =================================================================================
 // EEPROM Memory Map
-// This map describes how data is organized in the receiver's non-volatile memory
+// This map describes how data is organized in the receiver non-volatile memory
 //
-// Address(es) | Size | Symbol(s)                  | Description
-//-------------|------|----------------------------|----------------------------------------------------
-// 0           | 1 B  | EEPROM_APP_ID_ADDRESS      | Custom ID to validate firmware data structure
-// 1-6         | 6 B  | EEPROM_DATA_START_ADDRESS  | Global state header (volume, mode, BFO, etc.)
-// 7-230       | 224B | -                          | State for all 28 bands (28 bands * 8 bytes each)
-// 231-247     | 17 B | -                          | Global settings array `g_Settings`
-// 248-253     | 6 B  | -                          | Mode-dependent settings `g_modeSettings`
+// Address Range | Allotted | Used     | Symbol(s)                      | Description
+//---------------|----------|----------|--------------------------------|----------------------------------
+// 0             | 1 B      | 1 B      | EEPROM_APP_ID_ADDRESS          | Custom ID to validate data structure
+// 1             | 1 B      | 1 B      | EEPROM_VERSION_ADDRESS         | Firmware version for compatibility
 //
-// 260-279     | 20 B | EEPROM_FM_FAVORITES_START  | FM favorite station data (10 slots * 2 bytes/slot)
-// 280         | 1 B  | EEPROM_FM_FAVORITES_COUNT  | Address storing the number of saved FM favorites (0-10)
+// 10 - 19       | 10 B     | 6 B      | EEPROM_HEADER_START            | Global state header (volume, mode etc.)
+// 20 - 243      | 224 B    | 224 B    | EEPROM_BANDS_START             | State for all 28 bands (28 * 8 bytes)
+// 250 - 299     | 50 B     | ~19 B    | EEPROM_SETTINGS_START          | Global settings array `g_Settings`
+// 300 - 319     | 20 B     | 6 B      | EEPROM_MODE_SETTINGS_START     | Mode-dependent settings
 //
-// 1000        | 1 B  | EEPROM_VERSION_ADDRESS     | Firmware version for compatibility checks
-// -----------------------------------------------------------------------------------------------------
+// 400 - 419     | 20 B     | 20 B     | EEPROM_FM_FAVORITES_START      | FM favorite stations (10 * 2 bytes)
+// 420           | 1 B      | 1 B      | EEPROM_FM_FAVORITES_COUNT      | Count of saved FM favorites
+// =================================================================================
 
-// Core EEPROM
+// --- Core EEPROM Validation ---
 constexpr auto EEPROM_APP_ID = 235;
 constexpr auto EEPROM_APP_ID_ADDRESS = 0;
-constexpr auto EEPROM_VERSION_ADDRESS = 1000;
-constexpr auto EEPROM_DATA_START_ADDRESS = 1;
+constexpr auto EEPROM_VERSION_ADDRESS = 1;
 
-// FM Favorites Storage
-constexpr auto EEPROM_FM_FAVORITES_START = 260;
-constexpr auto EEPROM_FM_FAVORITES_COUNT = 280;
+// --- Data Block Start Addresses ---
+constexpr auto EEPROM_HEADER_START = 10;
+constexpr auto EEPROM_BANDS_START = 20;
+constexpr auto EEPROM_SETTINGS_START = 250;
+constexpr auto EEPROM_MODE_SETTINGS_START = 300;
+constexpr auto EEPROM_FM_FAVORITES_START = 400;
+constexpr auto EEPROM_FM_FAVORITES_COUNT = 420;
 
 // Behavior
 constexpr auto SAVE_ON_IDLE_TIMEOUT = 30000UL;
@@ -38,6 +42,10 @@ constexpr auto MIN_ELAPSED_RSSI_TIME = 150;
 constexpr auto SEEK_TIME = 65535UL;         // 65535 ms = 65.535 seconds
 constexpr auto SW_STEP_SPACING = 5;         // SW step spacing in kHz (1, 5, 9, 10) only supported values. 5 kHz is optimal
 constexpr auto LW_MW_STEP_SPACING = 1;      // for LW/MW a small step of 1kHz for grid alignment
+
+// for signal polling timing
+constexpr auto RSSI_POLL_INTERVAL_MS = 1000UL;          // How often to check RSSI/Stereo when idle.
+constexpr auto RSSI_POLL_DELAY_AFTER_TUNE_MS = 500UL;   // Debounce delay after tuning to let signal settle.
 
 // Display
 #define RST_PIN -1
@@ -83,8 +91,6 @@ constexpr auto MIN_SETFREQ_INTERVAL_MS = 25UL;
 #define STEP_BUTTON      10
 #define ENCODER_BUTTON   14
 
-// For test only (don`t edit)
-
 // Display options
 #define ENABLE_SPLASH_SCREEN 1              // Set to 1 to show splash screen, 0 to disable
 #define ENABLE_EEPROM_RESET_MSG 1           // Set to 1 to show "EEPROM RESET" message, 0 to disable
@@ -102,7 +108,7 @@ constexpr auto MIN_SETFREQ_INTERVAL_MS = 25UL;
 
 // Set to 1 to enable compilation of the SSB patch loading functions overridden in SI4735_fixed.h
 // These functions may offer better performance than the original library.
-// Set to 0 to disable them and fall back to the base library methods
+// Set to 0 to disable them and fall back to the base library methods - off for save 36 bytes
 #define PATCH_EX_SSB 1
 
 #define buttonEvent                NULL

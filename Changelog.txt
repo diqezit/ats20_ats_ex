@@ -532,3 +532,33 @@ This version introduces the ability to save your favorite FM stations.
 	
 ------------------------------------------------------------------------------------------------------------
 
+
+### **MOD_NO_RDS v5.4**
+
+`ATS_EX.ino`, `SI4735_fixed.h`, `Globals.h` , `Defines.h`
+*   **[Fixed] Fixed Audio Interruption During AM RSSI Updates.** 
+	previous polling mechanism in AM mode relied on a `setFrequency` command that caused audible mute or "pop" in the audio. 
+	By leveraging the dedicated `AM_RSQ_STATUS` command from the chip's documentation, the RSSI is now updated seamlessly. The listening experience in AM is now uninterrupted.
+
+*   **[Improved] Implemented "Soft Update" for AM RSSI.**
+	`softAmRssiUpdate()` was added to the `SI4735_fixed` - function encapsulates non-interrupting command (`AM_RSQ_STATUS`) to poll for a fresh signal strength value.
+
+*   **[Refactored] Simplified Signal Polling Logic and Reduced Code Size.** 
+	With the new, reliable "soft update" method in place, the legacy `g_forceRssiUpdate` flag and its associated timer (`updateAmRssiCountdown`) were rendered obsolete and have been removed. 
+	
+*   **[Improved] Restructured SW Band Map.** 
+	Replaced generic "SW" bands with specific broadcast bands (22m, 19m, 11m)
+	Preserved the 28-band limit by adjusting adjacent band boundaries to ensure seamless tuning coverage
+	
+*   **[Fixed] Corrected AGC/AVC Logic.** Fixed a logical inconsistency where the "AVC" (Automatic Volume Control) setting could conflict with manual attenuator (ATT) settings. 
+	AVC is now correctly applied only when the main AGC is active.
+	
+*   **[New] Added Soft Mute SNR Threshold Setting (SMT).** Can now fine-tune the signal-to-noise ratio (SNR) (0-63db) threshold at which the soft mute feature activates.
+	
+*   **[Architectural] Implemented Robust EEPROM Memory Map.** To ensure settings are safe across future firmware updates, EEPROM storage system has been completely overhauled. 
+	Previously, adding a new setting could cause a data shift, corrupting everything saved after it. 
+	The new system uses a block-based map with fixed addresses, so each data type has its own protected space, guaranteeing stability and making future feature additions much easier.
+	
+------------------------------------------------------------------------------------------------------------
+
+	
