@@ -85,4 +85,19 @@ public:
     }
 #endif
 
+    // soft update of the AM RSSI
+    // instead of a disruptive setFrequency() for push and update status - this uses the dedicated AM_RSQ_STATUS (0x43)
+    // command via the base library getter
+    // This command designed for polling signal quality without interrupting the audio path//
+    void softAmRssiUpdate() {
+
+        // base lib store 0x43 response in separate `currentRqsStatus` buff eer
+        getCurrentReceivedSignalQuality(0);
+
+        // copy result back to main `currentStatus` buffer
+        //   makes the fresh RSSI value compatible with the standard getReceivedSignalStrengthIndicator() method,
+        // which expects data in the format of a TUNE_STATUS (0x42) response
+        // per  AN332 - RSSI is at the same offset (RESP4) in both responses
+        currentStatus.raw[4] = currentRqsStatus.raw[4];
+    }
 };

@@ -9,7 +9,7 @@
 // 02.2024
 // http://github.com/goshante
 // ----------------------------------------------------------------------
-// MOD_NO_RDS_v5.3 by diqezit
+// MOD_NO_RDS_v5.4 by diqezit
 // More info for this mod you can get below
 // https://github.com/diqezit/ats20_ats_ex
 // ----------------------------------------------------------------------
@@ -44,7 +44,7 @@ GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 #include "Utils.h"
 #include "Battery.h"
 
-constexpr auto APP_VERSION = 53;
+constexpr auto APP_VERSION = 54;
 
 // ------------------------------------------
 // ------- Utility & Helper Functions -------
@@ -96,7 +96,6 @@ static void resetEepromDelay() {
 static inline void markStateAsDirty() {
     g_lastUserActivityTime = millis() / 1000;
     g_stateIsDirty = true;
-    g_forceRssiUpdate = true;
 }
 
 static bool checkStopSeeking() {
@@ -324,30 +323,33 @@ static void saveAllReceiverInformation(bool full_save = true) {
         return;
     }
 
-    EEPROM.update(EEPROM_VERSION_ADDRESS, APP_VERSION);
+    // Write validation headers to allow for safe future firmware updates.
     EEPROM.update(EEPROM_APP_ID_ADDRESS, EEPROM_APP_ID);
+    EEPROM.update(EEPROM_VERSION_ADDRESS, APP_VERSION);
 
-    uint16_t addr = EEPROM_DATA_START_ADDRESS;
+    uint16_t addr = EEPROM_HEADER_START;
     writeEepromHeader(addr);
 
     if (full_save) {
-        writeAllBandsToEeprom(addr);
+        const uint8_t band_state_size = sizeof(Band) - offsetof(Band, currentFreq);
+        for (uint8_t i = 0; i <= g_lastBand; i++)
+            writeBandStateToEEPROM(EEPROM_BANDS_START + (i * band_state_size), g_bandList[i]);
 
-        // g_Settings params one-by-one to avoid struct padding issues
-        for (uint8_t i = 0; i < SETTINGS_MAX; i++) {
-            EEPROM.update(addr++, g_Settings[i].param);
-        }
+        // g_Settings params are written one-by-one to avoid potential struct padding issues
+        // across different compiler versions
+        for (uint8_t i = 0; i < SETTINGS_MAX; i++)
+            EEPROM.update(EEPROM_SETTINGS_START + i, g_Settings[i].param);
 
-        // g_modeSettings as a block
+        addr = EEPROM_MODE_SETTINGS_START;
         writeEepromBlock(addr, g_modeSettings, sizeof(g_modeSettings));
 
 #if ENABLE_FM_FAV
         saveFMFav();
 #endif
     } else {
+        // partial save only updates the current band state 
         const uint8_t band_state_size = sizeof(Band) - offsetof(Band, currentFreq);
-        uint16_t band_addr = addr + (g_bandIndex * band_state_size);
-        writeBandStateToEEPROM(band_addr, g_bandList[g_bandIndex]);
+        writeBandStateToEEPROM(EEPROM_BANDS_START + (g_bandIndex * band_state_size), g_bandList[g_bandIndex]);
     }
 
     g_lastSavedFrequency = g_currentFrequency;
@@ -358,8 +360,8 @@ static void readAllReceiverInformation() {
     if (EEPROM.read(EEPROM_APP_ID_ADDRESS) != EEPROM_APP_ID || EEPROM.read(EEPROM_VERSION_ADDRESS) != APP_VERSION) {
 #if ENABLE_EEPROM_RESET_MSG
         oled.clear();
-        oled.setCursor(0, 2);
-        oled.print(F("  EEPROM RESET"));
+        oled.setCursor(40, 2);
+        oled.print(F("EEPROM RST"));
         delay(2000);
 #endif
         initializeDefaultModeSettings();
@@ -372,25 +374,22 @@ static void readAllReceiverInformation() {
         return;
     }
 
-    uint16_t addr = EEPROM_DATA_START_ADDRESS;
-
+    uint16_t addr = EEPROM_HEADER_START;
     readEepromHeader(addr);
-    readAllBandsFromEeprom(addr);
 
-    // g_Settings params one-by-one to avoid struct padding issues
-    for (uint8_t i = 0; i < SETTINGS_MAX; i++) {
-        g_Settings[i].param = EEPROM.read(addr++);
-    }
+    const uint8_t band_state_size = sizeof(Band) - offsetof(Band, currentFreq);
+    for (uint8_t i = 0; i <= g_lastBand; i++)
+        readBandStateFromEEPROM(EEPROM_BANDS_START + (i * band_state_size), g_bandList[i]);
 
-    // check for CPU Speed must happen immediately after read
-    if (g_Settings[SettingsIndex::CPUSpeed].param > 1) {
+    for (uint8_t i = 0; i < SETTINGS_MAX; i++)
+        g_Settings[i].param = EEPROM.read(EEPROM_SETTINGS_START + i);
+
+    if (g_Settings[SettingsIndex::CPUSpeed].param > 1)
         g_Settings[SettingsIndex::CPUSpeed].param = 0;
-    }
 
-    // g_modeSettings as a block
+    addr = EEPROM_MODE_SETTINGS_START;
     readEepromBlock(addr, g_modeSettings, sizeof(g_modeSettings));
 
-    // brightness setting, which depends on a value in g_Settings
     applyBrightness();
 
 #if ENABLE_FM_FAV
@@ -399,9 +398,8 @@ static void readAllReceiverInformation() {
 
     loadActiveStateFromBand();
     g_previousFrequency = g_currentFrequency;
-    if (isSSB()) {
-        loadSSBPatch();
-    }
+    if (isSSB()) loadSSBPatch();
+
     applyBandConfiguration();
 
     g_lastSavedFrequency = g_currentFrequency;
@@ -518,6 +516,12 @@ static void configureFMMode() {
     g_si4735.setFmBandwidth(current_band.bwIdxFM);
     g_si4735.setFMDeEmphasis(
         (g_Settings[DeEmp].param == 0) ? 1 : 2);
+
+    // force more aggressive stereo-to-mono blending for cleaner audio on weak stations
+    // tells the chip to switch to mono sooner as the signal fades
+    // FM_BLEND_MULTIPATH_STEREO_THRESHOLD (p. 59) rev 1.2
+    // g_si4735.setFmBlendStereoThreshold(49);     // Default 49
+    // g_si4735.setFmBlendMonoThreshold(30);       // Default 30
 }
 
 // Corrected CW BFO offset logic to match standard radio behavior
@@ -572,6 +576,7 @@ static void configureSSBMode(uint16_t minFreq, uint16_t maxFreq, bool extraSSBRe
 
     // Use SoftMute setting from storage for SSB
     g_si4735.setAmSoftMuteMaxAttenuation(g_modeSettings[MODE_SETTING_SOFT_MUTE][MODE_CONTEXT_SSB]);
+    g_si4735.setAMSoftMuteSnrThreshold(g_Settings[SoftMuteThr].param);
 
     // Use bandwidth index from the current band state
     g_si4735.setSSBAudioBandwidth((g_currentMode == CW) ? g_bwSSBIdx[0] : g_bwSSBIdx[current_band.bwIdxSSB]);
@@ -592,6 +597,7 @@ static void configureAMMode(uint16_t minFreq, uint16_t maxFreq) {
 
     // Use SoftMute setting from storage for AM
     g_si4735.setAmSoftMuteMaxAttenuation(g_modeSettings[MODE_SETTING_SOFT_MUTE][MODE_CONTEXT_AM]);
+    g_si4735.setAMSoftMuteSnrThreshold(g_Settings[SoftMuteThr].param);
     g_si4735.setBandwidth(g_bwAMIdx[current_band.bwIdxAM], 1);
 }
 
@@ -600,7 +606,10 @@ static void configureAMCommon(uint16_t minFreq, uint16_t maxFreq) {
     ModeContext modeCtx = getModeContext();
 
     // Apply AVC MAX GAIN from storage for the current mode
-    g_si4735.setAvcAmMaxGain(g_modeSettings[MODE_SETTING_AVC][modeCtx]);
+    // but only if the AGC enabled (ATT setting is in AUT mode)
+    if (g_modeSettings[MODE_SETTING_AGC][modeCtx] == 0)
+        g_si4735.setAvcAmMaxGain(g_modeSettings[MODE_SETTING_AVC][modeCtx]);
+
     g_si4735.setSeekAmLimits(minFreq, maxFreq);
 
     // Custom seek thresholds to improve seek on weak stations
@@ -644,7 +653,6 @@ void applyBandConfiguration(bool extraSSBReset) {
     loadActiveStateFromBand();
 
     g_signalQualityValue = 255; // not keeping old value on screen temporarily (save 8 bytes)
-    g_forceRssiUpdate = true;
 
     uint8_t cap_value = (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE) ? 1 : g_Settings[AntennaCap].param;
     g_si4735.setTuneFrequencyAntennaCapacitor(cap_value);
@@ -699,7 +707,7 @@ void showSplashScreen() {
     oled.clear();
 
     oled.setCursor(26, 1);
-    oled.print(F("ATS-20+ v5.3"));
+    oled.print(F("ATS-20+ v5.4"));
 
     oled.setCursor(32, 3);
     oled.print(F("Mod No RDS"));
@@ -1114,11 +1122,10 @@ static void DrawSetting(uint8_t idx, bool full) {
 // Draw the title of the settings menu
 static void showSettingsTitle() {
     oled.setCursor(0, 0);
-    printInverted(F("  SETTINGS "), true);
+    printInverted(F("      SETTINGS    "), true);
     printInverted((uint8_t)g_SettingsPage, true);
-    printInverted('/', true);
+    printInverted('|', true);
     printInverted((uint8_t)g_SettingsMaxPages, true);
-    printInverted(F("         "), true);
 }
 
 // Draw the complete settings screen (all visible items)
@@ -1467,7 +1474,11 @@ static void doVolume(int8_t v) {
     showVolume();
 }
 
-//Settings: Attenuation
+// Settings: Attenuation (ATT)
+// manual control over the receiver front-end gain, which handled by the Automatic Gain Control (AGC)
+// 'AUT' (Auto) is the standard mode.
+// can be useful to prevent overload from very strong local stations
+// (by increasing attenuation)
 void doAttenuation(int8_t v) {
     uint8_t max_att_value = (g_currentMode == FM) ? 26 : 37;
     doSwitchLogic(g_Settings[ATT].param, 0, max_att_value, v);
@@ -1475,12 +1486,25 @@ void doAttenuation(int8_t v) {
     setAgcHardware(g_Settings[ATT].param);
 }
 
-//Settings: Soft Mute
+// Settings: Soft Mute Attenuation
+// controls HOW MUCH the volume is reduced when a signal becomes weak
+// A higher value means stronger muting, making the receiver almost silent on noisy frequencies
+// Setting it to 0 - disables soft mute feature
 void doSoftMute(int8_t v) {
     doSwitchLogic(g_Settings[SoftMute].param, 0, 32, v);
 
     if (g_currentMode != FM)
         g_si4735.setAmSoftMuteMaxAttenuation(g_Settings[SoftMute].param);
+}
+
+// Settings: Soft Mute Threshold
+// controls WHEN the soft mute feature activates
+// It sets a minimum signal quality (SNR) threshold
+// If the signal drops below this level, the audio will be muted by the amount set in 'SMA'
+void doSoftMuteThreshold(int8_t v) {
+    doSwitchLogic(g_Settings[SoftMuteThr].param, 0, 63, v);
+    if (!g_si4735.isCurrentTuneFM())
+        g_si4735.setAMSoftMuteSnrThreshold(g_Settings[SoftMuteThr].param);
 }
 
 //Settings: Brightness
@@ -1503,7 +1527,10 @@ void doSSBAVC(int8_t v) {
     }
 }
 
-//Settings: Automatic Volume Control
+// Settings: Automatic Volume Control (AVC)
+// adjusts maximum gain for the AVC system helps to normalize volume levels
+// between strong and weak stations
+// higher value allows for more aggressive leveling, making quiet stations louder
 void doAvc(int8_t v) {
     doSwitchLogic(g_Settings[AutoVolControl].param, 12, 90, v);
 
@@ -1530,7 +1557,10 @@ void doSync(int8_t v) {
     }
 }
 
-//Settings: FM DeEmp switch (50 or 75)
+// Settings: FM De-Emphasis (DE)
+// sets de-emphasis time constant for FM reception
+// matches the pre-emphasis used by broadcasters in different regions
+// 75 µs is standard for America, 50 µs for Europe and rest of
 void doDeEmp(int8_t v) {
     toggleSetting(DeEmp);
     if (g_currentMode == FM)
@@ -2141,17 +2171,19 @@ static void handleDelayedFrequencyUpdate() {
     performFrequencyUpdateCheck(now);
 }
 
+// designated path for polling AM signal strength
+// get RSSI in AM mode using non-interrupting "soft update"
 static inline uint8_t getAmSignalValue() {
     if (g_Settings[RSSI_AM_Off].param == 1)
         return 255;
 
-    // last value if frozen or during 1-sec quiet period to keep display stable
-    if (!g_forceRssiUpdate || ((uint16_t)(millis() / 1000) - g_lastUserActivityTime < 1))
+    // 1sec quiet after interaction
+    // prevents RSSI from flickering while the encoder is actively being turned
+    if (((uint16_t)(millis() / 1000) - g_lastUserActivityTime < 1))
         return g_signalQualityValue;
 
-    g_forceRssiUpdate = false;
-    g_si4735.setFrequency(g_currentFrequency);
-    g_si4735.getStatus();
+    // perform "soft update" after checks passed.. 
+    g_si4735.softAmRssiUpdate();
     return g_si4735.getReceivedSignalStrengthIndicator();
 }
 
@@ -2174,17 +2206,6 @@ static inline void updateSignalQuality() {
     }
 }
 
-// helper for AM RSSI countdown logic
-static inline void updateAmRssiCountdown() {
-    static uint8_t am_refresh_countdown = 0;
-    if (g_currentMode != AM || g_forceRssiUpdate) {
-        am_refresh_countdown = 10;
-    } else if (g_Settings[RSSI_AM_Off].param == 0 && --am_refresh_countdown == 0) {
-        g_forceRssiUpdate = true;
-        am_refresh_countdown = 10;
-    }
-}
-
 // helper for FM stereo indicator logic
 static inline void updateFmStereoIndicator() {
     if (g_currentMode == FM && millis() > 3000) {
@@ -2199,7 +2220,7 @@ static inline void updateFmStereoIndicator() {
 // Checks for and handles signal quality and stereo indicator updates
 static inline void handleSignalAndStereoUpdates() {
     // 500ms debounce after last frequency change to prevent polling while actively tuning
-    if (millis() - g_lastFreqChange < 500) return;
+    if (millis() - g_lastFreqChange < RSSI_POLL_DELAY_AFTER_TUNE_MS) return;
 
     // updates prevent while in any menu
     if (g_settingsActive
@@ -2208,10 +2229,9 @@ static inline void handleSignalAndStereoUpdates() {
 #endif
         ) return;
 
-    if (millis() - g_lastRSSIUpdate >= 1000) {
+    if (millis() - g_lastRSSIUpdate >= RSSI_POLL_INTERVAL_MS) {
         g_lastRSSIUpdate = millis();
 
-        updateAmRssiCountdown();
         updateSignalQuality();
         updateFmStereoIndicator();
     }
@@ -2245,7 +2265,10 @@ static inline void checkDisplayTimeout() {
 
     if ((uint16_t)(millis() / 1000) - g_lastUserActivityTime > timeout_s) {
         g_displayOn = false;
-        setCpuPrescaler(1);
+
+        // on auto-timeout engage deep power save mode at 2 MHz to maximize battery life
+        setCpuPrescaler(3); // 3 = 2 MHz , 2 = 4 MHz , 1 = 8 MHz
+
         oled.setPower(false);
         autoDisplayOff = true;
     }

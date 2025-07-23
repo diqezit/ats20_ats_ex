@@ -41,8 +41,8 @@ enum SettingsIndex {
     ScanSwitch,     // SCN
     AutoVolControl, // AVC
     SoftMute,       // SM
+    SoftMuteThr,    // SMT - Soft Mute SNR Threshold
     DeEmp,          // DE
-    Brightness,     // SCR
 
     // --- Page 2: SSB & CW ---
     BFO,
@@ -53,11 +53,14 @@ enum SettingsIndex {
     Sync,           // SYN
 
     // --- Page 3: Hardware & Visual ---
+    Brightness,     // SCR
     AntennaCap,     // CAP
     UnitsSwitch,    // UNI 
     CPUSpeed,       // CPU
     SWUnits,        // SWU
     RSSI_AM_Off,    // RSI
+
+    // --- Page 4: Advanced ---
     DisplayOff,     // DIS (Display Off Timeout)
 
     SETTINGS_MAX
@@ -92,6 +95,7 @@ void applyBandConfiguration(bool extraSSBReset = false);
 void bandSwitch(bool up, bool loadStoredFreq = true);
 void doAttenuation(int8_t v);
 void doSoftMute(int8_t v);
+void doSoftMuteThreshold(int8_t v);
 void doBrightness(int8_t v);
 void doSSBAVC(int8_t v = 0);
 void doAvc(int8_t v);
@@ -126,7 +130,7 @@ void switchCommand(CommandMode mode);
 // A macro to convert a 4-character string literal into a char array without a null terminator
 #define PACK_STR4(s) {s[0], s[1], s[2], s[3]}
 
-const uint8_t g_SettingsMaxPages = 3;
+const uint8_t g_SettingsMaxPages = 4;       // pages number in settings menu
 const int16_t CW_PITCH_OFFSET_HZ = 500;     // 500 Hz pitch for CW tone generation
 
 #if ENABLE_FM_FAV
@@ -224,7 +228,6 @@ uint8_t g_totalFavorites = 0;
 // -------------------------------------------------------------------------------------------------
 // Radio State
 // -------------------------------------------------------------------------------------------------
-bool g_forceRssiUpdate = true;      // Flag to trigger a one-time RSSI update "kick" in AM/SSB.
 uint8_t g_signalQualityValue = 255; // Unified value for RSSI (all modes). 255 = invalidated.
 uint32_t g_lastRSSIUpdate = 0;
 uint8_t g_muteVolume = 0;
@@ -290,28 +293,31 @@ int8_t g_modeSettings[MODE_SETTINGS_COUNT][MODE_CONTEXT_COUNT];
 SettingsItem g_Settings[] =
 {
     // Page 1
-    { "ATT", 0,  SettingType::ZeroAuto,   doAttenuation     },
-    { "SCN", 1,  SettingType::Switch,     doScanSwitch      },
-    { "AVC", 90, SettingType::Num,        doAvc             },
-    { "SM ", 0,  SettingType::Num,        doSoftMute        },
-    { "DE ", 1,  SettingType::Switch,     doDeEmp           },
-    { "SCR", 4,  SettingType::Num,        doBrightness      },
+    { "ATT", 0,  SettingType::ZeroAuto,   doAttenuation       },
+    { "SCN", 1,  SettingType::Switch,     doScanSwitch        },
+    { "AVC", 90, SettingType::Num,        doAvc               },
+    { "SMA", 0,  SettingType::Num,        doSoftMute          },
+    { "SMT", 0,  SettingType::Num,        doSoftMuteThreshold },
+    { "DE ", 1,  SettingType::Switch,     doDeEmp             },
 
     // Page 2
-    { "BFO", 0,  SettingType::Num,        doBFOCalibration  },
-    { "SSM", 1,  SettingType::Switch,     doSSBSoftMuteMode },
-    { "SVC", 1,  SettingType::Switch,     doSSBAVC          },
-    { "COF", 0,  SettingType::SwitchAuto, doCutoffFilter    },
-    { "CW ", 0,  SettingType::Switch,     doCWSwitch        },
-    { "SYN", 0,  SettingType::Switch,     doSync            },
+    { "BFO", 0,  SettingType::Num,        doBFOCalibration    },
+    { "SSM", 1,  SettingType::Switch,     doSSBSoftMuteMode   },
+    { "SVC", 1,  SettingType::Switch,     doSSBAVC            },
+    { "COF", 0,  SettingType::SwitchAuto, doCutoffFilter      },
+    { "CW ", 0,  SettingType::Switch,     doCWSwitch          },
+    { "SYN", 0,  SettingType::Switch,     doSync              },
 
     // Page 3
-    { "CAP", 0,  SettingType::Switch,     doAntennaCapacitor},
-    { "UNI", 1,  SettingType::Switch,     doUnitsSwitch     },
-    { "CPU", 0,  SettingType::Switch,     doCPUSpeed        },
-    { "SWU", 0,  SettingType::Switch,     doSWUnits         },
-    { "RSI", 1,  SettingType::Switch,     doRSSIAMOff       },
-    { "DIS", 0,  SettingType::Switch,     doDisplayOff      },
+    { "SCR", 4,  SettingType::Num,        doBrightness        },
+    { "CAP", 0,  SettingType::Switch,     doAntennaCapacitor  },
+    { "UNI", 1,  SettingType::Switch,     doUnitsSwitch       },
+    { "CPU", 0,  SettingType::Switch,     doCPUSpeed          },
+    { "SWU", 0,  SettingType::Switch,     doSWUnits           },
+    { "RSI", 1,  SettingType::Switch,     doRSSIAMOff         },
+
+    // Page 4
+    { "DIS", 0,  SettingType::Switch,     doDisplayOff        },
 };
 
 // defines the text conversion rules ONLY for settings of type 'Switch'
@@ -322,8 +328,8 @@ const PROGMEM SwitchMapEntry switch_setting_map[] = {
     [ScanSwitch] =          {2, true},
     [AutoVolControl] =      {0, false},
     [SoftMute] =            {0, false},
+    [SoftMuteThr] =         {0, false},
     [DeEmp] =               {3, false},
-    [Brightness] =          {0, false},
     // Page 2
     [BFO] =                 {0, false},
     [SSM] =                 {7, false},
@@ -332,11 +338,14 @@ const PROGMEM SwitchMapEntry switch_setting_map[] = {
     [CWSwitch] =            {9, false},
     [Sync] =                {2, true},
     // Page 3
+    [Brightness] =          {0, false},
     [AntennaCap] =          {1, false},
     [UnitsSwitch] =         {2, true},
     [CPUSpeed] =            {11, false},
     [SWUnits] =             {5, false},
     [RSSI_AM_Off] =         {1, true},
+    // Page 4
+    [DisplayOff] =          {0, false},
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -371,17 +380,17 @@ Band g_bandList[g_bandCount] = {
     { PACK_STR4("SW  "),  5060,      5900, SW_BAND_TYPE,  5500,        1,      4,       1,      4,    4,     0 },
     { PACK_STR4("49m "),  5900,      6200, SW_BAND_TYPE,  6000,        1,      4,       1,      4,    4,     0 },
     { PACK_STR4("SW  "),  6200,      7000, SW_BAND_TYPE,  6500,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("40m "),  7000,      7300, SW_BAND_TYPE,  7150,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("41m "),  7300,      9400, SW_BAND_TYPE,  8500,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("40m "),  7000,      7200, SW_BAND_TYPE,  7100,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("41m "),  7200,      9400, SW_BAND_TYPE,  7450,        1,      4,       1,      4,    4,     0 },
     { PACK_STR4("31m "),  9400,      9900, SW_BAND_TYPE,  9600,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("SW  "),  9900,     10100, SW_BAND_TYPE, 10000,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("30m "), 10100,     10150, SW_BAND_TYPE, 10120,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("25m "), 10150,     18068, SW_BAND_TYPE, 14000,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("17m "), 18068,     18168, SW_BAND_TYPE, 18100,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("16m "), 18168,     21000, SW_BAND_TYPE, 19500,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("15m "), 21000,     21450, SW_BAND_TYPE, 21200,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("13m "), 21450,     28000, SW_BAND_TYPE, 25000,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("10m "), 28000,     30000, SW_BAND_TYPE, 28400,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("SW  "),  9900,     11600, SW_BAND_TYPE, 11000,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("25m "), 11600,     12100, SW_BAND_TYPE, 11975,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("22m "), 12100,     13870, SW_BAND_TYPE, 13700,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("19m "), 13870,     15800, SW_BAND_TYPE, 15300,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("16m "), 15800,     18100, SW_BAND_TYPE, 17700,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("15m "), 18100,     21850, SW_BAND_TYPE, 21600,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("13m "), 21850,     26100, SW_BAND_TYPE, 25800,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("11m "), 26100,     30000, SW_BAND_TYPE, 27500,        1,      4,       1,      4,    4,     0 },
     // --- FM ---
     { PACK_STR4("    "),  6400,     10800, FM_BAND_TYPE,   8400,        1,      4,       1,      4,    4,     0 }
 };
