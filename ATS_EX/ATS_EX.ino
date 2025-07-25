@@ -9,7 +9,7 @@
 // 02.2024
 // http://github.com/goshante
 // ----------------------------------------------------------------------
-// MOD_NO_RDS_v5.4 by diqezit
+// MOD_NO_RDS_v5.5 by diqezit
 // More info for this mod you can get below
 // https://github.com/diqezit/ats20_ats_ex
 // ----------------------------------------------------------------------
@@ -44,7 +44,7 @@ GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 #include "Utils.h"
 #include "Battery.h"
 
-constexpr auto APP_VERSION = 54;
+constexpr auto APP_VERSION = 55;
 
 // ------------------------------------------
 // ------- Utility & Helper Functions -------
@@ -282,6 +282,7 @@ static inline void writeEepromHeader(uint16_t& addr) {
     EEPROM.update(addr++, g_currentBFO >> 8);
     EEPROM.update(addr++, g_currentBFO & 0xFF);
     EEPROM.update(addr++, g_prevMode);
+    EEPROM.update(addr++, g_lastCWMode);
 }
 
 // Reads the main configuration header and performs sanity checks
@@ -292,6 +293,7 @@ static inline void readEepromHeader(uint16_t& addr) {
     g_currentMode = EEPROM.read(addr++);
     g_currentBFO = (EEPROM.read(addr++) << 8) | EEPROM.read(addr++);
     g_prevMode = EEPROM.read(addr++);
+    g_lastCWMode = EEPROM.read(addr++);
 }
 
 // Writes all band data from RAM to EEPROM
@@ -533,7 +535,7 @@ static void updateBFO() {
     int16_t finalBfo = g_currentBFO + (g_Settings[BFO].param * 100);
 
     if (g_currentMode == CW) {
-        if (g_Settings[CWSwitch].param == 1) { // 1 = USB
+        if (g_lastCWMode == USB) { // 1 = USB
             finalBfo -= CW_PITCH_OFFSET_HZ;
         } else { // 0 = LSB
             finalBfo += CW_PITCH_OFFSET_HZ;
@@ -561,7 +563,7 @@ static void configureSSBMode(uint16_t minFreq, uint16_t maxFreq, bool extraSSBRe
         maxFreq,
         current_band.currentFreq,
         1, // Base step for the chip (1 kHz)
-        (g_currentMode == CW) ? (g_Settings[CWSwitch].param + 1) : g_currentMode);
+        (g_currentMode == CW) ? g_lastCWMode : g_currentMode);
 
     updateSSBCutoffFilter();
 
@@ -634,18 +636,10 @@ static void applyAgcSettings() {
     setAgcHardware(att_val);
 }
 
-// Helper to detect a major mode switch (FM <-> AM/SSB)
-// is needed for safely toggle amplifier off/on during the internal IC transition
-static inline bool isSwitchingBetweenFmAndAm() {
-    bool prevWasFM = (g_currentMode == FM);
-    bool nextIsFM = (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE);
-    bool nextIsPureAM = !nextIsFM && !g_ssbLoaded;
-    return (prevWasFM && nextIsPureAM) || (!prevWasFM && nextIsFM);
-}
-
 // Main band switching logic that coordinates mode transitions and amplifier control
 void applyBandConfiguration(bool extraSSBReset) {
-    bool switchingBetweenFMandAM = isSwitchingBetweenFmAndAm();
+    // detects a major mode switch (FM <-> non-FM) to safely toggle amp
+    bool switchingBetweenFMandAM = (g_currentMode == FM) != (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE);
 
     if (switchingBetweenFMandAM)
         setAmpState(false);
@@ -657,7 +651,7 @@ void applyBandConfiguration(bool extraSSBReset) {
     uint8_t cap_value = (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE) ? 1 : g_Settings[AntennaCap].param;
     g_si4735.setTuneFrequencyAntennaCapacitor(cap_value);
 
-    if (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE) { // better use this
+    if (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE) {
         configureFMMode();
     } else {
         uint16_t minFreq = g_bandList[g_bandIndex].minimumFreq;
@@ -707,7 +701,7 @@ void showSplashScreen() {
     oled.clear();
 
     oled.setCursor(26, 1);
-    oled.print(F("ATS-20+ v5.4"));
+    oled.print(F("ATS-20+ v5.5"));
 
     oled.setCursor(32, 3);
     oled.print(F("Mod No RDS"));
@@ -780,7 +774,7 @@ static void renderSSBTail(bool ssbMode, uint16_t tailBFO, uint8_t len, uint8_t p
 
 // renders measurement units (kHz/MHz)
 static void renderUnit(bool ssbMode, uint8_t len, const char* unit) {
-    if (g_Settings[SettingsIndex::UnitsSwitch].param == 1 && (!ssbMode || len < 5)) {
+    if (!ssbMode || len < 5) {
         oled.setCursor(108, 4);
         oled.print(unit);
     }
@@ -931,47 +925,44 @@ static void showStep() {
     printInverted((__FlashStringHelper*)step_lookup_table[index], invert);
 }
 
-// displays the current bandwidth
+// Renders the bandwidth label
 static void showBandwidth() {
-    char bw[8];
-    const Band& current_band = g_bandList[g_bandIndex];
     const uint8_t* table_ptr = nullptr;
-    uint8_t index;
+    uint8_t index = 0;
+
     switch (g_currentMode) {
     case LSB:
     case USB:
         table_ptr = bw_ssb_map;
-        index = current_band.bwIdxSSB;
+        index = g_bandList[g_bandIndex].bwIdxSSB;
         break;
     case AM:
         table_ptr = bw_am_map;
-        index = current_band.bwIdxAM;
+        index = g_bandList[g_bandIndex].bwIdxAM;
         break;
     case FM:
         table_ptr = bw_fm_map;
-        index = current_band.bwIdxFM;
+        index = g_bandList[g_bandIndex].bwIdxFM;
         break;
+    case CW:
+        // for CW mode non-selectable value
+        return;
     }
 
-    if (table_ptr) {
-        uint8_t offset = pgm_read_byte(&table_ptr[index]);
-        for (uint8_t i = 0; i < 7; i++) {
-            bw[i] = pgm_read_byte(&bw_all_data[offset + i]);
-        }
-        bw[7] = '\0';
-    } else { // for CW
-        bw[0] = '\0';
-    }
+    uint8_t offset = pgm_read_byte(&table_ptr[index]);
+    const char* bw_str_ptr = &bw_all_data[offset];
+
     bool invert = (g_activeCommand == CMD_BW);
     oled.setCursor(40, 7);
-    printInverted(bw, invert);
+    printInverted((__FlashStringHelper*)bw_str_ptr, invert);
 }
 
 // determine the indicator character based on mode
 void updateStereoIndicator() {
-    char c = (g_currentMode == CW) ? (g_Settings[CWSwitch].param == 0 ? 'L' : 'U') :
-        (isSSB() && g_Settings[Sync].param == 1) ? 'S' :
-        (g_currentMode == FM && g_stereoStatus) ? '*' : ' ';
+    char c = (g_currentMode == CW)
+        ? (g_lastCWMode == LSB ? 'L' : 'U')
+        : (isSSB() && g_Settings[Sync].param == 1) ? 'S'
+        : (g_currentMode == FM && g_stereoStatus) ? '*' : ' ';
 
     oled.setCursor(24, 7);
     oled.print(c);
@@ -1020,8 +1011,7 @@ static inline void drawFavItem(uint8_t index, uint8_t y_pos, bool selected) {
 // Display favorites menu
 static void showFav() {
     oled.setCursor(0, 0);
-    printInverted(F("  FM FAVORITES"), true);
-    printInverted(F("         "), true);
+    printInverted(F("     FM FAVORITES    "), true);
 
     if (!g_totalFavorites) {
         oled.setCursor(30, 3);
@@ -1063,7 +1053,7 @@ static inline void handleSwitchParam(char* buf, uint8_t idx, int8_t param, uint8
     uint8_t inverted = pgm_read_byte(&switch_setting_map[idx].inverted);
 
     uint8_t textIdx = (idx == SettingsIndex::DisplayOff)
-        ? (param ? 12 + param : 2)
+        ? (param ? 10 + param : 2)
         : (type == SettingType::SwitchAuto ? param
             : (base + (inverted ? -param : param)));
 
@@ -1074,6 +1064,12 @@ static inline void handleSwitchParam(char* buf, uint8_t idx, int8_t param, uint8
 static void SettingParamToUI(char* buf, uint8_t idx) {
     const auto& s = g_Settings[idx];
     int8_t param = s.param;
+
+    if (idx == SettingsIndex::BATT_PIN) {
+        // LF - named constants in Battery.h for the UI strings
+        strcpy_P(buf, (param == 1) ? BATT_PIN_NAME_ALT : BATT_PIN_NAME_DEFAULT);
+        return;
+    }
 
     if (s.type >= SettingType::Switch) {
         handleSwitchParam(buf, idx, param, s.type);
@@ -1104,8 +1100,9 @@ static void DrawSetting(uint8_t idx, bool full) {
     char buf[5];
 
     uint8_t place = idx - ((g_SettingsPage - 1) * 6);
-    uint8_t xOffset = (place > 2) * 68;
-    uint8_t yOffset = ((place - (place > 2) * 3) << 1) + 2;
+    bool is_right_column = (place > 2);
+    uint8_t xOffset = is_right_column * 68;
+    uint8_t yOffset = ((place - (is_right_column * 3)) << 1) + 2;
 
     if (full) {
         oled.setCursor(5 + xOffset, yOffset);
@@ -1162,6 +1159,7 @@ static void bandSwitch(bool up, bool loadStoredFreq) {
     if (oldType != FM_BAND_TYPE && newType != FM_BAND_TYPE) {
         // fast for seamless transitions within AM/SW bands
         g_si4735.setFrequency(g_currentFrequency);
+        doBandwidth(0);
 
         // clear at SW<->MW/LW transition if MHz mode is enabled
         bool clean = g_Settings[SettingsIndex::SWUnits].param == 1 &&
@@ -1170,7 +1168,6 @@ static void bandSwitch(bool up, bool loadStoredFreq) {
         showFrequency(clean);
         showBandTag();
         showStep();
-        showBandwidth();
     } else {
         // long for major mode changes (like to/from FM - in AM/LW/MW (SSB too)
         applyBandConfiguration();
@@ -1198,6 +1195,7 @@ static void doSeek() {
     }
 
     g_si4735.setFrequency(g_currentFrequency);
+    doBandwidth(0);
     syncActiveStateToBand();
     showStatus(true);
     resetEepromDelay();
@@ -1242,7 +1240,7 @@ static void doFrequencyTune() {
         // intentionally skipped during a band switch to prevent frequency distortion
         uint16_t remainder = newFreq % step;
         g_currentFrequency = remainder
-            ? (newFreq + (g_seekDirection ? step - remainder : -remainder))
+            ? (newFreq - remainder + (g_seekDirection ? step : 0))
             : newFreq;
     }
 
@@ -1345,19 +1343,15 @@ static inline void performModeCycle(int8_t bw) {
     }
 }
 
-// finalize mode switch by applying configuration and handling amp
-static inline void finalizeModeSwitch() {
-    applyBandConfiguration();
-
-    if (!g_ssbLoaded && g_currentMode == AM) setAmpState(true);
-}
-
 // handles the complex logic of cycling through AM, LSB, USB, and CW modes
 static inline void cycleAmSsbCwModes() {
     int8_t bw;
     prepareModeSwitch(bw);
     performModeCycle(bw);
-    finalizeModeSwitch();
+    applyBandConfiguration();
+
+    if (!g_ssbLoaded && g_currentMode == AM)
+        setAmpState(true);
 }
 
 // ------------------------------------------
@@ -1612,11 +1606,6 @@ void doBFOCalibration(int8_t v) {
     }
 }
 
-//Settings: Tune Frequency Antenna Capacitor
-void doUnitsSwitch(int8_t v) {
-    toggleSetting(UnitsSwitch);
-}
-
 //Settings: Scan button switch
 void doScanSwitch(int8_t v) {
     toggleSetting(ScanSwitch);
@@ -1625,23 +1614,28 @@ void doScanSwitch(int8_t v) {
 //Settings: CW sideband mode switch (LSB/USB)
 // provides a seamless sideband switch by calculating the required
 // frequency shift to keep the audible CW tone stable
-void doCWSwitch(int8_t v) {
-    constexpr int16_t COMPENSATION_KHZ = (2 * CW_PITCH_OFFSET_HZ) / 1000; // 1 kHz if CW_PITCH_OFFSET_HZ = 500
-    const int8_t old_param = g_Settings[CWSwitch].param;
-    uint16_t original_freq = g_currentFrequency;
-
-    toggleSetting(CWSwitch);
+static inline void doCWSwitch() {
     if (g_currentMode != CW) return;
 
-    const int8_t actual_direction = g_Settings[CWSwitch].param - old_param;
-    // if (actual_direction == 0) return;
+    constexpr int16_t COMPENSATION_KHZ = (2 * CW_PITCH_OFFSET_HZ) / 1000;
+    uint16_t original_freq = g_currentFrequency;
 
-    g_currentFrequency += actual_direction * COMPENSATION_KHZ;
+    // Toggles g_lastCWMode between LSB (1) and USB (2)
+    g_lastCWMode = 3 - g_lastCWMode;
+    // Calculates direction: -1 for LSB (1), +1 for USB (2)
+    int8_t direction = (g_lastCWMode << 1) - 3; // (mode * 2) - 3
+
+    g_currentFrequency += direction * COMPENSATION_KHZ;
     g_si4735.setFrequency(g_currentFrequency);
     updateBFO();
     g_currentFrequency = original_freq;
     showFrequency(true);
     updateStereoIndicator();
+}
+
+// Settings: Toggles the battery voltage pin between A1 and A2.
+void doBatteryPinSelect(int8_t v = 0) {
+    toggleSetting(BATT_PIN);
 }
 
 //Settings: Auto Antenna Capacitor
@@ -1716,30 +1710,8 @@ static uint8_t volumeEvent(uint8_t event, uint8_t pin) {
             if ((BUTTONEVENT_SHORTPRESS != event) || (VOLUME_BUTTON == pin))
                 doVolume(1);
         }
-    }
-
-    if (!g_muteVolume) {
-#if (0 != VOLUME_DELAY)
-#if (VOLUME_DELAY > 1)
-        static uint8_t count;
-        if (BUTTONEVENT_FIRSTLONGPRESS == event) {
-            count = 0;
-        }
-#endif
-        if (BUTTONEVENT_ISLONGPRESS(event))
-            if (BUTTONEVENT_LONGPRESSDONE != event) {
-#if (VOLUME_DELAY > 1)
-                if (count++ == 0)
-#endif
-                    doVolume(VOLUME_BUTTON == pin ? 1 : -1);
-#if (VOLUME_DELAY > 1)
-                count = count % VOLUME_DELAY;
-#endif
-            }
-#else
-        if (BUTTONEVENT_FIRSTLONGPRESS == event)
-            event = BUTTONEVENT_SHORTPRESS;
-#endif
+    } else if (BUTTONEVENT_ISLONGPRESS(event) && (BUTTONEVENT_LONGPRESSDONE != event)) {
+        doVolume(VOLUME_BUTTON == pin ? 1 : -1);
     }
     return event;
 }
@@ -1779,6 +1751,7 @@ static inline void handleEncoderButton() {
     if (g_settingsActive) {
         g_SettingEditing = !g_SettingEditing;
         DrawSetting(g_SettingSelected, true);
+        g_lastAdjustmentTime = millis();
         return;
     }
 
@@ -1800,6 +1773,7 @@ static inline void handleBandUpButton() {
 
     if (g_settingsActive) {
         switchSettingsPage();
+        g_lastAdjustmentTime = millis();
     } else {
         switchCommand(CMD_BAND);
     }
@@ -1812,6 +1786,7 @@ static inline void handleBandDownButton() {
     resetCommandMode();
     g_settingsActive = !g_settingsActive;
     switchSettings();
+    if (g_settingsActive) g_lastAdjustmentTime = millis();
 }
 
 static inline void handleVolumeUpButton() {
@@ -1852,17 +1827,17 @@ static inline void handleAgcButton() {
     uint8_t evt = btn_AGC.checkEvent(simpleEvent);
     if (BUTTONEVENT_SHORTPRESS != evt) return;
 
-    // not allow toggling OFF while in settings menu
-    if (g_settingsActive && g_displayOn) return;
+    // toggling display power, but prevent turning it OFF while in settings menu
+    if (!g_settingsActive || !g_displayOn) {
+        g_displayOn = !g_displayOn;
+        uint8_t new_prescaler = g_displayOn ? g_Settings[SettingsIndex::CPUSpeed].param : 1;
 
-    g_displayOn = !g_displayOn;
-    uint8_t new_prescaler = g_displayOn ? g_Settings[SettingsIndex::CPUSpeed].param : 1;
+        setCpuPrescaler(new_prescaler);
 
-    setCpuPrescaler(new_prescaler);
+        g_displayOn ? oled.setPower(true) : oled.setPower(false);
 
-    g_displayOn ? oled.setPower(true) : oled.setPower(false);
-
-    if (!g_displayOn) autoDisplayOff = false;
+        if (!g_displayOn) autoDisplayOff = false;
+    }
 }
 
 // step button handler
@@ -1885,7 +1860,7 @@ static inline void handleStepButton() {
             applyBandConfiguration();
         } else if (g_currentMode == CW) {
             // in CW call handle with frequency compensation
-            doCWSwitch(0);
+            doCWSwitch();
         }
     }
 }
@@ -2111,9 +2086,8 @@ static inline void wakeUpDisplayIfNeeded() {
 
 // Handles encoder actions by dispatching to the appropriate handler
 static bool processEncoderActions() {
-    if (g_activeCommand != CMD_NONE) {
+    if (g_activeCommand != CMD_NONE || g_settingsActive)
         g_lastAdjustmentTime = millis();
-    }
 
     bool was_tuning_event = false;
 
@@ -2237,10 +2211,18 @@ static inline void handleSignalAndStereoUpdates() {
     }
 }
 
-// exits command modes (Volume, BW, etc.) after a period of inactivity
+// provides auto-exit for both temporary adjustment modes
+// (e.g., Volume) and the main Settings menu.
 static inline void handleCommandTimeout() {
-    if (g_lastAdjustmentTime && millis() - g_lastAdjustmentTime > ADJUSTMENT_ACTIVE_TIMEOUT)
-        resetCommandMode();
+    if (g_lastAdjustmentTime && millis() - g_lastAdjustmentTime > ADJUSTMENT_ACTIVE_TIMEOUT) {
+        if (g_settingsActive) {
+            g_settingsActive = false;
+            switchSettings();
+            g_lastAdjustmentTime = 0;
+        } else {
+            resetCommandMode();
+        }
+    }
 }
 
 // settings saved to EEPROM if they have been marked as changed
@@ -2257,11 +2239,10 @@ static inline void handleSettingsSave() {
 // and tracks time in seconds to keep all math within 16-bit operations
 static inline void checkDisplayTimeout() {
     uint8_t p = g_Settings[DisplayOff].param;
-    // timeout values in seconds corresponding to parameter values 0-4
-    static const uint16_t T[5] PROGMEM = { 0, 600, 900, 1800, 3600 };
-    uint16_t timeout_s = pgm_read_word(&T[p]);
 
-    if (!g_displayOn || !timeout_s) return;
+    if (!g_displayOn || p == 0) return;
+
+    uint16_t timeout_s = pgm_read_word(&T[p]);
 
     if ((uint16_t)(millis() / 1000) - g_lastUserActivityTime > timeout_s) {
         g_displayOn = false;
@@ -2296,7 +2277,8 @@ static inline void initHardwarePins() {
     DDRD &= ~((1 << ENCODER_PIN_A) | (1 << ENCODER_PIN_B));
     PORTD |= (1 << ENCODER_PIN_A) | (1 << ENCODER_PIN_B);
 
-    g_voltagePinConnnected = analogRead(BATTERY_VOLTAGE_PIN) > 300;
+    // get the correct pin for the initial connection check (lf in Battery.h)
+    g_voltagePinConnnected = analogRead(getBatteryPin()) > 300;
 }
 
 // Helper to initialize OLED display

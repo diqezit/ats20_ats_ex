@@ -561,4 +561,39 @@ This version introduces the ability to save your favorite FM stations.
 	
 ------------------------------------------------------------------------------------------------------------
 
+
+### **MOD_NO_RDS v5.5**
+
+`ATS_EX.ino`, `Globals.h`, `Defines.h`, `Battery.h`
+
+*   **[Refactored] Removed the redundant 'Units Switch' (UNI) setting.**
+    Frequency units (kHz/MHz) are now permanently enabled on the main screen, removing an unnecessary configuration step on/off for this.
+
+*   **[Refactored] Streamlined CW sideband selection.**
+    The 'CW Switch' setting has been removed from the menu to free up memory. 
+	CW sideband (LSB/USB) selection is now handled directly only by a long-press on the `STEP` button
+
+*   **[New] CW sideband state is now persistent.**
+    The selected CW sideband (LSB/USB) is now saved to EEPROM and restored on startup, providing a consistent experience similar to SSB mode.
 	
+*   **[Fixed] Bandwidth settings now apply correctly during SW sub-band changes.**
+	Previously, audio filter would not update after switching between SW bands or completing a station seek without a full mode change. This has been corrected.
+	
+*   [Fixed] Corrected an issue where the Settings menu would remain open indefinitely. 
+	It now closes automatically after inactivity, just like other temporary modes.
+	
+*   [Optimized] Minor adjustments to operators to equivalent arithmetic expressions 
+	without branches convenient for optimization by the compiler to reduce the amount of firmware
+
+*   **[Optimized] Bandwidth display logic (`showBandwidth`) was refactored for Flash savings. **
+	Now calculates a direct pointer to `PROGMEM` data, eliminating a RAM buffer and a  data copy loop.
+	
+*   **[New] Added a "Battery Pin" (BAP) setting to the menu.**
+	Users can now select between ADC pins A1 and A2 for battery voltage monitoring, making the firmware compatible with different hardware revisions without needing to recompile. 
+	Selection is saved to EEPROM.
+	
+*   **[Optimized] Streamlined the long-press handler for Volume controls.**
+	To save critical Flash memory, logic that provided a configurable delay for volume change repeats was removed. 
+	New is simpler and more direct, sacrificing the adjustable repeat speed for a significant reduction in size.
+	
+------------------------------------------------------------------------------------------------------------
