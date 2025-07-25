@@ -17,6 +17,25 @@
 #if ENABLE_BATTERY_MONITOR
 uint8_t g_stableBatteryPercent = 100;
 
+// used for the UI display to match the pin
+// if you change below - modify the corresponding string in the UI code
+const char BATT_PIN_NAME_ALT[]      PROGMEM = " A1"; // <-- Change " A1" to your alternative  (e.g., " A0")
+const char BATT_PIN_NAME_DEFAULT[]  PROGMEM = " A2"; // <-- Change " A2" to your default      (e.g., " A4")
+
+// ----------------------------------------------------------------------------------------------------
+// Returns the ADC pin for battery monitoring based on the user menu selection
+// ----------------------------------------------------------------------------------------------------
+// for use non-standard pin (etc - A0), modify the return values below
+// this ONLY place that needs to be changed!
+// setting parameter stored in EEPROM is 0 for the default pin (A2) and 1 for the alternative (A1)
+static inline uint8_t getBatteryPin() {
+    return (g_Settings[BATT_PIN].param == 1) ?
+        A1 // <------------ Change here for the alternative pin (e.g., " A4")
+        :
+        A2 // <------------ Change here for the default     pin (e.g., " A0")
+        ;
+}
+
 // key points of Li-Ion discharge curve and pre-calculated ranges forinterpolation formula
 #define BATT_ADC_FULL        647 // fully charged battery                               (4.15V)
 #define BATT_ADC_SHOULDER    616 // initial voltage drop flattens out                   (3.95V)
@@ -72,7 +91,7 @@ static inline void applyPercentUpdate(uint8_t newPercent) {
 static inline void updateStablePercent() {
     if (!g_voltagePinConnnected) return;
 
-    int sample = analogRead(BATTERY_VOLTAGE_PIN);
+    int sample = analogRead(getBatteryPin());
 
     if (sample <= 0) sample = BATT_ADC_EMPTY; // if disconnected
 

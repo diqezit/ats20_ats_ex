@@ -44,23 +44,20 @@ enum SettingsIndex {
     SoftMuteThr,    // SMT - Soft Mute SNR Threshold
     DeEmp,          // DE
 
-    // --- Page 2: SSB & CW ---
+    // --- Page 2: SSB & Visual ---
     BFO,
     SSM,
     SVC,
     CutoffFilter,   // COF
-    CWSwitch,       // CW
     Sync,           // SYN
-
-    // --- Page 3: Hardware & Visual ---
     Brightness,     // SCR
+
+    // --- Page 3: Hardware ---
     AntennaCap,     // CAP
-    UnitsSwitch,    // UNI 
     CPUSpeed,       // CPU
+    BATT_PIN,       // BAP (Battery Pin Select)
     SWUnits,        // SWU
     RSSI_AM_Off,    // RSI
-
-    // --- Page 4: Advanced ---
     DisplayOff,     // DIS (Display Off Timeout)
 
     SETTINGS_MAX
@@ -106,12 +103,12 @@ void doSSBSoftMuteMode(int8_t v = 0);
 void doCutoffFilter(int8_t v);
 void doCPUSpeed(int8_t v = 0);
 void doBFOCalibration(int8_t v);
-void doUnitsSwitch(int8_t v = 0);
 void doScanSwitch(int8_t v = 0);
 void doRSSIAMOff(int8_t v = 0);
-void doCWSwitch(int8_t v = 0);
+void doCWSwitch();
 void doAntennaCapacitor(int8_t v = 0);
 void doDisplayOff(int8_t v = 0);
+void doBatteryPinSelect(int8_t v = 0);
 void showSplashScreen();
 void showStatus(bool cleanFreq = false);
 void updateAndShowBattery(bool forceShow);
@@ -130,7 +127,7 @@ void switchCommand(CommandMode mode);
 // A macro to convert a 4-character string literal into a char array without a null terminator
 #define PACK_STR4(s) {s[0], s[1], s[2], s[3]}
 
-const uint8_t g_SettingsMaxPages = 4;       // pages number in settings menu
+const uint8_t g_SettingsMaxPages = 3;       // pages number in settings menu
 const int16_t CW_PITCH_OFFSET_HZ = 500;     // 500 Hz pitch for CW tone generation
 
 #if ENABLE_FM_FAV
@@ -235,8 +232,9 @@ uint8_t g_volume = DEFAULT_VOLUME;
 volatile uint8_t g_currentMode = FM;
 volatile uint8_t g_prevMode = FM;
 int g_currentBFO = 0;
-extern uint8_t g_stableBatteryPercent; // store table percentage for display
-uint8_t g_lastSsbMode = LSB;        // Remember the last used sideband (LSB or USB)
+extern uint8_t g_stableBatteryPercent;  // store table percentage for display
+uint8_t g_lastSsbMode = LSB;            // last used sideband (LSB or USB)
+uint8_t g_lastCWMode = LSB;             // last used CW sideband (LSB/USB)
 
 //Frequency tracking
 uint16_t g_currentFrequency;
@@ -305,18 +303,15 @@ SettingsItem g_Settings[] =
     { "SSM", 1,  SettingType::Switch,     doSSBSoftMuteMode   },
     { "SVC", 1,  SettingType::Switch,     doSSBAVC            },
     { "COF", 0,  SettingType::SwitchAuto, doCutoffFilter      },
-    { "CW ", 0,  SettingType::Switch,     doCWSwitch          },
     { "SYN", 0,  SettingType::Switch,     doSync              },
+    { "SCR", 4,  SettingType::Num,        doBrightness        },
 
     // Page 3
-    { "SCR", 4,  SettingType::Num,        doBrightness        },
     { "CAP", 0,  SettingType::Switch,     doAntennaCapacitor  },
-    { "UNI", 1,  SettingType::Switch,     doUnitsSwitch       },
     { "CPU", 0,  SettingType::Switch,     doCPUSpeed          },
+    { "BAP", 0,  SettingType::Switch,     doBatteryPinSelect  },
     { "SWU", 0,  SettingType::Switch,     doSWUnits           },
     { "RSI", 1,  SettingType::Switch,     doRSSIAMOff         },
-
-    // Page 4
     { "DIS", 0,  SettingType::Switch,     doDisplayOff        },
 };
 
@@ -335,16 +330,14 @@ const PROGMEM SwitchMapEntry switch_setting_map[] = {
     [SSM] =                 {7, false},
     [SVC] =                 {2, true},
     [CutoffFilter] =        {0, false},
-    [CWSwitch] =            {9, false},
     [Sync] =                {2, true},
-    // Page 3
     [Brightness] =          {0, false},
+    // Page 3
     [AntennaCap] =          {1, false},
-    [UnitsSwitch] =         {2, true},
-    [CPUSpeed] =            {11, false},
+    [CPUSpeed] =            {9, false},
+    [BATT_PIN] =            {0, false},
     [SWUnits] =             {5, false},
     [RSSI_AM_Off] =         {1, true},
-    // Page 4
     [DisplayOff] =          {0, false},
 };
 
@@ -392,23 +385,28 @@ Band g_bandList[g_bandCount] = {
     { PACK_STR4("13m "), 21850,     26100, SW_BAND_TYPE, 25800,        1,      4,       1,      4,    4,     0 },
     { PACK_STR4("11m "), 26100,     30000, SW_BAND_TYPE, 27500,        1,      4,       1,      4,    4,     0 },
     // --- FM ---
-    { PACK_STR4("    "),  6400,     10800, FM_BAND_TYPE,   8400,        1,      4,       1,      4,    4,     0 }
+    { PACK_STR4("    "),  6400,     10800, FM_BAND_TYPE,  8400,        1,      4,       1,      4,    4,     0 }
 };
 
 // -------------------------------------------------------------------------------------------------
 // Bandwidth Tables
 // -------------------------------------------------------------------------------------------------
-// single string array in PROGMEM holds all bandwidth labels to save Flash
+
+// single PROGMEM block of null-terminated UI labels
 const char bw_all_data[] PROGMEM =
-"0.5 kHz" "1.0 kHz" "1.2 kHz" "1.8 kHz" "2.0 kHz" "2.2 kHz" "2.5 kHz" "3.0 kHz"
-"4.0 kHz" "6.0 kHz" " AUTO  " "110 kHz" "84 kHz " "60 kHz " "40 kHz ";
+"0.5 kHz\0" "1.0 kHz\0" "1.2 kHz\0" "1.8 kHz\0" "2.0 kHz\0" "2.2 kHz\0"
+"2.5 kHz\0" "3.0 kHz\0" "4.0 kHz\0" "6.0 kHz\0" " AUTO  \0" "110 kHz\0"
+"84 kHz \0" "60 kHz \0" "40 kHz \0";
 
-// more compact (1 byte per entry) than a early table of pointers (2 bytes per entry)
-const uint8_t bw_ssb_map[] PROGMEM = { 0 * 7, 1 * 7, 2 * 7, 5 * 7, 7 * 7, 8 * 7 };
-const uint8_t bw_am_map[] PROGMEM = { 1 * 7, 3 * 7, 4 * 7, 6 * 7, 7 * 7, 8 * 7, 9 * 7 };
-const uint8_t bw_fm_map[] PROGMEM = { 10 * 7, 11 * 7, 12 * 7, 13 * 7, 14 * 7 };
+// Maps UI index to an offset in `bw_all_data`
+// Using 1-byte offsets (vs 2-byte pointers) is a key data size optimization
+// The `* 8` is for readability, reflecting the 8-byte fixed string length
+const uint8_t bw_ssb_map[] PROGMEM = { 0 * 8, 1 * 8, 2 * 8, 5 * 8, 7 * 8, 8 * 8 };
+const uint8_t bw_am_map[]  PROGMEM = { 1 * 8, 3 * 8, 4 * 8, 6 * 8, 7 * 8, 8 * 8, 9 * 8 };
+const uint8_t bw_fm_map[]  PROGMEM = { 10 * 8, 11 * 8, 12 * 8, 13 * 8, 14 * 8 };
 
-// arrays for chip configuration. They map the our UI index to configure IC Si473x
+// Hardware control: Translates a UI index to the Si473x register value
+// Order is fixed by the chip API, not the UI display order
 const uint8_t g_bwSSBIdx[] = { 4, 5, 0, 1, 2, 3 };
 const uint8_t g_bwSSBMaxIdx = 5;
 const uint8_t g_maxFilterAM = 6;
@@ -451,9 +449,12 @@ const int8_t g_lastStepFM = (sizeof(g_tabStepFM) / sizeof(int8_t)) - 1;
 // used by SettingParamToUI function to convert parameter values to display strings
 const char PROGMEM paramTexts[][4] = {
   "AUT", " On", "Off", "50u", "75u", "kHz", "MHz",
-  "RSS", "SNR", "LSB", "USB", "100", "50%",
+  "RSS", "SNR", "100", "50%",
   "10m", "15m", "30m", "60m"
 };
+
+// Timeout values in seconds for the display-off feature, indexed by the setting parameter
+const uint16_t T[5] PROGMEM = { 0, 600, 900, 1800, 3600 };
 
 const char g_bandModeDesc[][4] = { "AM ", "LSB", "USB", "CW ", "FM " };
 
