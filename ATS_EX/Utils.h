@@ -4,13 +4,9 @@
 // cleans up repetitive if/else blocks in the UI drawing code
 template <typename T>
 void printInverted(const T& text, bool invert) {
-    if (invert) {
-        oled.invertText(true);
-        oled.print(text);
-        oled.invertText(false);
-    } else {
-        oled.print(text);
-    }
+    oled.invertText(invert);
+    oled.print(text);
+    oled.invertText(false); // Always reset state to non-inverted
 }
 
 //Faster alternative for convertToChar
@@ -64,23 +60,18 @@ uint8_t ilen(uint16_t n) {
 }
 
 //Split KHz frequency + BFO to KHz and .00 tail
-void splitFreq(uint16_t& khz, uint16_t& tail) {
-    // replaced the original 32-bit math to save a ton of flash space
-    // old way ( (freq * 1000) + bfo ) was linking huge lib
+static inline void splitFreq(uint16_t& khz, uint16_t& tail) {
+    int16_t b = g_currentBFO;
+    int16_t d = b / 1000;
+    int16_t r = b % 1000;
 
-    khz = g_currentFrequency;
-    int16_t bfo_temp = g_currentBFO;
-
-    // manually handle the "borrow" if BFO is negative
-    // way cheaper than converting everything to 32-bit
-    while (bfo_temp < 0) {
-        bfo_temp += 1000;
-        khz--;
+    if (r < 0) {
+        r += 1000;
+        d -= 1;
     }
 
-    // bfo_temp is just the positive part, 0-999
-    // final division is a cheap 16-bit one
-    tail = bfo_temp / 10;
+    khz = g_currentFrequency + d;
+    tail = r / 10;
 }
 
 uint8_t strlen8(const char* s) {
