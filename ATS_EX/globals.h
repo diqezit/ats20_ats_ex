@@ -88,8 +88,16 @@ void debugPrint_P(const char* str);
 void debugPrintNum(int16_t num);
 #endif
 
-void applyBandConfiguration(bool extraSSBReset = false);
-void bandSwitch(bool up, bool loadStoredFreq = true);
+static void applyBandConfiguration(bool extraSSBReset = false);
+static void bandSwitch(bool up, bool loadStoredFreq = true);
+static void doCWSwitch();
+static void applyBrightness();
+static void loadSSBPatch();
+static void showChargeOnDisplay();
+static void showFrequencySeek(uint16_t freq);
+static void resetCommandMode();
+static void switchCommand(CommandMode mode);
+
 void doAttenuation(int8_t v);
 void doSoftMute(int8_t v);
 void doSoftMuteThreshold(int8_t v);
@@ -105,7 +113,6 @@ void doCPUSpeed(int8_t v = 0);
 void doBFOCalibration(int8_t v);
 void doScanSwitch(int8_t v = 0);
 void doRSSIAMOff(int8_t v = 0);
-void doCWSwitch();
 void doAntennaCapacitor(int8_t v = 0);
 void doDisplayOff(int8_t v = 0);
 void doBatteryPinSelect(int8_t v = 0);
@@ -113,12 +120,6 @@ void showSplashScreen();
 void showStatus(bool cleanFreq = false);
 void updateAndShowBattery(bool forceShow);
 void updateStereoIndicator();
-void applyBrightness();
-void loadSSBPatch();
-void showChargeOnDisplay();
-void showFrequencySeek(uint16_t freq);
-void resetCommandMode();
-void switchCommand(CommandMode mode);
 
 // =================================================================================================
 // Macros & Constants
@@ -195,43 +196,42 @@ struct SwitchMapEntry {
 // System State & Flags
 // -------------------------------------------------------------------------------------------------
 long g_storeTime = millis();
-bool g_voltagePinConnnected = false;
-bool g_ssbLoaded = false;
-bool g_stereoStatus = false;
-bool autoDisplayOff = false;
+bool g_voltagePinConnnected;
+bool g_ssbLoaded;
+bool g_stereoStatus;
+bool autoDisplayOff;
 bool g_displayOn = true;
-volatile bool g_seekStop = false;    // violatile important here!
-uint32_t g_lastAdjustmentTime = 0;
-uint16_t g_lastUserActivityTime = 0; // time of the last user frequency change (IN SECONDS)
-bool g_stateIsDirty = false;         // indicate if the state needs saving on idle
+volatile bool g_seekStop;    // violatile important here!
+uint32_t g_lastAdjustmentTime;
+uint16_t g_lastUserActivityTime; // time of the last user frequency change (IN SECONDS)
+bool g_stateIsDirty;         // indicate if the state needs saving on idle
 
 // -------------------------------------------------------------------------------------------------
 // UI & Command State
 // -------------------------------------------------------------------------------------------------
-volatile CommandMode g_activeCommand = CMD_NONE;
-bool g_settingsActive = false;
-bool g_settingsDirty = false;
-int8_t g_SettingSelected = 0;
+volatile CommandMode g_activeCommand;
+bool g_settingsActive;
+bool g_settingsDirty;
+int8_t g_SettingSelected;
 int8_t g_SettingsPage = 1;
-bool g_SettingEditing = false;
+bool g_SettingEditing;
 
 #if ENABLE_FM_FAV
-bool g_favoritesActive = false;
-bool g_favoritesDirty = false;
-uint8_t g_favoriteSelected = 0;
-uint8_t g_totalFavorites = 0;
+bool g_favoritesActive;
+bool g_favoritesDirty;
+uint8_t g_favoriteSelected;
+uint8_t g_totalFavorites;
 #endif
 
 // -------------------------------------------------------------------------------------------------
 // Radio State
 // -------------------------------------------------------------------------------------------------
 uint8_t g_signalQualityValue = 255; // Unified value for RSSI (all modes). 255 = invalidated.
-uint32_t g_lastRSSIUpdate = 0;
-uint8_t g_muteVolume = 0;
+uint32_t g_lastRSSIUpdate;
+uint8_t g_muteVolume;
 uint8_t g_volume = DEFAULT_VOLUME;
 volatile uint8_t g_currentMode = FM;
-volatile uint8_t g_prevMode = FM;
-int g_currentBFO = 0;
+int g_currentBFO;
 extern uint8_t g_stableBatteryPercent;  // store table percentage for display
 uint8_t g_lastSsbMode = LSB;            // last used sideband (LSB or USB)
 uint8_t g_lastCWMode = LSB;             // last used CW sideband (LSB/USB)
@@ -239,19 +239,19 @@ uint8_t g_lastCWMode = LSB;             // last used CW sideband (LSB/USB)
 //Frequency tracking
 uint16_t g_currentFrequency;
 uint16_t g_previousFrequency;
-uint16_t g_lastSavedFrequency = 0;
+uint16_t g_lastSavedFrequency;
 uint8_t g_seekDirection = 1;
 
 //Special logic for fast and responsive frequency surfing
-uint32_t g_lastFreqChange = 0;
-bool g_processFreqChange = 0;
-uint32_t g_lastSetFreqTime = 0;
+uint32_t g_lastFreqChange;
+bool g_processFreqChange;
+uint32_t g_lastSetFreqTime;
 
 // -------------------------------------------------------------------------------------------------
 // Encoder & Buttons
 // -------------------------------------------------------------------------------------------------
-volatile int g_encoderCount = 0;
-int g_safeEncoderMovement = 0;
+volatile int g_encoderCount;
+int g_safeEncoderMovement;
 
 SimpleButton  btn_Bandwidth(BANDWIDTH_BUTTON);
 SimpleButton  btn_BandUp(BAND_BUTTON);

@@ -9,7 +9,7 @@
 // 0             | 1 B      | 1 B      | EEPROM_APP_ID_ADDRESS          | Custom ID to validate data structure
 // 1             | 1 B      | 1 B      | EEPROM_VERSION_ADDRESS         | Firmware version for compatibility
 //
-// 10 - 19       | 10 B     | 7 B      | EEPROM_HEADER_START            | Global state header (volume, mode etc.)
+// 10 - 19       | 10 B     | 6 B      | EEPROM_HEADER_START            | Global state header (volume, mode etc.)
 // 20 - 243      | 224 B    | 224 B    | EEPROM_BANDS_START             | State for all 28 bands (28 * 8 bytes)
 // 250 - 299     | 50 B     | ~18 B    | EEPROM_SETTINGS_START          | Global settings array `g_Settings` 
 // 300 - 319     | 20 B     | 6 B      | EEPROM_MODE_SETTINGS_START     | Mode-dependent settings
@@ -35,13 +35,10 @@ constexpr auto EEPROM_FM_FAVORITES_COUNT = 420;
 constexpr auto SAVE_ON_IDLE_TIMEOUT = 30000UL;
 constexpr auto DEFAULT_VOLUME = 25;
 constexpr auto ADJUSTMENT_ACTIVE_TIMEOUT = 3000;
+constexpr auto SETTINGS_MENU_TIMEOUT = 10000UL;
 #define BAND_DELAY                2
-#define VOLUME_DELAY              1 
 constexpr auto MIN_ELAPSED_TIME = 100;
-constexpr auto MIN_ELAPSED_RSSI_TIME = 150;
 constexpr auto SEEK_TIME = 65535UL;         // 65535 ms = 65.535 seconds
-constexpr auto SW_STEP_SPACING = 5;         // SW step spacing in kHz (1, 5, 9, 10) only supported values. 5 kHz is optimal
-constexpr auto LW_MW_STEP_SPACING = 1;      // for LW/MW a small step of 1kHz for grid alignment
 
 // for signal polling timing
 constexpr auto RSSI_POLL_INTERVAL_MS = 1000UL;          // How often to check RSSI/Stereo when idle.
@@ -55,8 +52,6 @@ constexpr auto RSSI_POLL_DELAY_AFTER_TUNE_MS = 500UL;   // Debounce delay after 
 #define AMP_DDR   DDRC
 #define AMP_PORT  PORTC
 #define AMP_BIT   3
-
-constexpr auto STEREO_STATUS_BIT = 0;
 
 // delay (in ms) to wait after the encoder stops turning before sending
 // final frequency to the chip
@@ -106,5 +101,3 @@ constexpr auto MIN_SETFREQ_INTERVAL_MS = 25UL;
 // These functions may offer better performance than the original library.
 // Set to 0 to disable them and fall back to the base library methods - off for save 36 bytes
 #define PATCH_EX_SSB 0
-
-#define buttonEvent                NULL

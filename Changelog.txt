@@ -597,3 +597,36 @@ This version introduces the ability to save your favorite FM stations.
 	New is simpler and more direct, sacrificing the adjustable repeat speed for a significant reduction in size.
 	
 ------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v5.6**
+
+*   **[Optimized] Code refactoring for Flash savings:**
+    *   Eliminated redundant and unreachable conditions in all main button handlers (`Step`, `Mode`, `Volume`, `Favorites`), saving a total of **68 bytes**. This was achieved by analyzing the global UI state and control flow.
+    *   Removed unnecessary UI redraw logic from `doSync` and `handleModeButton` after identifying that the screen state was already being correctly preserved, saving **26 bytes**.
+    *   Removed unused `g_prevMode` variable and its EEPROM storage, saving **26 bytes** of Flash and 2 bytes of RAM.
+    *   **Optimized `SettingParamToUI` by flattening its logic with a "guard clause" pattern.** This eliminated a nested `if/else` block, leading to more efficient machine code and saving **6 bytes** of Flash.
+    *   Refactored `handleAgcButton`, `snapToNewStep`, `applyBandConfiguration`, and `processEncoderForCommands` for minor code size reduction, saving a combined **14 bytes**.
+    *   Refactored `doStep()` to use a unified processing block with a switch-case statement. Uses pointers to mode-specific variables to eliminate branching and code duplication.
+    *   Refactored `syncModeDependentSettings()` to use a ternary-based assignment, saving 12 bytes of flash.
+    *   Refactored `doBandwidth()` to unify AM/FM logic via a pointer-based approach, saving 24 bytes.
+    *   `doSeek()` Cached pointer to band element in SW scan loop, saving 8 bytes of Flash.
+
+*   **[Fixed] Improved Settings Menu control:**
+    *   Now longer 10-second inactivity timeout for the Settings menu to prevent it from closing prematurely. 3-second timeout for simple modes (Volume, Step, etc.) is retained.
+	
+*   **[Fixed] Ensured EEPROM Data Integrity:** 
+	*   Corrected 16-bit EEPROM reads in readEepromHeader and loadFMFav. Switched to a sequential, multi-step process to eliminate undefined behavior 
+		from multiple addr++ operations, preventing potential byte-swapping and data corruption.
+		
+*   **[Feature] Implemented Dynamic AM Seek Step:**
+    *   `seek` operation now uses currently selected manual tuning step (1, 5, 9, or 10 kHz), giving the user direct control over scan speed and precision. Replaces previous fixed seek step (1 / 5 kHz).
+	
+*   **[Feature] Restored the advanced SSB tuning system for a smooth, "analog-like" experience.**
+    *  BFO now operates in a seamless ±13 kHz fine-tuning window, automatically rolling over into the main frequency to eliminate perceptible tuning jumps.
+		A BFO calibration setting with a ±2.5 kHz range is available in the menu, allowing precise compensation for hardware variations in the quartz crystal resonator.
+		
+*   **[Optimized] The font has been adjusted for better readability so that it does not strain the eyes.
+	
+
+------------------------------------------------------------------------------------------------------------
