@@ -161,5 +161,15 @@ void debugPrintNum(int16_t num) {
     }
 }
 
+void debugPrintHex(uint16_t num) {
+    debugPrint_P(PSTR("0x"));
+    for (int8_t i = 12; i >= 0; i -= 4) {
+        uint8_t digit = (num >> i) & 0xF;
+        char ch = (digit < 10) ? ('0' + digit) : ('A' + digit - 10);
+        while (!(UCSR0A & (1 << UDRE0))); UDR0 = ch;
+    }
+    debugPrint_P(PSTR("\n"));
+}
+
 #endif
 

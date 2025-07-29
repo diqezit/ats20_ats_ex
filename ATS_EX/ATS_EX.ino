@@ -9,7 +9,7 @@
 // 02.2024
 // http://github.com/goshante
 // ----------------------------------------------------------------------
-// MOD_NO_RDS_v5.7 by diqezit
+// MOD_NO_RDS_v5.8 by diqezit
 // More info for this mod you can get below
 // https://github.com/diqezit/ats20_ats_ex
 // ----------------------------------------------------------------------
@@ -24,11 +24,14 @@
 // https://github.com/G8PTN/ATS_MINI
 // ----------------------------------------------------------------------
 
+// To resolve the conflict of definitions(wire->microWire),
+// you will need to manually edit the SI4735.h header file,
+// which is part of the PU2CLR library, if the library is updated automatically
+#include <microWire.h> // #include <Wire.h>
+
 #include "Defines.h"
 #include "SI4735_fixed.h"
 #include <EEPROM.h>
-
-#include "CustomFonts.h"        // custom font data
 #include "SSD1306_OLED.h"
 GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 
@@ -44,11 +47,11 @@ GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 #include "Utils.h"
 #include "Battery.h"
 
-constexpr auto APP_VERSION = 57;
+constexpr auto APP_VERSION = 58;
 
-// ------------------------------------------
-// ---------------- Macro -------------------
-// ------------------------------------------
+// ==========================================
+// ===== CORE UTILITIES & DEFINITIONS =======
+// ==========================================
 
 // helper to check if the band type
 // used to limit max AM step index as larger steps (like 9/10kHz)
@@ -57,17 +60,12 @@ constexpr auto APP_VERSION = 57;
 // to get the last valid index of a zero-based array
 #define LEN(a) ((uint8_t)(sizeof(a) - 1))
 
-
 // timed checks
 #define now_ms()            (uint32_t)millis()
 #define since_ms(t)         (now_ms() - (uint32_t)(t))
 #define passed_ms(t,d)      (since_ms(t) >= (uint32_t)(d))
 
 #define RETURN_IF_SETTINGS_ACTIVE() do { if (g_settingsActive) return; } while(0)
-
-// ------------------------------------------
-// ------- Utility & Helper Functions -------
-// ------------------------------------------
 
 static bool isSSB() {
     return g_currentMode > AM && g_currentMode < FM;
@@ -192,9 +190,9 @@ static inline void performBfoRolloverWithBandCheck(uint16_t* freq, int32_t* bfo)
     }
 }
 
-// ------------------------------------------
-// ------- EEPROM Data I/O Subsystem --------
-// ------------------------------------------
+// ==========================================
+// ===== EEPROM MANAGEMENT SUBSYSTEM ========
+// ==========================================
 
 // Initializes mode-dependent settings to their default values
 static void initializeDefaultModeSettings() {
@@ -422,10 +420,10 @@ static void readAllReceiverInformation() {
     g_lastSavedFrequency = g_currentFrequency;
 }
 
-// ----------------------------------------------
-// ---- Hardware & Receiver Control Subsystem ---
-// ---- Sensitive logic is here -----------------
-// ----------------------------------------------
+
+// ==========================================
+// ===== HARDWARE CONTROL SUBSYSTEM =========
+// ==========================================
 
 // Controls the MD8002A amplifier state (on/off)
 // Always sets the pin to OUTPUT mode for safety
@@ -437,6 +435,15 @@ static inline void __attribute__((always_inline)) setAmpState(bool on) {
     } else {
         AMP_PORT |= (1 << AMP_BIT);   // HIGH (off)
     }
+}
+
+// AGC hardware control
+static inline void setAgcHardware(int8_t att_val) {
+    bool disableAgc = att_val > 0;
+    // attenuation index for the chip is one less than the parameter valu
+    // if att_val is 0 (auto) or 1 (manual, 0dB), the index sent to the chip is 0
+    uint8_t agcNdx = (att_val > 1) ? (att_val - 1) : 0;
+    g_si4735.setAutomaticGainControl(disableAgc, agcNdx);
 }
 
 //Saves more flash image size
@@ -518,7 +525,74 @@ static inline uint16_t executeHardwareSeek() {
     return g_si4735.getFrequency();
 }
 
-// Set up FM radio parameters including frequency limits, bandwidth, and de-emphasis
+// Applies curated audio profile for FM band
+// Profile is permanently active in FM mode and combines key enhancements
+// - Enables aggressive soft mute for quiet tuning between stations
+// - Repurposes Hi-Cut filter as a static EQ creating warmer sound on small speaker
+// - Activates an experimental noise blanker to reduce impulse noise
+// - Delegates mono/stereo control to dedicated handler
+static void FMAudioConfigure() {
+
+    // --- Aggressive Soft Mute ---
+    // properties make the soft mute react instantly and attenuate deeply when SNR drops
+    // silences static hiss when tuning between stations
+    g_si4735.setProperty(0x1300, FM_PROP_SOFTMUTE_RATE);
+    g_si4735.setProperty(0x1301, FM_PROP_SOFTMUTE_SLOPE);
+    g_si4735.setProperty(0x1302, FM_PROP_SOFTMUTE_MAX_ATTN);
+    g_si4735.setProperty(0x1303, FM_PROP_SOFTMUTE_REL_RATE);
+    g_si4735.setProperty(0x1304, FM_PROP_SOFTMUTE_ATT_RATE);
+    g_si4735.setProperty(0x1305, FM_PROP_SOFTMUTE_DEC_RATE);
+
+
+    // --- Hi-Cut Filter as Audio Equalizer ---
+    // The code below re-purposes the hi-cut filter as a static EQ to create a warmer sound
+
+    // dynamic hi-cut filter is re-purposed as a static audio filter
+    // forced active to tailor the audio output for the small speaker,
+    // reducing high-frequency harshness
+    g_si4735.setProperty(0x1A01, FM_PROP_HICUT_WINDOW);
+    g_si4735.setProperty(0x1A02, FM_PROP_HICUT_SNR_THRESH);
+    g_si4735.setProperty(0x1A03, FM_PROP_HICUT_ATT_RATE);
+    g_si4735.setProperty(0x1A04, FM_PROP_HICUT_REL_RATE);
+    g_si4735.setProperty(0x1A05, FM_PROP_HICUT_MPX_THRESH);
+    g_si4735.setProperty(0x1A06, FM_PROP_HICUT_CUTOFF);
+    g_si4735.setProperty(FM_PROP_HICUT_ENABLE, 1); // Always enable Hi-Cut for this profile
+
+    // --- Experimental Noise Blanker ---
+    // configure a digital filter to detect and suppress short noise spikes
+    // this feature is undocumented for Si473x but present in related chips
+    // testing shows no audio degradation when enabled
+    g_si4735.setProperty(0x1900, FM_PROP_NB_REJ_THRESH);
+    g_si4735.setProperty(0x1901, FM_PROP_NB_ATT_RATE);
+    g_si4735.setProperty(0x1902, FM_PROP_NB_REL_RATE);
+    g_si4735.setProperty(0x1903, FM_PROP_NB_ADC_OVER_THRESH);
+    g_si4735.setProperty(0x1904, FM_PROP_NB_ADC_OVER_DELAY);
+}
+
+// Corrected CW BFO offset logic to match standard radio behavior
+// The Si4735 IC requires an inverted BFO value, so the math is reversed here to compensate
+// To get a positive BFO offset for USB, the value must be negative before the final inversion
+// See: https://github.com/goshante/ats20_ats_ex/issues/42#issuecomment-3015265184
+static void updateBFO() {
+
+    int16_t finalBfo = g_currentBFO + (g_Settings[BFO].param * 100);
+
+    if (g_currentMode == CW) {
+        if (g_lastCWMode == USB) { // 1 = USB
+            finalBfo -= CW_PITCH_OFFSET_HZ;
+        } else { // 0 = LSB
+            finalBfo += CW_PITCH_OFFSET_HZ;
+        }
+    }
+
+    g_si4735.setSSBBfo(finalBfo * -1);
+}
+
+// Orchestrates complete Si4735 setup for FM mode
+// Main entry point when switching to any FM band
+// - Sets essential parameters like frequency limits and step from band data
+// - Applies custom seek thresholds for improved weak station performance
+// - Activates curated audio profile via FMAudioConfigure for enhanced sound
 static void configureFMMode() {
     g_currentMode = FM;
     g_stereoStatus = false;
@@ -552,95 +626,10 @@ static void configureFMMode() {
     FMAudioConfigure();
 }
 
-// apply curated set of audio properties specifically for the FM band - pernamently active in FM mode
-static void FMAudioConfigure() {
-
-    // --- Aggressive Soft Mute ---
-    // properties make the soft mute react instantly and attenuate deeply when SNR drops
-    // silences static hiss when tuning between stations
-    g_si4735.setProperty(0x1300, FM_PROP_SOFTMUTE_RATE);
-    g_si4735.setProperty(0x1301, FM_PROP_SOFTMUTE_SLOPE);
-    g_si4735.setProperty(0x1302, FM_PROP_SOFTMUTE_MAX_ATTN);
-    g_si4735.setProperty(0x1303, FM_PROP_SOFTMUTE_REL_RATE);
-    g_si4735.setProperty(0x1304, FM_PROP_SOFTMUTE_ATT_RATE);
-    g_si4735.setProperty(0x1305, FM_PROP_SOFTMUTE_DEC_RATE);
-
-    
-    // --- Hi-Cut Filter as Audio Equalizer (Temporarily Disabled) ---
-    // The code below re-purposes the hi-cut filter as a static EQ to create a warmer sound
-
-    // To re-enable, simply uncomment this block
-
-    // dynamic hi-cut filter is re-purposed as a static audio filter
-    // forced active to tailor the audio output for the small speaker,
-    // reducing high-frequency harshness
-    /*
-    g_si4735.setProperty(0x1A00, FM_PROP_HICUT_ENABLE);
-    g_si4735.setProperty(0x1A01, FM_PROP_HICUT_WINDOW);
-    g_si4735.setProperty(0x1A02, FM_PROP_HICUT_SNR_THRESH);
-    g_si4735.setProperty(0x1A03, FM_PROP_HICUT_ATT_RATE);
-    g_si4735.setProperty(0x1A04, FM_PROP_HICUT_REL_RATE);
-    g_si4735.setProperty(0x1A05, FM_PROP_HICUT_MPX_THRESH);
-    g_si4735.setProperty(0x1A06, FM_PROP_HICUT_CUTOFF);
-    */
-
-
-    // --- Experimental Noise Blanker ---
-    // configure a digital filter to detect and suppress short noise spikes
-    // this feature is undocumented for Si473x but present in related chips
-    // testing shows no audio degradation when enabled
-    g_si4735.setProperty(0x1900, FM_PROP_NB_REJ_THRESH);
-    g_si4735.setProperty(0x1901, FM_PROP_NB_ATT_RATE);
-    g_si4735.setProperty(0x1902, FM_PROP_NB_REL_RATE);
-    g_si4735.setProperty(0x1903, FM_PROP_NB_ADC_OVER_THRESH);
-    g_si4735.setProperty(0x1904, FM_PROP_NB_ADC_OVER_DELAY);
-
-
-    // --- Forced MONO Operation (Temporarily Disabled) ---
-    // The code below forces the receiver into MONO mode for a cleaner signal on the internal speaker.
-    // It is disabled by default to allow stereo listening via headphones.
-    // I can add logic switch for this via the menu, but it didn't fit in the memory! :(
-
-    // To re-enable, simply uncomment this block
-
-    // stereo decoder is disabled directly
-    /*
-    g_si4735.setFmStereoOff();
-    g_si4735.setProperty(0x1105, FM_PROP_BLEND_STEREO_THRESH);
-    g_si4735.setProperty(0x1106, FM_PROP_BLEND_MONO_THRESH);
-    g_si4735.setProperty(0x1800, FM_PROP_BLEND_STEREO_THRESH); // Also set legacy property for compatibility
-    g_si4735.setProperty(0x1801, FM_PROP_BLEND_MONO_THRESH);   // Also set legacy property for compatibility
-
-
-    // additional blend/hicut properties to ensure mono operation
-    g_si4735.setProperty(0x1804, 127);
-    g_si4735.setProperty(0x1805, 127);
-    g_si4735.setProperty(0x1808, 0);
-    g_si4735.setProperty(0x1809, 0);
-    */
-
-}
-
-// Corrected CW BFO offset logic to match standard radio behavior
-// The Si4735 IC requires an inverted BFO value, so the math is reversed here to compensate
-// To get a positive BFO offset for USB, the value must be negative before the final inversion
-// See: https://github.com/goshante/ats20_ats_ex/issues/42#issuecomment-3015265184
-static void updateBFO() {
-
-    int16_t finalBfo = g_currentBFO + (g_Settings[BFO].param * 100);
-
-    if (g_currentMode == CW) {
-        if (g_lastCWMode == USB) { // 1 = USB
-            finalBfo -= CW_PITCH_OFFSET_HZ;
-        } else { // 0 = LSB
-            finalBfo += CW_PITCH_OFFSET_HZ;
-        }
-    }
-
-    g_si4735.setSSBBfo(finalBfo * -1);
-}
-
-// Initialize SSB mode with patch loading, BFO setup, filters, and audio bandwidth configuration
+// Orchestrates Si4735 setup for SSB and CW modes
+// - Handles optional SSB patch reload on major mode changes
+// - Differentiates between SSB and CW disabling DSP AFC for CW reception
+// - Applies all user-defined settings for filters audio and soft mute
 static void configureSSBMode(uint16_t minFreq, uint16_t maxFreq, bool extraSSBReset) {
     Band& current_band = g_bandList[g_bandIndex];
 
@@ -681,7 +670,9 @@ static void configureSSBMode(uint16_t minFreq, uint16_t maxFreq, bool extraSSBRe
     g_si4735.setSSBSoftMute(g_Settings[SSM].param);
 }
 
-// Switch to AM mode and configure bandwidth, soft mute, and frequency parameters
+// Configures chip for standard AM reception
+// - Reads all parameters like frequency step and bandwidth from current band state
+// - Applies mode-specific settings for audio properties like soft mute
 static void configureAMMode(uint16_t minFreq, uint16_t maxFreq) {
     g_currentMode = AM;
     const Band& current_band = g_bandList[g_bandIndex];
@@ -698,7 +689,9 @@ static void configureAMMode(uint16_t minFreq, uint16_t maxFreq) {
     g_si4735.setBandwidth(g_bwAMIdx[current_band.bwIdxAM], 1);
 }
 
-// Set AGC, AVC gain, and seek parameters shared between AM and SSB modes
+// Centralizes setup for properties shared between AM and SSB to avoid code duplication
+// - Conditionally applies AVC max gain only when AGC is in automatic mode
+// - Sets custom seek thresholds for improved weak station performance
 static void configureAMCommon(uint16_t minFreq, uint16_t maxFreq) {
     ModeContext modeCtx = getModeContext();
 
@@ -714,15 +707,6 @@ static void configureAMCommon(uint16_t minFreq, uint16_t maxFreq) {
     g_si4735.setProperty(AM_SEEK_RSSI_THRESHOLD, 10);   // AM_SEEK_TUNE_RSSI_THRESHOLD (Default: 25)
 }
 
-// AGC hardware control
-static inline void setAgcHardware(int8_t att_val) {
-    bool disableAgc = att_val > 0;
-    // attenuation index for the chip is one less than the parameter valu
-    // if att_val is 0 (auto) or 1 (manual, 0dB), the index sent to the chip is 0
-    uint8_t agcNdx = (att_val > 1) ? (att_val - 1) : 0;
-    g_si4735.setAutomaticGainControl(disableAgc, agcNdx);
-}
-
 // Applies AGC settings based on current mode and stored values
 static void applyAgcSettings() {
     ModeContext modeCtx = getModeContext();
@@ -731,7 +715,10 @@ static void applyAgcSettings() {
     setAgcHardware(att_val);
 }
 
-// Main band switching logic that coordinates mode transitions and amplifier control
+// Top-level orchestrator for all band and mode changes
+// Manages amplifier state safely preventing audio pops during major mode switches (FM <-> AM)
+// Loads new band data then dispatches to correct configuration handler
+// Applies shared settings like AGC and refreshes display to reflect new state
 static void applyBandConfiguration(bool extraSSBReset) {
     // detects a major mode switch (FM <-> non-FM) to safely toggle amp
     bool switchingBetweenFMandAM = (g_currentMode == FM) != (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE);
@@ -775,9 +762,12 @@ static void applyBandConfiguration(bool extraSSBReset) {
     g_previousFrequency = g_currentFrequency;
 }
 
-// ------------------------------------------
-// ------- UI: Main Screen Drawing ----------
-// ------------------------------------------
+
+// ==========================================
+// ===== UI DRAWING SUBSYSTEM ===============
+// ==========================================
+
+// --- UI: General & Splash Screen ---
 
 // helper for brightness calculating the value by using integer (low flash consume)
 // on edit have a white color display (non default blue), so don`t know what it will look like for you
@@ -796,7 +786,7 @@ void showSplashScreen() {
     oled.clear();
 
     oled.setCursor(26, 1);
-    oled.print(F("ATS-20* V5.7"));
+    oled.print(F("ATS-20* V5.8"));
 
     oled.setCursor(32, 3);
     oled.print(F("MOD NO RDS"));
@@ -813,6 +803,8 @@ void showSplashScreen() {
     oled.clear();
 }
 
+// --- UI: Main Screen Drawing ---
+
 // display mode, dot position, units based on current band
 static void prepareDisplayConfig(
     bool ssbMode, BandType band,
@@ -821,17 +813,17 @@ static void prepareDisplayConfig(
 
     outMode = 0;
     outDotPos = 0;
-    outUnit = "KHZ";
+    outUnit = "kHz";
 
     if (ssbMode) {
         outMode = 2;
     } else if (band == FM_BAND_TYPE) {
         outMode = 1;
         outDotPos = 3;
-        outUnit = "MHZ";
+        outUnit = "MHz";
     } else if (band == SW_BAND_TYPE && g_Settings[SettingsIndex::SWUnits].param == 1) {
         outDotPos = 2;
-        outUnit = "MHZ";
+        outUnit = "MHz";
     }
 }
 
@@ -877,13 +869,6 @@ static void renderSSBTail(
     oled.drawDigit('.', curX, pixelY);                  curX += SEVEN_SEG_DOT_WIDTH;
     oled.drawDigit('0' + (tailBFO / 10), curX, pixelY); curX += SEVEN_SEG_DIGIT_WIDTH;
     oled.drawDigit('0' + (tailBFO % 10), curX, pixelY); // No curX update needed for the last digit
-
-    // If main frequency shortens (e.g. 14MHz -> 7MHz), clear the now-empty space
-    // left by the disappearing digit from the main part.
-    if (len < prevLen) {
-        // The clear area must match the new, taller digit dimensions.
-        oled.clear(curX, pixelY, curX + SEVEN_SEG_DIGIT_WIDTH - 1, pixelY + SEVEN_SEG_DIGIT_HEIGHT - 1);
-    }
 }
 
 // renders measurement units (kHz/MHz)
@@ -966,6 +951,17 @@ static void showBandTag() {
 
     oled.setCursor(0, 0);
     printInverted(name_buffer, invert);
+}
+
+// determine the indicator character based on mode
+void updateStereoIndicator() {
+    char c = (g_currentMode == CW)
+        ? (g_lastCWMode == LSB ? 'L' : 'U')
+        : (isSSB() && g_Settings[Sync].param == 1) ? 'S'
+        : (g_currentMode == FM && g_stereoStatus) ? '*' : ' ';
+
+    oled.setCursor(24, 7);
+    oled.print(c);
 }
 
 //Draw current modulation (AM/LSB/USB/CW/FM) and stereo indicator
@@ -1074,17 +1070,6 @@ static void showBandwidth() {
     printInverted((__FlashStringHelper*)bw_str_ptr, invert);
 }
 
-// determine the indicator character based on mode
-void updateStereoIndicator() {
-    char c = (g_currentMode == CW)
-        ? (g_lastCWMode == LSB ? 'L' : 'U')
-        : (isSSB() && g_Settings[Sync].param == 1) ? 'S'
-        : (g_currentMode == FM && g_stereoStatus) ? '*' : ' ';
-
-    oled.setCursor(24, 7);
-    oled.print(c);
-}
-
 // Orchestrator for drawing the main status screen
 void showStatus(bool cleanFreq) {
     showFrequency(cleanFreq);
@@ -1098,9 +1083,7 @@ void showStatus(bool cleanFreq) {
     showSignalQuality();
 }
 
-// ------------------------------------------
-// --- UI: Favorites Menu Drawing -----------
-// ------------------------------------------
+// --- UI: Favorites Menu Drawing ---
 
 #if ENABLE_FM_FAV
 // Draws a single item in the favorites list, called by showFav
@@ -1158,9 +1141,7 @@ static void showFav() {
 }
 #endif
 
-// ------------------------------------------
-// --- UI: Settings Menu Drawing ------------
-// ------------------------------------------
+// --- UI: Settings Menu Drawing ---
 
 // Maps a setting parameter to its UI display string
 // case handles DisplayOff due to non-sequential text indices,
@@ -1252,9 +1233,10 @@ static void showSettings() {
         DrawSetting(i + ((g_SettingsPage - 1) * 6), true);
 }
 
-// ------------------------------------------
-// --- State & Band Management Subsystem ----
-// ------------------------------------------
+
+// ==========================================
+// ===== ACTION & STATE MANAGEMENT ==========
+// ==========================================
 
 // switches band index and immediately applies the new band's default state
 static void bandSwitch(bool up, bool loadStoredFreq) {
@@ -1491,9 +1473,7 @@ static inline void cycleAmSsbCwModes() {
         setAmpState(true);
 }
 
-// ------------------------------------------
-// --- Settings & Parameter Subsystem -------
-// ------------------------------------------
+// --- Settings & Parameter Handlers ---
 
 static void switchSettingsPage() {
     g_SettingsPage++;
@@ -1614,7 +1594,7 @@ static void doStep(int8_t v) {
 
     // if step table was assigned (i.e., not for SSB/CW) update IC
     if (table) g_si4735.setFrequencyStep((uint16_t)table[*idx]);
-   
+
     showStep();
 }
 
@@ -1845,9 +1825,12 @@ static void doBandwidth(uint8_t v) {
     showBandwidth();
 }
 
-// ------------------------------------------
-// --- Input: Button & Event Handling -------
-// ------------------------------------------
+
+// ==========================================
+// ===== INPUT HANDLING SUBSYSTEM ===========
+// ==========================================
+
+// --- Input: Rotary Encoder & Buttons ---
 
 // Handle encoder direction (ISR context)
 static void rotaryEncoder() {
@@ -2120,9 +2103,7 @@ static void processButtonEvents() {
     handleModeButton();
 }
 
-// ------------------------------------------
-// --- Input: Encoder & Command Logic -----
-// ------------------------------------------
+// --- Input: Command Mode & Encoder Logic ---
 
 // helper to refresh all command indicators on screen
 static void refreshCommandIndicators() {
@@ -2259,9 +2240,10 @@ static bool processEncoderActions() {
     return was_tuning_event;
 }
 
-// ------------------------------------------
-// --- Timed & Periodic Tasks ---------------
-// ------------------------------------------
+
+// ==========================================
+// ===== PERIODIC & TIMED TASKS =============
+// ==========================================
 
 // Helper for performing frequency update check
 static inline void performFrequencyUpdateCheck(uint32_t now) {
@@ -2336,12 +2318,14 @@ static inline void updateSignalQuality() {
 
 // helper for FM stereo indicator logic
 static inline void updateFmStereoIndicator() {
-    if (g_currentMode == FM && millis() > 3000) {
-        bool stereo = g_si4735.getCurrentPilot();
-        if (g_stereoStatus != stereo) {
-            g_stereoStatus = stereo;
-            updateStereoIndicator();
-        }
+    if (g_currentMode != FM || millis() <= 3000) return;
+    g_si4735.getCurrentReceivedSignalQuality(0);
+
+    bool stereo = g_si4735.getCurrentPilot();
+
+    if (stereo != g_stereoStatus) {
+        updateStereoIndicator();
+        g_stereoStatus = stereo;
     }
 }
 
@@ -2423,9 +2407,10 @@ static void handlePeriodicTasks() {
 #endif
 }
 
-// ------------------------------------------
-// ------------ Main Init Logic  ------------
-// ------------------------------------------
+
+// ==========================================
+// ===== MAIN APPLICATION ENTRY POINTS ======
+// ==========================================
 
 // Helper to initialize hardware pins and battery check
 static inline void initHardwarePins() {

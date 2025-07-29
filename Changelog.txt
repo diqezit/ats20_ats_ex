@@ -657,7 +657,34 @@ This version introduces the ability to save your favorite FM stations.
 		This system provides faster character retrieval and ensures that any request for an unsupported character safely renders a blank space, preventing visual artifacts.
     *   All UI text strings throughout the firmware have been converted to UPPERCASE to align with the new, more memory-efficient font map.
 
-
-
 	
 ------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v5.8**
+
+*   **[Critical Optimization] Migrated from `Wire.h` to `microWire.h` I2C Library:**
+    *   The entire project has been successfully migrated from the standard Arduino `Wire` library to AlexGyver's lightweight `microWire` library.
+		This was done to overcome critical memory limitations of the ATmega328P microcontroller.
+    *   **Memory Savings:** This single change resulted in freeing approximately **2 KB of program storage (Flash)** and **64 bytes of static memory (SRAM)**. 
+		The savings come from eliminating the internal I2C buffers and using a more compact, non-interrupt-driven implementation.
+    *   **Impact:** This optimization provides crucial headroom for the application stack, enhancing runtime stability and unlocking potential 
+		for future feature additions that were previously impossible due to memory constraints.
+		The migration was implemented as a seamless "drop-in replacement," ensuring no loss of hardware functionality.
+
+*   **[Hardware Investigation & Cleanup] Removed Non-Functional 'Force FM Mono' (FMM) Feature:**
+    *   An extensive, in-depth debugging process was conducted to address the non-functional 'FMM' setting.
+		All known documented (`0x18xx` properties) and undocumented (`0x1100` bit 8) methods to force mono reception "on-the-fly" were systematically 
+		implemented and tested.
+    *   **Conclusion:** It was definitively determined that the specific Si4735 chip revision used in this hardware 
+		**strictly adheres to the datasheet limitation**, which states that stereo blend properties can only be set during the
+		initial power-up/configuration phase of the FM mode. The chip consistently ignored all attempts to change these properties dynamically.
+    *   **Action Taken:** To prevent user confusion and maintain code integrity, the 'FMM' setting and all associated logic have been 
+		**completely removed** from the firmware. The receiver will now operate in its default, reliable automatic stereo mode as intended by the hardware.
+
+*   **[UI & Readability] Enhanced UI Typography:**
+    *   The compact font was regressed to include essential lowercase characters (`k`, `m`, `z`) 
+		for standardized display of all SI units of measurement (e.g., `kHz`, `MHz`). De-emphasis values in the menu were also simplified to just `50` / `75`.
+
+------------------------------------------------------------------------------------------------------------
+
