@@ -85,7 +85,7 @@ constexpr auto MIN_SETFREQ_INTERVAL_MS = 25UL;
 // Display options
 #define ENABLE_SPLASH_SCREEN 1              // Set to 1 to show splash screen, 0 to disable
 #define ENABLE_EEPROM_RESET_MSG 1           // Set to 1 to show "EEPROM RESET" message, 0 to disable
-#define ANIMATE_SPLASH 0                    // Set to 1 to animate splash screen, 0 to disable
+#define ANIMATE_SPLASH 1                    // Set to 1 to animate splash screen, 0 to disable
 
 // IC options
 #define ENABLE_FM_FAV 1                     // Set to 1 to use FM favorites, 0 to disable (must disable some other features to compile & work)
@@ -101,3 +101,100 @@ constexpr auto MIN_SETFREQ_INTERVAL_MS = 25UL;
 // These functions may offer better performance than the original library.
 // Set to 0 to disable them and fall back to the base library methods - off for save 36 bytes
 #define PATCH_EX_SSB 0
+
+
+
+// =================================================================================================
+// --------------- FM Audio Enhancement Profile Constants ------------------------------------------
+// =================================================================================================
+// Defines a curated audio profile for FM reception
+// Values are derived from experimental testing from users and Si47XX AN332 programming guide
+
+// --- Aggressive Soft Mute for Quiet Tuning ---
+// Eliminate static hiss when tuning between stations
+// Properties are set for instant reaction and deep attenuation when SNR drops
+// These values are aggressive. Reducing them will result in a softer mute
+// Extremes might cause audio pumping on fading signals
+
+// Property 0x1300: FM_SOFTMUTE_RATE
+// Sets mute/unmute speed. Maximum value provides instantaneous action
+const auto FM_PROP_SOFTMUTE_RATE = 255;                 // Default: 64. Range: 1-255
+
+// Property 0x1301: FM_SOFTMUTE_SLOPE
+// Configures attenuation slope (dB attenuation per 1 dB SNR drop)
+// A higher value causes faster audio fade-out as signal weakens
+const auto FM_PROP_SOFTMUTE_SLOPE = 4;                  // Default: 2. Range: 0-63
+
+// Property 0x1302: FM_SOFT_MUTE_MAX_ATTENUATION
+// Sets maximum attenuation amount when soft mute is fully engaged
+// A higher value results in a deeper mute. 22dB is used for near-silence
+const auto FM_PROP_SOFTMUTE_MAX_ATTN = 22;              // Default: 16 dB. Range: 0-31
+
+// Property 0x1304 & 0x1305: FM_SOFTMUTE_ATTACK/DECAY_RATE
+// Undocumented properties for fine control over attack/decay times
+// High values ensure the mute engages and disengages rapidly
+const auto FM_PROP_SOFTMUTE_ATT_RATE = 32700;           // Default: Unknown
+const auto FM_PROP_SOFTMUTE_DEC_RATE = 32700;           // Default: Unknown
+
+// Property 0x1303: (Undocumented, possibly release rate)
+// This value was found through experimentation for a balanced response
+const auto FM_PROP_SOFTMUTE_REL_RATE = 4;
+
+
+// --- Hi-Cut Filter as a "Warm Sound" Equalizer ---
+// Goal: Reduce high-frequency harshness to suit the small speaker
+// Mechanism: The dynamic hi-cut filter is re-purposed as a static audio filter
+// It is forced active to tailor audio output for the speaker's physical limitations
+// Safe Range: The CUTOFF value is critical. Changing it will alter the audio tone
+
+// Property 0x1A00: FM_HICUT_ENABLE
+// Enables or disables hi-cut functionality. Forced ON to act as an EQ.
+const auto FM_PROP_HICUT_ENABLE = 1;                    // 1 = On, 0 = Off
+
+// Property 0x1A02: FM_HICUT_SNR_HIGH_THRESHOLD
+// SNR level where the hi-cut filter starts to engage
+// A low value ensures the filter is active on almost all signals for a consistent audio profile
+const auto FM_PROP_HICUT_SNR_THRESH = 10;               // Default: 24 dB. Range: 0-127
+
+// Property 0x1A06: FM_HICUT_CUTOFF_FREQUENCY
+// This setting controls the audio tone. It has two parts:
+// - Bits 6:4: Maximum Audio Frequency. Sets a hard limit on the audio path.
+// - Bits 2:0: Hi-Cut Transition Frequency. Sets frequency for filter attenuation.
+// Value 0x0055 (binary ...0101 0101) translates to:
+// - Max Audio = 2 (3 kHz). Audio above 3 kHz is sharply cut. This removes piercing highs.
+// - Hi-Cut Freq = 5 (5 kHz). This softens upper mid-range frequencies.
+const auto FM_PROP_HICUT_CUTOFF = 0x0055;               // Default: 0x0000 (Disabled)
+
+// Other Hi-Cut properties for filter behavior. These values ensure a fast and stable response.
+const auto FM_PROP_HICUT_WINDOW = 1;                    // Property 0x1A01. Filter response parameter
+const auto FM_PROP_HICUT_ATT_RATE = 32760;              // Property 0x1A03. Fast attack rate
+const auto FM_PROP_HICUT_REL_RATE = 1;                  // Property 0x1A04. (Undocumented)
+const auto FM_PROP_HICUT_MPX_THRESH = 100;              // Property 0x1A05. (Undocumented)
+
+
+// --- Experimental Noise Blanker ---
+// Potentially reduce impulse noise from sources like car ignitions
+// These properties configure a digital filter to detect and suppress short noise spikes
+// The feature is undocumented for Si473x but present in related chips
+// These values are experimental. Safest fallback is setting all to 0
+// Testing shows no audio degradation when enabled
+const auto FM_PROP_NB_REJ_THRESH = 0;                   // Property 0x1900
+const auto FM_PROP_NB_ATT_RATE = 48;                    // Property 0x1901
+const auto FM_PROP_NB_REL_RATE = 64;                    // Property 0x1902
+const auto FM_PROP_NB_ADC_OVER_THRESH = 300;            // Property 0x1903
+const auto FM_PROP_NB_ADC_OVER_DELAY = 125;             // Property 0x1904
+
+
+// --- Forced MONO for Signal Clarity ---
+// Provide a cleaner signal by disabling stereo. Stereo often adds noise on a portable radio
+// Mechanism: The stereo decoder is disabled directly
+// Automatic blend thresholds are also set to maximum values, making it impossible for the chip to switch to stereo
+
+// Property 0x1105/0x1800 & 0x1106/0x1801: FM_BLEND_..._THRESHOLD
+// These set the RSSI thresholds for stereo/mono blending
+// Setting both to 127 forces the receiver into the "full mono" region
+// under all signal conditions for a consistent mono output
+const auto FM_PROP_BLEND_STEREO_THRESH = 127;           // Default: 49 dBµV
+const auto FM_PROP_BLEND_MONO_THRESH = 127;             // Default: 30 dBµV
+
+

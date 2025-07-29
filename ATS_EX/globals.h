@@ -360,30 +360,30 @@ Band g_bandList[g_bandCount] = {
     { PACK_STR4("MW  "),   522,      1710, MW_BAND_TYPE,   522,        2,      4,       1,      4,    4,     0 },
     // --- SW sub bands ---
     { PACK_STR4("SW  "),  1710,      1810, SW_BAND_TYPE,  1750,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("160m"),  1810,      2000, SW_BAND_TYPE,  1850,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("160M"),  1810,      2000, SW_BAND_TYPE,  1850,        1,      4,       1,      4,    4,     0 },
     { PACK_STR4("SW  "),  2000,      2300, SW_BAND_TYPE,  2150,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("120m"),  2300,      2500, SW_BAND_TYPE,  2400,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("120M"),  2300,      2500, SW_BAND_TYPE,  2400,        1,      4,       1,      4,    4,     0 },
     { PACK_STR4("SW  "),  2500,      3200, SW_BAND_TYPE,  2800,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("90m "),  3200,      3400, SW_BAND_TYPE,  3300,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("90M "),  3200,      3400, SW_BAND_TYPE,  3300,        1,      4,       1,      4,    4,     0 },
     { PACK_STR4("SW  "),  3400,      3500, SW_BAND_TYPE,  3450,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("80m "),  3500,      3900, SW_BAND_TYPE,  3700,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("75m "),  3900,      4000, SW_BAND_TYPE,  3950,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("80M "),  3500,      3900, SW_BAND_TYPE,  3700,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("75M "),  3900,      4000, SW_BAND_TYPE,  3950,        1,      4,       1,      4,    4,     0 },
     { PACK_STR4("SW  "),  4000,      4750, SW_BAND_TYPE,  4400,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("60m "),  4750,      5060, SW_BAND_TYPE,  4850,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("60M "),  4750,      5060, SW_BAND_TYPE,  4850,        1,      4,       1,      4,    4,     0 },
     { PACK_STR4("SW  "),  5060,      5900, SW_BAND_TYPE,  5500,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("49m "),  5900,      6200, SW_BAND_TYPE,  6000,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("49M "),  5900,      6200, SW_BAND_TYPE,  6000,        1,      4,       1,      4,    4,     0 },
     { PACK_STR4("SW  "),  6200,      7000, SW_BAND_TYPE,  6500,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("40m "),  7000,      7200, SW_BAND_TYPE,  7100,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("41m "),  7200,      9400, SW_BAND_TYPE,  7450,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("31m "),  9400,      9900, SW_BAND_TYPE,  9600,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("40M "),  7000,      7200, SW_BAND_TYPE,  7100,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("41M "),  7200,      9400, SW_BAND_TYPE,  7450,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("31M "),  9400,      9900, SW_BAND_TYPE,  9600,        1,      4,       1,      4,    4,     0 },
     { PACK_STR4("SW  "),  9900,     11600, SW_BAND_TYPE, 11000,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("25m "), 11600,     12100, SW_BAND_TYPE, 11975,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("22m "), 12100,     13870, SW_BAND_TYPE, 13700,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("19m "), 13870,     15800, SW_BAND_TYPE, 15300,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("16m "), 15800,     18100, SW_BAND_TYPE, 17700,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("15m "), 18100,     21850, SW_BAND_TYPE, 21600,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("13m "), 21850,     26100, SW_BAND_TYPE, 25800,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("11m "), 26100,     30000, SW_BAND_TYPE, 27500,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("25M "), 11600,     12100, SW_BAND_TYPE, 11975,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("22M "), 12100,     13870, SW_BAND_TYPE, 13700,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("19M "), 13870,     15800, SW_BAND_TYPE, 15300,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("16M "), 15800,     18100, SW_BAND_TYPE, 17700,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("15M "), 18100,     21850, SW_BAND_TYPE, 21600,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("13M "), 21850,     26100, SW_BAND_TYPE, 25800,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("11M "), 26100,     30000, SW_BAND_TYPE, 27500,        1,      4,       1,      4,    4,     0 },
     // --- FM ---
     { PACK_STR4("    "),  6400,     10800, FM_BAND_TYPE,  8400,        1,      4,       1,      4,    4,     0 }
 };
@@ -394,9 +394,9 @@ Band g_bandList[g_bandCount] = {
 
 // single PROGMEM block of null-terminated UI labels
 const char bw_all_data[] PROGMEM =
-"0.5 kHz\0" "1.0 kHz\0" "1.2 kHz\0" "1.8 kHz\0" "2.0 kHz\0" "2.2 kHz\0"
-"2.5 kHz\0" "3.0 kHz\0" "4.0 kHz\0" "6.0 kHz\0" " AUTO  \0" "110 kHz\0"
-"84 kHz \0" "60 kHz \0" "40 kHz \0";
+"0.5 KHZ\0" "1.0 KHZ\0" "1.2 KHZ\0" "1.8 KHZ\0" "2.0 KHZ\0" "2.2 KHZ\0"
+"2.5 KHZ\0" "3.0 KHZ\0" "4.0 KHZ\0" "6.0 KHZ\0" " AUTO  \0" "110 KHZ\0"
+"84 KHZ \0" "60 KHZ \0" "40 KHZ \0";
 
 // Maps UI index to an offset in `bw_all_data`
 // Using 1-byte offsets (vs 2-byte pointers) is a key data size optimization
@@ -419,9 +419,9 @@ const uint8_t g_bwAMIdx[] = { 4, 5, 3, 6, 2, 1, 0 };
 // step strings padded to 4 chars to reduce mem usage
 static const char step_lookup_table[][7] PROGMEM = {
     // AM Steps (indices 0-6)
-    "1 kHz ", "5 kHz ", "9 kHz ", "10 kHz", "50 kHz", "100kHz", "1 MHz ",
+    "1 KHZ ", "5 KHZ ", "9 KHZ ", "10 KHZ", "50 KHZ", "100KHZ", "1 MHZ ",
     // SSB Steps (indices 7-15)
-    "10 Hz ", "25 Hz ", "50 Hz ", "100 Hz", "500 Hz", "1 kHz ", "5 kHz ", "9 kHz ", "10 kHz"
+    "10 HZ ", "25 HZ ", "50 HZ ", "100 HZ", "500 HZ", "1 KHZ ", "5 KHZ ", "9 KHZ ", "10 KHZ"
 };
 
 // Array with tuning steps. The structure is defined like - AM (in kHz), then SSB (in Hz)
@@ -448,9 +448,9 @@ const int8_t g_lastStepFM = (sizeof(g_tabStepFM) / sizeof(int8_t)) - 1;
 // -------------------------------------------------------------------------------------------------
 // used by SettingParamToUI function to convert parameter values to display strings
 const char PROGMEM paramTexts[][4] = {
-  "AUT", " On", "Off", "50u", "75u", "kHz", "MHz",
+  "AUT", " ON", "OFF", "50U", "75U", "KHZ", "MHZ",
   "RSS", "SNR", "100", "50%",
-  "10m", "15m", "30m", "60m"
+  "10M", "15M", "30M", "60M"
 };
 
 // Timeout values in seconds for the display-off feature, indexed by the setting parameter

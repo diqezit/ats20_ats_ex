@@ -630,3 +630,34 @@ This version introduces the ability to save your favorite FM stations.
 	
 
 ------------------------------------------------------------------------------------------------------------
+
+
+
+### **MOD_NO_RDS v5.7**
+
+*   **[Feature] New FM Audio Enhancement Profile:**
+    *   **Implemented a permanent audio enhancement profile for the FM band.** 
+		This is a core improvement, not a menu option, that applies automatically. The profile actively enables:
+        1.  **Quiet Tuning:** An aggressive soft-mute configuration is now active, using custom `setProperty` values (`0x1300`-`0x1305`) to eliminate static hiss when tuning between stations.
+        2.  **Experimental Noise Blanker:** The undocumented Noise Blanker (properties `0x1900`-`0x1904`) is enabled by default to potentially reduce impulse noise.
+    *   **NOTE:** The code also includes configurations for a "Warm Sound EQ" (via Hi-Cut filter) and "Forced MONO" operation. 
+		These features are **disabled by default** (commented out) to preserve a neutral, stereo-capable audio profile for headphone users and to conserve memory. 
+		They can be manually enabled in the source code for experimentation.
+
+*   **[UI] Increased Frequency Digit Size and Spacing:**
+    *   The main frequency display now uses **larger, 32-pixel high seven-segment digits** (previously 24px) for dramatically improved readability. 
+		The digit "blueprints" and rendering logic were redesigned to maintain correct proportions at the new size.
+    *   **Added 2px spacing between each digit** to prevent them from merging visually, further enhancing clarity. 
+		The vertical position of the frequency display has also been adjusted to keep it centered.
+
+*   **[Optimized] Major Font System Refactoring for Performance and Size:**
+    *   **Freed over 200 bytes of Flash memory** by overhauling the standard 6x8 font system. 
+		All unused characters, including the entire lowercase set, have been removed from the firmware binary.
+    *   **Replaced the original linear font map with a compact array and a lookup table (`_charMap_min` & `_charLookup`).** 
+		This system provides faster character retrieval and ensures that any request for an unsupported character safely renders a blank space, preventing visual artifacts.
+    *   All UI text strings throughout the firmware have been converted to UPPERCASE to align with the new, more memory-efficient font map.
+
+
+
+	
+------------------------------------------------------------------------------------------------------------

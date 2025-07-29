@@ -9,7 +9,7 @@
 // 02.2024
 // http://github.com/goshante
 // ----------------------------------------------------------------------
-// MOD_NO_RDS_v5.6 by diqezit
+// MOD_NO_RDS_v5.7 by diqezit
 // More info for this mod you can get below
 // https://github.com/diqezit/ats20_ats_ex
 // ----------------------------------------------------------------------
@@ -44,7 +44,7 @@ GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 #include "Utils.h"
 #include "Battery.h"
 
-constexpr auto APP_VERSION = 56;
+constexpr auto APP_VERSION = 57;
 
 // ------------------------------------------
 // ---------------- Macro -------------------
@@ -543,16 +543,82 @@ static void configureFMMode() {
     g_si4735.setProperty(0x1404, 5);  // FM_SEEK_TUNE_RSSI_THRESHOLD (Default: 20)
 
     g_ssbLoaded = false;
-    // g_si4735.setFifoCount(1);
+
     g_si4735.setFmBandwidth(current_band.bwIdxFM);
     g_si4735.setFMDeEmphasis(
         (g_Settings[DeEmp].param == 0) ? 1 : 2);
 
-    // force more aggressive stereo-to-mono blending for cleaner audio on weak stations
-    // tells the chip to switch to mono sooner as the signal fades
-    // FM_BLEND_MULTIPATH_STEREO_THRESHOLD (p. 59) rev 1.2
-    // g_si4735.setFmBlendStereoThreshold(49);     // Default 49
-    // g_si4735.setFmBlendMonoThreshold(30);       // Default 30
+    // after basic FM configuration is done - apply permanent audio enhancement profile
+    FMAudioConfigure();
+}
+
+// apply curated set of audio properties specifically for the FM band - pernamently active in FM mode
+static void FMAudioConfigure() {
+
+    // --- Aggressive Soft Mute ---
+    // properties make the soft mute react instantly and attenuate deeply when SNR drops
+    // silences static hiss when tuning between stations
+    g_si4735.setProperty(0x1300, FM_PROP_SOFTMUTE_RATE);
+    g_si4735.setProperty(0x1301, FM_PROP_SOFTMUTE_SLOPE);
+    g_si4735.setProperty(0x1302, FM_PROP_SOFTMUTE_MAX_ATTN);
+    g_si4735.setProperty(0x1303, FM_PROP_SOFTMUTE_REL_RATE);
+    g_si4735.setProperty(0x1304, FM_PROP_SOFTMUTE_ATT_RATE);
+    g_si4735.setProperty(0x1305, FM_PROP_SOFTMUTE_DEC_RATE);
+
+    
+    // --- Hi-Cut Filter as Audio Equalizer (Temporarily Disabled) ---
+    // The code below re-purposes the hi-cut filter as a static EQ to create a warmer sound
+
+    // To re-enable, simply uncomment this block
+
+    // dynamic hi-cut filter is re-purposed as a static audio filter
+    // forced active to tailor the audio output for the small speaker,
+    // reducing high-frequency harshness
+    /*
+    g_si4735.setProperty(0x1A00, FM_PROP_HICUT_ENABLE);
+    g_si4735.setProperty(0x1A01, FM_PROP_HICUT_WINDOW);
+    g_si4735.setProperty(0x1A02, FM_PROP_HICUT_SNR_THRESH);
+    g_si4735.setProperty(0x1A03, FM_PROP_HICUT_ATT_RATE);
+    g_si4735.setProperty(0x1A04, FM_PROP_HICUT_REL_RATE);
+    g_si4735.setProperty(0x1A05, FM_PROP_HICUT_MPX_THRESH);
+    g_si4735.setProperty(0x1A06, FM_PROP_HICUT_CUTOFF);
+    */
+
+
+    // --- Experimental Noise Blanker ---
+    // configure a digital filter to detect and suppress short noise spikes
+    // this feature is undocumented for Si473x but present in related chips
+    // testing shows no audio degradation when enabled
+    g_si4735.setProperty(0x1900, FM_PROP_NB_REJ_THRESH);
+    g_si4735.setProperty(0x1901, FM_PROP_NB_ATT_RATE);
+    g_si4735.setProperty(0x1902, FM_PROP_NB_REL_RATE);
+    g_si4735.setProperty(0x1903, FM_PROP_NB_ADC_OVER_THRESH);
+    g_si4735.setProperty(0x1904, FM_PROP_NB_ADC_OVER_DELAY);
+
+
+    // --- Forced MONO Operation (Temporarily Disabled) ---
+    // The code below forces the receiver into MONO mode for a cleaner signal on the internal speaker.
+    // It is disabled by default to allow stereo listening via headphones.
+    // I can add logic switch for this via the menu, but it didn't fit in the memory! :(
+
+    // To re-enable, simply uncomment this block
+
+    // stereo decoder is disabled directly
+    /*
+    g_si4735.setFmStereoOff();
+    g_si4735.setProperty(0x1105, FM_PROP_BLEND_STEREO_THRESH);
+    g_si4735.setProperty(0x1106, FM_PROP_BLEND_MONO_THRESH);
+    g_si4735.setProperty(0x1800, FM_PROP_BLEND_STEREO_THRESH); // Also set legacy property for compatibility
+    g_si4735.setProperty(0x1801, FM_PROP_BLEND_MONO_THRESH);   // Also set legacy property for compatibility
+
+
+    // additional blend/hicut properties to ensure mono operation
+    g_si4735.setProperty(0x1804, 127);
+    g_si4735.setProperty(0x1805, 127);
+    g_si4735.setProperty(0x1808, 0);
+    g_si4735.setProperty(0x1809, 0);
+    */
+
 }
 
 // Corrected CW BFO offset logic to match standard radio behavior
@@ -730,10 +796,10 @@ void showSplashScreen() {
     oled.clear();
 
     oled.setCursor(26, 1);
-    oled.print(F("ATS-20+ v5.6"));
+    oled.print(F("ATS-20* V5.7"));
 
     oled.setCursor(32, 3);
-    oled.print(F("Mod No RDS"));
+    oled.print(F("MOD NO RDS"));
 
 #if ANIMATE_SPLASH
     for (int i = 0; i < 21; i++) {
@@ -755,17 +821,17 @@ static void prepareDisplayConfig(
 
     outMode = 0;
     outDotPos = 0;
-    outUnit = "kHz";
+    outUnit = "KHZ";
 
     if (ssbMode) {
         outMode = 2;
     } else if (band == FM_BAND_TYPE) {
         outMode = 1;
         outDotPos = 3;
-        outUnit = "MHz";
+        outUnit = "MHZ";
     } else if (band == SW_BAND_TYPE && g_Settings[SettingsIndex::SWUnits].param == 1) {
         outDotPos = 2;
-        outUnit = "MHz";
+        outUnit = "MHZ";
     }
 }
 
@@ -789,11 +855,11 @@ static void renderClearOrBlink(
     uint8_t off, int pixelY) {
 
     if (cleanDisplay) {
-        oled.clear(0, pixelY, 128, pixelY + 23);
+        oled.clear(0, pixelY, 128, pixelY + (SEVEN_SEG_DIGIT_HEIGHT - 1));
     } else if (len != prevLen) {
         // if frequency length changes - clear from its starting position to the end of the screen
         uint8_t maxW = 128 - off;
-        oled.partialUpdate(off, pixelY, maxW, 24, NULL);
+        oled.partialUpdate(off, pixelY, maxW, SEVEN_SEG_DIGIT_HEIGHT, NULL);
     }
 }
 
@@ -805,15 +871,19 @@ static void renderSSBTail(
 
     if (!ssbMode) return;
 
-    // Tightly align and draw the decimal part. Font widths: '.'=6px, digit=16px
-    int curX = mainEndX - 2;
-    oled.drawDigit('.', curX, pixelY);                  curX += 6;
-    oled.drawDigit('0' + (tailBFO / 10), curX, pixelY); curX += 16;
-    oled.drawDigit('0' + (tailBFO % 10), curX, pixelY); curX += 16;
+    // Tightly align and draw the decimal part.
+    // Widths are now derived from constants to ensure correct spacing.
+    int curX = mainEndX - 2; // Fine-tune alignment
+    oled.drawDigit('.', curX, pixelY);                  curX += SEVEN_SEG_DOT_WIDTH;
+    oled.drawDigit('0' + (tailBFO / 10), curX, pixelY); curX += SEVEN_SEG_DIGIT_WIDTH;
+    oled.drawDigit('0' + (tailBFO % 10), curX, pixelY); // No curX update needed for the last digit
 
     // If main frequency shortens (e.g. 14MHz -> 7MHz), clear the now-empty space
-    // left by the disappearing digit from the main part
-    if (len < prevLen) oled.clear(curX, pixelY, curX + 13, pixelY + 23);
+    // left by the disappearing digit from the main part.
+    if (len < prevLen) {
+        // The clear area must match the new, taller digit dimensions.
+        oled.clear(curX, pixelY, curX + SEVEN_SEG_DIGIT_WIDTH - 1, pixelY + SEVEN_SEG_DIGIT_HEIGHT - 1);
+    }
 }
 
 // renders measurement units (kHz/MHz)
@@ -826,11 +896,14 @@ static void renderUnit(bool ssbMode, uint8_t len, const char* unit) {
 
 // Helper function to render each character in the frequency string using drawDigit
 static int renderFrequencyString(const char* freqDisplay, int startX, int pixelY) {
+    // Define the spacing between each digit. 2px is a good value for readability.
+    const int DIGIT_SPACING = 2;
     int curX = startX;
-    for (uint8_t i = 0; freqDisplay[i] != '\0'; i++) {
-        char ch = freqDisplay[i];
+
+    for (const char* p = freqDisplay; *p; ++p) {
+        char ch = *p;
         oled.drawDigit(ch, curX, pixelY);
-        curX += (ch == '.') ? 6 : 16;
+        curX += (ch == '.' ? SEVEN_SEG_DOT_WIDTH : SEVEN_SEG_DIGIT_WIDTH) + DIGIT_SPACING;
     }
     return curX;
 }
@@ -862,7 +935,7 @@ static void showFrequency(bool cleanDisplay = false) {
     // Violatile here adds + 80 bytes!
 
     // Set cursor position for frequency display
-    int pixelY = 24 * 1;
+    int pixelY = 16 * 1;
 
     renderClearOrBlink(cleanDisplay, ssbMode, len, prevLen, off, pixelY);
 
@@ -1049,7 +1122,7 @@ static inline void drawFavItem(uint8_t index, uint8_t y_pos, bool selected) {
 
     uint8_t first_decimal = sw_div(f_copy, 10);
     oled.print(first_decimal);
-    oled.print(F(" MHz  "));
+    oled.print(F(" MHZ  "));
 }
 
 // Display favorites menu
