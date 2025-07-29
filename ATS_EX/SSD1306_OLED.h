@@ -34,7 +34,7 @@
 #ifndef GyverOLED_h
 #define GyverOLED_h
 
-#include <Wire.h>
+#include <microWire.h> 
 #include "CustomFonts.h"
 
 // ===== Constants =====

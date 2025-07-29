@@ -183,18 +183,3 @@ const auto FM_PROP_NB_ATT_RATE = 48;                    // Property 0x1901
 const auto FM_PROP_NB_REL_RATE = 64;                    // Property 0x1902
 const auto FM_PROP_NB_ADC_OVER_THRESH = 300;            // Property 0x1903
 const auto FM_PROP_NB_ADC_OVER_DELAY = 125;             // Property 0x1904
-
-
-// --- Forced MONO for Signal Clarity ---
-// Provide a cleaner signal by disabling stereo. Stereo often adds noise on a portable radio
-// Mechanism: The stereo decoder is disabled directly
-// Automatic blend thresholds are also set to maximum values, making it impossible for the chip to switch to stereo
-
-// Property 0x1105/0x1800 & 0x1106/0x1801: FM_BLEND_..._THRESHOLD
-// These set the RSSI thresholds for stereo/mono blending
-// Setting both to 127 forces the receiver into the "full mono" region
-// under all signal conditions for a consistent mono output
-const auto FM_PROP_BLEND_STEREO_THRESH = 127;           // Default: 49 dBµV
-const auto FM_PROP_BLEND_MONO_THRESH = 127;             // Default: 30 dBµV
-
-
