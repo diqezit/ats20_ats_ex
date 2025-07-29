@@ -9,8 +9,8 @@
     (!) Simplified only for SSD1306 128x64, I2C, minimal buffer (only for segments drawings)
     (!) Minimal features for only main functionality with ATS_EX receiver
 
-    Manual generation of segments 14x24 resolution (7-segment display) use SSD1306 minimal library
-    By diqezit v1.5 
+    Manual generation of segments 14x32 resolution (7-segment display) use SSD1306 minimal library
+    By diqezit v1.6
     Charset: '.', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
 
     My repos: https://github.com/diqezit/TestDisplay
@@ -35,10 +35,18 @@
 #define GyverOLED_h
 
 #include <Wire.h>
+#include "CustomFonts.h"
 
 // ===== Constants =====
 #define SSD1306_128x64 1
 #define OLED_NO_BUFFER 0
+
+// ===== Seven Segment Digit Dimensions =====
+// These constants define the canvas size for the large frequency digits
+// Changing these requires redesigning the segment blueprints in the 'segs' array
+const auto SEVEN_SEG_DIGIT_WIDTH = 14;
+const auto SEVEN_SEG_DIGIT_HEIGHT = 32;
+const auto SEVEN_SEG_DOT_WIDTH = 4;
 
 // ===== Backend Constants =====
 #define OLED_WIDTH 128
@@ -90,8 +98,6 @@ static const uint8_t _oled_init[] PROGMEM = {
     OLED_NORMALDISPLAY,
     OLED_DISPLAY_ON,
 };
-
-extern const uint8_t _charMap[][6] PROGMEM;
 
 // ===== Class Definition =====
 template <int _TYPE, int _BUFF = OLED_NO_BUFFER>
@@ -245,15 +251,17 @@ public:
         endTransm();
     }
 
-    // Generates seven-segment digit by rendering into a local buffer and sending it to the display
+    // Generates seven-segment digit by rendering into a local buffer and sending it to the display.
+    // Dimensions are controlled by the SEVEN_SEG_... constants at the top of this file.
     void drawDigit(char c, int px, int py) {
         if ((c < '0' || c > '9') && (c != '.')) return;
 
-        uint8_t digitW = (c == '.') ? 4 : 14;            // Smaller width for dot
-        uint8_t digitH = 24;                             // Full height for dot to position at bottom
+        // Use predefined constants for dimensions
+        uint8_t digitW = (c == '.') ? SEVEN_SEG_DOT_WIDTH : SEVEN_SEG_DIGIT_WIDTH;
+        uint8_t digitH = SEVEN_SEG_DIGIT_HEIGHT;
 
-        uint8_t pages = (digitH + 7) / 8;                // Number of pages (3-4 for 24 height)
-        unsigned char localBuf[digitW * pages] = { 0 };  // Local buffer (minimal size)
+        uint8_t pages = (digitH + 7) / 8;
+        unsigned char localBuf[digitW * pages] = { 0 };
 
         uint8_t index = (c == '.') ? 10 : (c - '0');
         uint8_t mask = pgm_read_byte(&symbolMasks[index]);
@@ -357,11 +365,18 @@ public:
         delayMicroseconds(2);
     }
 
-    // Retrieves font column byte from PROGMEM array for given character and row
+    // retrieves font column byte using a lookup table for a compact font map
     uint8_t getFont(uint8_t font, uint8_t row) {
         if (font < 32 || font > 126) return 0;
-        font -= 32;
-        return pgm_read_byte(&(_charMap[font][row]));
+
+        // find real index in table
+        uint8_t index = pgm_read_byte(&(_charLookup[font - 32]));
+
+        // if the index is 0xFF - char is not in our font map
+        if (index == 0xFF) return 0;
+
+        // font data from the compact map using real index
+        return pgm_read_byte(&(_charMap_min[index][row]));
     }
 
     // ===== Variables and Constants =====
@@ -394,7 +409,10 @@ const uint8_t GyverOLED<_TYPE, _BUFF>::symbolMasks[11] PROGMEM = {
     0b10000000  // . (uses bit 7)
 };
 
-// "Blueprints" for each digit
+// "Blueprints" for the seven-segment digits.
+// Each entry defines a segment's position and dimensions on a canvas whose size is
+// defined by SEVEN_SEG_DIGIT_WIDTH and SEVEN_SEG_DIGIT_HEIGHT.
+// Format: {X-coordinate, Y-coordinate, Length, IsHorizontal (1 or 0)}
 //
 //      ---a---
 //     |       |
@@ -409,14 +427,14 @@ const uint8_t GyverOLED<_TYPE, _BUFF>::symbolMasks[11] PROGMEM = {
 
 template <int _TYPE, int _BUFF>
 const typename GyverOLED<_TYPE, _BUFF>::SegDef GyverOLED<_TYPE, _BUFF>::segs[8] PROGMEM = {
-    {2, 0, 10, 1},   // A: top horizontal bar
-    {11, 2, 9, 0},   // B: upper right vertical bar
-    {11, 13, 9, 0},  // C: lower right vertical bar
-    {2, 22, 10, 1},  // D: bottom horizontal bar
-    {0, 13, 9, 0},   // E: lower left vertical bar
-    {0, 2, 9, 0},    // F: upper left vertical bar
-    {2, 11, 10, 1},  // G: middle horizontal bar
-    {1, 22, 2, 1}    // Dot: as horizontal line of length 2
+    {2, 0, 10, 1},    // A
+    {11, 2, 12, 0},   // B
+    {11, 17, 12, 0},  // C
+    {2, 30, 10, 1},   // D
+    {0, 17, 12, 0},   // E
+    {0, 2, 12, 0},    // F
+    {2, 15, 10, 1},   // G
+    {1, 30, 2, 1}     // Dot
 };
 
 #endif
