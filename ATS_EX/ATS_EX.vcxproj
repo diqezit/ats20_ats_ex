@@ -95,11 +95,14 @@
     <ClInclude Include="Defines.h" />
     <ClInclude Include="CustomFonts.h" />
     <ClInclude Include="Globals.h" />
+    <ClInclude Include="Input.h" />
+    <ClInclude Include="Memory.h" />
     <ClInclude Include="SSD1306_OLED.h" />
     <ClInclude Include="patch_ssb_compressed.h" />
     <ClInclude Include="Rotary.h" />
     <ClInclude Include="SI4735_fixed.h" />
     <ClInclude Include="SimpleButton.h" />
+    <ClInclude Include="UI.h" />
     <ClInclude Include="Utils.h" />
     <ClInclude Include="__vm\.ATS_EX.vsarduino.h" />
   </ItemGroup>
