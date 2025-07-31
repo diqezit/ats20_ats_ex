@@ -1,4 +1,38 @@
+// Globals.h
+
 #pragma once
+
+// =================================================================================================
+// Macros & Constants
+// =================================================================================================
+
+// helper to check if the band type
+// used to limit max AM step index as larger steps (like 9/10kHz)
+#define IS_LW_MW(bt) ((bt)==LW_BAND_TYPE || (bt)==MW_BAND_TYPE)
+
+// to get the last valid index of a zero-based array
+#define LEN(a) ((uint8_t)(sizeof(a) - 1))
+
+// timed checks
+#define now_ms()            (uint32_t)millis()
+#define since_ms(t)         (now_ms() - (uint32_t)(t))
+#define passed_ms(t,d)      (since_ms(t) >= (uint32_t)(d))
+
+#define RETURN_IF_SETTINGS_ACTIVE() do { if (g_settingsActive) return; } while(0)
+
+// A macro to convert a 4-character string literal into a char array without a null terminator
+#define PACK_STR4(s) {s[0], s[1], s[2], s[3]}
+
+const uint8_t g_SettingsMaxPages = 3;       // pages number in settings menu
+const int16_t CW_PITCH_OFFSET_HZ = 500;     // 500 Hz pitch for CW tone generation
+
+#if ENABLE_FM_FAV
+const uint8_t MAX_FM_FAVORITES = 10;
+#endif
+
+const uint8_t g_bandCount = 28;             // Number of bands for seamless coverage
+const uint8_t g_lastBand = g_bandCount - 1;
+
 
 // =================================================================================================
 // Enumerations
@@ -88,6 +122,45 @@ void debugPrint_P(const char* str);
 void debugPrintNum(int16_t num);
 #endif
 
+// --- Memory Handling Orchestrators (using in EEPROM) ---
+void syncActiveStateToBand();
+void loadActiveStateFromBand();
+
+// --- Input Handling Orchestrators (called by loop) ---
+bool processEncoderActions();
+void processButtonEvents();
+static void updateEncoderState();
+static void refreshCommandIndicators();
+static void switchSettings();
+static void switchCommand(CommandMode mode);
+static void resetCommandMode();
+
+// --- Core Utilities & State Management (needed by Input.h) ---
+static bool isSSB();
+static void doSeek();
+static void switchSettingsPage();
+static void switchSettings();
+static void cycleAmSsbCwModes();
+static void doFrequencyTuneSSB();
+static void doFrequencyTune();
+static void doVolume(int8_t v);
+static void doStep(int8_t v);
+static void doBandwidth(uint8_t v);
+static void addFav();
+static void delFav();
+static void saveFMFav();
+static void setCpuPrescaler(uint8_t prescaler);
+static void resetEepromDelay();
+
+// --- UI Drawing (needed by Input.h) ---
+static void DrawSetting(uint8_t idx, bool full);
+static void showFav();
+static void showVolume();
+static void showStep();
+static void showBandwidth();
+static void showModulation();
+
+// --- Other Global Prototypes ---
 static void applyBandConfiguration(bool extraSSBReset = false);
 static void bandSwitch(bool up, bool loadStoredFreq = true);
 static void doCWSwitch();
@@ -120,23 +193,6 @@ void showSplashScreen();
 void showStatus(bool cleanFreq = false);
 void updateAndShowBattery(bool forceShow);
 void updateStereoIndicator();
-
-// =================================================================================================
-// Macros & Constants
-// =================================================================================================
-
-// A macro to convert a 4-character string literal into a char array without a null terminator
-#define PACK_STR4(s) {s[0], s[1], s[2], s[3]}
-
-const uint8_t g_SettingsMaxPages = 3;       // pages number in settings menu
-const int16_t CW_PITCH_OFFSET_HZ = 500;     // 500 Hz pitch for CW tone generation
-
-#if ENABLE_FM_FAV
-const uint8_t MAX_FM_FAVORITES = 10;
-#endif
-
-const uint8_t g_bandCount = 28;             // Number of bands for seamless coverage
-const uint8_t g_lastBand = g_bandCount - 1;
 
 // =================================================================================================
 // Data Structures
@@ -319,26 +375,26 @@ SettingsItem g_Settings[] =
 // it is indexed here by the SettingsIndex enum
 const PROGMEM SwitchMapEntry switch_setting_map[] = {
     // Page 1
-    [ATT] =                 {0, false},
-    [ScanSwitch] =          {2, true},
-    [AutoVolControl] =      {0, false},
-    [SoftMute] =            {0, false},
-    [SoftMuteThr] =         {0, false},
-    [DeEmp] =               {3, false},
+    [ATT] = {0, false},
+    [ScanSwitch] = {2, true},
+    [AutoVolControl] = {0, false},
+    [SoftMute] = {0, false},
+    [SoftMuteThr] = {0, false},
+    [DeEmp] = {3, false},
     // Page 2
-    [BFO] =                 {0, false},
-    [SSM] =                 {7, false},
-    [SVC] =                 {2, true},
-    [CutoffFilter] =        {0, false},
-    [Sync] =                {2, true},
-    [Brightness] =          {0, false},
+    [BFO] = {0, false},
+    [SSM] = {7, false},
+    [SVC] = {2, true},
+    [CutoffFilter] = {0, false},
+    [Sync] = {2, true},
+    [Brightness] = {0, false},
     // Page 3
-    [AntennaCap] =          {1, false},
-    [CPUSpeed] =            {9, false},
-    [BATT_PIN] =            {0, false},
-    [SWUnits] =             {5, false},
-    [RSSI_AM_Off] =         {1, true},
-    [DisplayOff] =          {0, false},
+    [AntennaCap] = {1, false},
+    [CPUSpeed] = {9, false},
+    [BATT_PIN] = {0, false},
+    [SWUnits] = {5, false},
+    [RSSI_AM_Off] = {1, true},
+    [DisplayOff] = {0, false},
 };
 
 // -------------------------------------------------------------------------------------------------

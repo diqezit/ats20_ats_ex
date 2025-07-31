@@ -688,3 +688,18 @@ This version introduces the ability to save your favorite FM stations.
 
 ------------------------------------------------------------------------------------------------------------
 
+
+### **MOD_NO_RDS v5.8.1**
+
+`(!) Attention: This is a technical release focused on internal improvements. There are no new user-facing features.`
+
+*   **[Optimization] Code Health & Refactoring:**
+    *   Overhauled the project internal structure for improved modularity, making future updates easier to develop and maintain.
+    *   Broke down large functions into smaller (SRP) & reusable utilities to reduce code duplication (DRY).
+    *   Improved code readability in key modules (like UI and input handling) through better formatting and clearer comments.
+	*   Refactored the input handling subsystem into a clean, table-driven dispatcher
+    *   Centralized all button logic, eliminating redundant handlers (DRY) to improve code readability and simplify future maintenance
+	
+	
+
+------------------------------------------------------------------------------------------------------------

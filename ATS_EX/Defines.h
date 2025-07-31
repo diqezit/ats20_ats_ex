@@ -31,6 +31,10 @@ constexpr auto EEPROM_MODE_SETTINGS_START = 300;
 constexpr auto EEPROM_FM_FAVORITES_START = 400;
 constexpr auto EEPROM_FM_FAVORITES_COUNT = 420;
 
+
+constexpr auto APP_VERSION = 58; // Version number for compatibility checks
+
+
 // Behavior
 constexpr auto SAVE_ON_IDLE_TIMEOUT = 30000UL;
 constexpr auto DEFAULT_VOLUME = 25;
