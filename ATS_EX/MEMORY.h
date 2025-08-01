@@ -1,185 +1,16 @@
 #pragma once
 
-#include <EEPROM.h>
-
 // ======================================================================
 // Memory.h - EEPROM Management Subsystem
 // Handles saving and loading all persistent receiver state
 // ======================================================================
 
 // ==========================================
-// ===== INITIALIZATION & DEFAULTS ==========
-// ==========================================
-
-// Populates settings with factory defaults
-// usually on first boot or corruption
-static void initializeDefaultModeSettings() {
-    for (uint8_t i = 0; i < MODE_CONTEXT_COUNT; i++) {
-        g_modeSettings[MODE_SETTING_AGC][i] = defaultModeSettings[i].agc;
-        g_modeSettings[MODE_SETTING_SOFT_MUTE][i] = defaultModeSettings[i].soft_mute;
-        g_modeSettings[MODE_SETTING_AVC][i] = defaultModeSettings[i].avc;
-    }
-}
-
-// ==========================================
-// ===== LOW-LEVEL EEPROM HELPERS ===========
-// ==========================================
-
-// Writes one band variable data to a specific EEPROM address
-static void writeBandStateToEEPROM(uint16_t addr, const Band& band) {
-    EEPROM.update(addr + 0, band.currentFreq >> 8);
-    EEPROM.update(addr + 1, band.currentFreq & 0xFF);
-    EEPROM.update(addr + 2, band.stepIdxAM);
-    EEPROM.update(addr + 3, band.stepIdxSSB);
-    EEPROM.update(addr + 4, band.stepIdxFM);
-    EEPROM.update(addr + 5, band.bwIdxAM);
-    EEPROM.update(addr + 6, band.bwIdxSSB);
-    EEPROM.update(addr + 7, band.bwIdxFM);
-}
-
-// Reads one band variable data from a specific EEPROM address
-static void readBandStateFromEEPROM(uint16_t addr, Band& band) {
-    band.currentFreq = (EEPROM.read(addr + 0) << 8) | EEPROM.read(addr + 1);
-    band.stepIdxAM = EEPROM.read(addr + 2);
-    band.stepIdxSSB = EEPROM.read(addr + 3);
-    band.stepIdxFM = EEPROM.read(addr + 4);
-    band.bwIdxAM = EEPROM.read(addr + 5);
-    band.bwIdxSSB = EEPROM.read(addr + 6);
-    band.bwIdxFM = EEPROM.read(addr + 7);
-}
-
-// ==========================================
-// ===== FM FAVORITES MANAGEMENT ============
-// ==========================================
-
-#if ENABLE_FM_FAV
-// Saves FM favorites list to EEPROM
-static void saveFMFav() {
-    EEPROM.update(EEPROM_FM_FAVORITES_COUNT, g_totalFavorites);
-
-    uint16_t addr = EEPROM_FM_FAVORITES_START;
-    for (uint8_t i = 0; i < g_totalFavorites; i++) {
-        uint16_t freq = g_fmFavorites[i].frequency;
-        EEPROM.update(addr++, freq >> 8);
-        EEPROM.update(addr++, freq & 0xFF);
-    }
-}
-
-// Loads FM favorites from EEPROM
-// resetting if data is invalid
-static void loadFMFav() {
-    g_totalFavorites = EEPROM.read(EEPROM_FM_FAVORITES_COUNT);
-
-    // Protect against invalid count from uninitialized EEPROM (0xFF)
-    if (g_totalFavorites == 0xFF || g_totalFavorites > MAX_FM_FAVORITES) {
-        g_totalFavorites = 0;
-        saveFMFav();
-        return;
-    }
-
-    uint16_t addr = EEPROM_FM_FAVORITES_START;
-
-    // Read 16-bit frequency byte-by-byte to ensure correct endianness
-    for (uint8_t i = 0; i < g_totalFavorites; i++) {
-        uint8_t highByte = EEPROM.read(addr);
-        addr++;
-        uint8_t lowByte = EEPROM.read(addr);
-        addr++;
-        uint16_t freq = (highByte << 8) | lowByte;
-        g_fmFavorites[i].frequency = freq;
-    }
-}
-#endif
-
-// ==========================================
-// ===== GENERIC BLOCK I/O HELPERS ==========
-// ==========================================
-
-// Generic helper to write a block of memory to EEPROM
-static inline void writeEepromBlock(uint16_t& addr, const void* src, uint16_t size) {
-    const uint8_t* p = (const uint8_t*)src;
-    for (uint16_t i = 0; i < size; i++) {
-        EEPROM.update(addr + i, p[i]);
-    }
-    addr += size;
-}
-
-// Generic helper to read a block of memory from EEPROM
-static inline void readEepromBlock(uint16_t& addr, void* dst, uint16_t size) {
-    uint8_t* p = (uint8_t*)dst;
-    for (uint16_t i = 0; i < size; i++) {
-        p[i] = EEPROM.read(addr + i);
-    }
-    addr += size;
-}
-
-// ==========================================
-// ===== COMPONENT-LEVEL STATE HANDLERS =====
-// ==========================================
-
-// Wraps block I/O for reading or writing mode-specific settings
-static inline void handleModeSettingsEEPROM(bool save) {
-    uint16_t addr = EEPROM_MODE_SETTINGS_START;
-    if (save)
-        writeEepromBlock(addr, g_modeSettings, sizeof(g_modeSettings));
-    else
-        readEepromBlock(addr, g_modeSettings, sizeof(g_modeSettings));
-}
-
-// Writes main configuration block (volume, mode, BFO) to EEPROM
-static inline void writeEepromHeader(uint16_t& addr) {
-    EEPROM.update(addr++, g_muteVolume > 0 ? g_muteVolume : g_si4735.getVolume());
-    EEPROM.update(addr++, g_bandIndex);
-    EEPROM.update(addr++, g_currentMode);
-    EEPROM.update(addr++, g_currentBFO >> 8);
-    EEPROM.update(addr++, g_currentBFO & 0xFF);
-    EEPROM.update(addr++, g_lastCWMode);
-}
-
-// Reads main configuration block with sanity checks for data integrity
-static inline void readEepromHeader(uint16_t& addr) {
-    g_volume = EEPROM.read(addr++);
-    g_bandIndex = EEPROM.read(addr++);
-    // Sanity check against invalid data
-    if (g_bandIndex > g_lastBand) g_bandIndex = 1;
-    g_currentMode = EEPROM.read(addr++);
-
-    // Reconstruct 16-bit BFO from two bytes
-    uint8_t highBFO = EEPROM.read(addr);
-    addr++;
-    uint8_t lowBFO = EEPROM.read(addr);
-    addr++;
-    g_currentBFO = (highBFO << 8) | lowBFO;
-
-    g_lastCWMode = EEPROM.read(addr++);
-}
-
-// Saves band data
-// non-full save writes only current band to reduce EEPROM wear
-static inline void saveBands(bool full_save) {
-    const uint8_t band_state_size = sizeof(Band) - offsetof(Band, currentFreq);
-
-    if (full_save) {
-        for (uint8_t i = 0; i <= g_lastBand; ++i)
-            writeBandStateToEEPROM(EEPROM_BANDS_START + (i * band_state_size), g_bandList[i]);
-    } else {
-        writeBandStateToEEPROM(EEPROM_BANDS_START + (g_bandIndex * band_state_size), g_bandList[g_bandIndex]);
-    }
-}
-
-// Loads state for all bands from EEPROM into the global band list
-static inline void loadBands() {
-    const uint8_t band_state_size = sizeof(Band) - offsetof(Band, currentFreq);
-    for (uint8_t i = 0; i <= g_lastBand; ++i)
-        readBandStateFromEEPROM(EEPROM_BANDS_START + (i * band_state_size), g_bandList[i]);
-}
-
-// ==========================================
 // ===== UI & MESSAGING HELPERS =============
 // ==========================================
 
 #if ENABLE_EEPROM_RESET_MSG
-// Displays a message on screen when EEPROM is reset to defaults
+// Notify user that settings have been reset to defaults
 static void drawEepromResetMsg() {
     oled.clear();
     oled.setCursor(40, 2);
@@ -189,6 +20,133 @@ static void drawEepromResetMsg() {
 #endif
 
 // ==========================================
+// ===== DATA STRUCTURES FOR EEPROM =========
+// ==========================================
+
+// Main configuration data, grouped for a single EEPROM write
+struct __attribute__((packed)) ReceiverHeader {
+    uint8_t volume;
+    uint8_t bandIndex;
+    uint8_t currentMode;
+    int16_t currentBFO;
+    uint8_t lastCWMode;
+};
+
+// Band settings are bit-packed to save EEPROM space
+struct __attribute__((packed)) BandStatePacked {
+    uint16_t currentFreq;
+    uint8_t packed_am;
+    uint8_t packed_ssb;
+    uint8_t packed_fm;
+};
+
+// ==========================================
+// ===== COMPONENT-LEVEL STATE HANDLERS =====
+// ==========================================
+
+// --- Band State ---
+// Pack runtime band data into a compact struct and save to EEPROM
+static void saveBandState(uint8_t bandIndex) {
+    BandStatePacked state;
+    const Band& band = g_bandList[bandIndex];
+    state.currentFreq = band.currentFreq;
+    // Pack step and bandwidth indices into single bytes
+    state.packed_am = (band.stepIdxAM & 0x0F) |
+        ((band.bwIdxAM & 0x0F) << 4);
+    state.packed_ssb = (band.stepIdxSSB & 0x0F) |
+        ((band.bwIdxSSB & 0x0F) << 4);
+    state.packed_fm = (band.stepIdxFM & 0x0F) |
+        ((band.bwIdxFM & 0x0F) << 4);
+    eeprom_update_block(
+        &state,
+        (void*)(EEPROM_BANDS_START + (bandIndex * sizeof(BandStatePacked))),
+        sizeof(BandStatePacked)
+    );
+}
+
+// Read packed band data from EEPROM and expand into runtime struct
+static void loadBandState(uint8_t bandIndex) {
+    BandStatePacked state;
+    Band& band = g_bandList[bandIndex];
+    eeprom_read_block(
+        &state,
+        (const void*)(EEPROM_BANDS_START + (bandIndex * sizeof(BandStatePacked))),
+        sizeof(BandStatePacked)
+    );
+    band.currentFreq = state.currentFreq;
+    // Unpack step and bandwidth from their respective bytes
+    band.stepIdxAM = state.packed_am & 0x0F;
+    band.bwIdxAM = (state.packed_am >> 4) & 0x0F;
+    band.stepIdxSSB = state.packed_ssb & 0x0F;
+    band.bwIdxSSB = (state.packed_ssb >> 4) & 0x0F;
+    band.stepIdxFM = state.packed_fm & 0x0F;
+    band.bwIdxFM = (state.packed_fm >> 4) & 0x0F;
+}
+
+// On partial saves only write current band state to reduce EEPROM wear
+static inline void saveBands(bool full_save) {
+    if (full_save) {
+        for (uint8_t i = 0; i <= g_lastBand; ++i)
+            saveBandState(i);
+    } else {
+        saveBandState(g_bandIndex);
+    }
+}
+
+// Helper to load all band configurations at startup
+static inline void loadBands() {
+    for (uint8_t i = 0; i <= g_lastBand; ++i)
+        loadBandState(i);
+}
+
+// --- Favorites ---
+#if ENABLE_FAVORITES
+// Write the entire list of favorite stations to EEPROM
+static void saveFavorites() {
+    eeprom_update_byte((uint8_t*)EEPROM_FAVORITES_COUNT, g_totalFavorites);
+    uint16_t addr = EEPROM_FAVORITES_START;
+    for (uint8_t i = 0; i < g_totalFavorites; i++) {
+        eeprom_update_block(&g_favorites[i], (void*)addr, sizeof(FavoriteStation));
+        addr += sizeof(FavoriteStation);
+    }
+}
+
+// Read favorite stations from EEPROM, handling uninitialized data
+static void loadFavorites() {
+    g_totalFavorites = eeprom_read_byte((const uint8_t*)EEPROM_FAVORITES_COUNT);
+
+    // Sanity check favorite count to handle uninitialized EEPROM
+    if (g_totalFavorites == 0xFF || g_totalFavorites > MAX_FAVORITES) {
+        g_totalFavorites = 0;
+        saveFavorites();
+        return;
+    }
+
+    uint16_t addr = EEPROM_FAVORITES_START;
+    for (uint8_t i = 0; i < g_totalFavorites; i++) {
+        eeprom_read_block(&g_favorites[i], (const void*)addr, sizeof(FavoriteStation));
+        addr += sizeof(FavoriteStation);
+    }
+}
+#endif
+
+// Save or load mode-specific settings as a single block
+static inline void handleModeSettingsEEPROM(bool save) {
+    if (save)
+        eeprom_update_block(
+            g_modeSettings,
+            (void*)EEPROM_MODE_SETTINGS_START,
+            sizeof(g_modeSettings)
+        );
+    else
+        eeprom_read_block(
+            g_modeSettings,
+            (const void*)EEPROM_MODE_SETTINGS_START,
+            sizeof(g_modeSettings)
+        );
+}
+
+// ==========================================
 // ===== MAIN ORCHESTRATORS =================
 // ==========================================
 
@@ -196,28 +154,36 @@ static void drawEepromResetMsg() {
 static void saveAllReceiverInformation(bool full_save = true) {
     syncActiveStateToBand();
 
-    // Optimization: skip write if frequency has not changed
+    // Skip write if frequency is unchanged on partial saves to reduce wear
     if (!full_save && g_currentFrequency == g_lastSavedFrequency) {
         g_stateIsDirty = false;
         return;
     }
 
-    EEPROM.update(EEPROM_APP_ID_ADDRESS, EEPROM_APP_ID);
-    EEPROM.update(EEPROM_VERSION_ADDRESS, APP_VERSION);
+    eeprom_update_byte((uint8_t*)EEPROM_APP_ID_ADDRESS, EEPROM_APP_ID);
+    eeprom_update_byte((uint8_t*)EEPROM_VERSION_ADDRESS, APP_VERSION);
 
-    uint16_t addr = EEPROM_HEADER_START;
-    writeEepromHeader(addr);
+    ReceiverHeader header;
+    header.volume = g_muteVolume > 0 ? g_muteVolume : g_si4735.getVolume();
+    header.bandIndex = g_bandIndex;
+    header.currentMode = g_currentMode;
+    header.currentBFO = g_currentBFO;
+    header.lastCWMode = g_lastCWMode;
+    eeprom_update_block(&header, (void*)EEPROM_HEADER_START, sizeof(header));
 
     saveBands(full_save);
 
     if (full_save) {
-        for (uint8_t i = 0; i < SETTINGS_MAX; ++i)
-            EEPROM.update(EEPROM_SETTINGS_START + i, g_Settings[i].param);
-
+        for (uint8_t i = 0; i < SETTINGS_MAX; ++i) {
+            eeprom_update_byte(
+                (uint8_t*)(EEPROM_SETTINGS_START + i),
+                g_Settings[i].param
+            );
+        }
         handleModeSettingsEEPROM(true);
 
-#if ENABLE_FM_FAV
-        saveFMFav();
+#if ENABLE_FAVORITES
+        saveFavorites();
 #endif
     }
 
@@ -225,33 +191,50 @@ static void saveAllReceiverInformation(bool full_save = true) {
 }
 
 // Main entry point for loading all state from EEPROM on boot
+// It validates EEPROM data using magic bytes and version
+// If data is invalid it orchestrates a factory reset
+// using compile-time defaults in g_Settings as source of truth
 static void readAllReceiverInformation() {
-    // Check for magic bytes to validate EEPROM data
-    // reset if invalid
-    if (EEPROM.read(EEPROM_APP_ID_ADDRESS) != EEPROM_APP_ID ||
-        EEPROM.read(EEPROM_VERSION_ADDRESS) != APP_VERSION) {
+    // Validate EEPROM data with magic bytes and version, reset to defaults if invalid
+    if (eeprom_read_byte((const uint8_t*)EEPROM_APP_ID_ADDRESS) != EEPROM_APP_ID ||
+        eeprom_read_byte((const uint8_t*)EEPROM_VERSION_ADDRESS) != APP_VERSION) {
 #if ENABLE_EEPROM_RESET_MSG
         drawEepromResetMsg();
 #endif
-        initializeDefaultModeSettings();
-#if ENABLE_FM_FAV
+        // Populate g_modeSettings from the compile-time defaults already in g_Settings
+        syncModeDependentSettings(false);
+
+#if ENABLE_FAVORITES
         g_totalFavorites = 0;
 #endif
+        // Now both RAM arrays are pristine and consistent, save them
         saveAllReceiverInformation(true);
         loadActiveStateFromBand();
         applyBandConfiguration();
         return;
     }
 
-    uint16_t addr = EEPROM_HEADER_START;
-    readEepromHeader(addr);
+    // Normal boot path - load all data from valid EEPROM
+    ReceiverHeader header;
+    eeprom_read_block(&header, (const void*)EEPROM_HEADER_START, sizeof(header));
+
+    g_volume = header.volume;
+    g_bandIndex = header.bandIndex;
+    // Prevent loading an out-of-bounds band index
+    if (g_bandIndex > g_lastBand) g_bandIndex = 1;
+    g_currentMode = header.currentMode;
+    g_currentBFO = header.currentBFO;
+    g_lastCWMode = header.lastCWMode;
 
     loadBands();
 
-    for (uint8_t i = 0; i < SETTINGS_MAX; ++i)
-        g_Settings[i].param = EEPROM.read(EEPROM_SETTINGS_START + i);
+    for (uint8_t i = 0; i < SETTINGS_MAX; ++i) {
+        g_Settings[i].param = eeprom_read_byte(
+            (const uint8_t*)(EEPROM_SETTINGS_START + i)
+        );
+    }
 
-    // Safety check to prevent loading invalid CPU speed on settings
+    // Ensure CPU speed setting is valid after loading from EEPROM
     if (g_Settings[SettingsIndex::CPUSpeed].param > 1)
         g_Settings[SettingsIndex::CPUSpeed].param = 0;
 
@@ -259,8 +242,8 @@ static void readAllReceiverInformation() {
 
     applyBrightness();
 
-#if ENABLE_FM_FAV
-    loadFMFav();
+#if ENABLE_FAVORITES
+    loadFavorites();
 #endif
 
     loadActiveStateFromBand();

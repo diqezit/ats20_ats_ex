@@ -1,38 +1,26 @@
 #pragma once
 
-//Faster alternative for convertToChar
-// not used in the code
-/* void utoa(char* out, uint16_t num)
-{
-    char* p = out;
-    if (num == 0)
-        *p++ = '0';
-    else
-    {
-        for (uint16_t base = 10000; base > 0; base /= 10)
-        {
-            if (num >= base)
-            {
-                *p++ = '0' + num / base;
-                num %= base;
-            }
-            else if (p != out)
-                *p++ = '0';
-        }
-    }
-    *p = '\0';
-}
-*/
+// =====================================================================================
+// String & Number Conversion Utilities
+// =====================================================================================
 
-//Better than sprintf which has overwhelmingly large overhead, it helps to reduce binary size
-void convertToChar(char* str, uint16_t value, uint8_t len, uint8_t dot = 0, char separator = '.', char space = ' ') {
+// Converts an integer to a character string with options for padding and decimal points.
+// A lightweight alternative to sprintf to save flash space.
+void convertToChar(
+    char* str,
+    uint16_t value,
+    uint8_t len,
+    uint8_t dot = 0,
+    char separator = '.',
+    char space = ' '
+) {
     uint8_t current_pos = len + (dot > 0);
     str[current_pos] = '\0';
 
     for (uint8_t i = 0; i < len; ++i) {
-        if (dot > 0 && i == (len - dot))
+        if (dot > 0 && i == (len - dot)) {
             str[--current_pos] = separator;
-
+        }
         str[--current_pos] = (value % 10) + '0';
         value /= 10;
     }
@@ -43,14 +31,44 @@ void convertToChar(char* str, uint16_t value, uint8_t len, uint8_t dot = 0, char
     }
 }
 
-//Measure integer digit length
+// Measures integer digit length for display formatting
 uint8_t ilen(uint16_t n) {
     if (n < 100) return 1 + (n >= 10);
     if (n < 10000) return 3 + (n >= 1000);
     return 5;
 }
 
-//Split KHz frequency + BFO to KHz and .00 tail
+
+// =====================================================================================
+// Core State, Tuning & EEPROM Utilities
+// =====================================================================================
+
+// Checks if the current mode is LSB, USB, or CW
+static bool isSSB() {
+    return g_currentMode > AM && g_currentMode < FM;
+}
+
+// Gets the current mode context (AM or SSB) for loading mode-specific settings
+static ModeContext getModeContext() {
+    if (isSSB()) {
+        return MODE_CONTEXT_SSB;
+    }
+    return MODE_CONTEXT_AM;
+}
+
+// Resets the EEPROM save timer to delay saving state until the user is idle
+static inline void resetEepromDelay() {
+    g_storeTime = millis();
+    g_previousFrequency = 0;
+}
+
+// Marks receiver state as dirty to trigger an EEPROM save on idle
+static inline void markStateAsDirty() {
+    g_lastUserActivityTime = millis() / 1000;
+    g_stateIsDirty = true;
+}
+
+// Splits the main frequency and BFO into a displayable format (e.g., 7050.50)
 static inline void splitFreq(uint16_t& khz, uint16_t& tail) {
     int16_t b = g_currentBFO;
     int16_t d = b / 1000;
@@ -65,32 +83,35 @@ static inline void splitFreq(uint16_t& khz, uint16_t& tail) {
     tail = r / 10;
 }
 
-uint8_t strlen8(const char* s) {
-    const char* start = s;
-    while (*s)
-        s++;
-    return s - start;
-}
+// Aligns frequency to the current step grid. Keeps tuning predictable
+static inline void snapToNewStep(uint16_t* freq, bool isUp) {
+    uint8_t step_index = SSB_STEP_OFFSET + g_bandList[g_bandIndex].stepIdxSSB;
+    uint16_t step_khz = g_tabStep[step_index] / 1000;
+    if (step_khz == 0) return;
 
-// division via subtraction loop to save flash space
-static inline uint8_t sw_div(uint16_t& dividend, const uint16_t divisor) {
-    uint8_t quotient = 0;
-    while (dividend >= divisor) {
-        quotient++;
-        dividend -= divisor;
+    uint16_t remainder = *freq % step_khz;
+    if (remainder != 0) {
+        if (isUp) {
+            // Snap to the next grid step
+            *freq += step_khz - remainder;
+        } else {
+            // Snap to the current grid step
+            *freq -= remainder;
+        }
     }
-    return quotient;
 }
 
-// save more flash image size
+// Handles parameter switching with wrap-around logic. Used in settings menu
 static void doSwitchLogic(int8_t& param, int8_t low, int8_t high, int8_t step) {
     param += step;
-    if (param < low)
+    if (param < low) {
         param = high;
-    else if (param > high)
+    } else if (param > high) {
         param = low;
+    }
 }
 
+// Toggles a binary setting (0 or 1)
 static void toggleSetting(uint8_t settingIndex) {
     g_Settings[settingIndex].param = 1 - g_Settings[settingIndex].param;
 }
@@ -99,9 +120,9 @@ static void toggleSetting(uint8_t settingIndex) {
 #if DEBUG_MODE
 
 
-// --------------------------------------------------------
-// ------- Lighweight debbuger instead SerialPrint --------
-// --------------------------------------------------------
+// =====================================================================================
+// Lighweight Debugger (replaces SerialPrint to save flash space)
+// =====================================================================================
 
 
 // UART (baud 9600)
@@ -113,7 +134,7 @@ void initDebugUART() {
     UCSR0C = (1 << UCSZ01) | (1 << UCSZ00);
 }
 
-// PROGMEM strings oup for debug - for debug use - debugPrint_P(PSTR("Hello World!"));
+// Prints PROGMEM strings for debug. Usage: debugPrint_P(PSTR("Hello"));
 void debugPrint_P(const char* str) {
     char c;
     while ((c = pgm_read_byte(str++))) {
@@ -122,7 +143,7 @@ void debugPrint_P(const char* str) {
     }
 }
 
-// for char buffer (fix garbage in names)
+// Prints a character buffer
 void debugPrintBuf(const char* buf, uint8_t len) {
     for (uint8_t i = 0; i < len; i++) {
         while (!(UCSR0A & (1 << UDRE0)));
@@ -130,7 +151,7 @@ void debugPrintBuf(const char* buf, uint8_t len) {
     }
 }
 
-// uint16_t num to UART
+// Prints a number to UART
 void debugPrintNum(int16_t num) {
     if (num == 0) {
         debugPrint_P(PSTR("0"));
@@ -152,6 +173,7 @@ void debugPrintNum(int16_t num) {
     }
 }
 
+// Prints a number in hexadecimal format
 void debugPrintHex(uint16_t num) {
     debugPrint_P(PSTR("0x"));
     for (int8_t i = 12; i >= 0; i -= 4) {
@@ -163,4 +185,3 @@ void debugPrintHex(uint16_t num) {
 }
 
 #endif
-

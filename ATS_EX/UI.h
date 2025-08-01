@@ -12,6 +12,8 @@
 
 extern GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 
+const char g_bandModeDesc[][4] = { "AM ", "LSB", "USB", "CW ", "FM " };
+
 // Spacing between seven-segment characters
 const int DIGIT_SPACING = 2;
 
@@ -82,8 +84,8 @@ static void drawSettingItem(
 
 // --- UI: General & Splash Screen ---
 
-// helper for brightness calculating the value by using integer (low flash consume)
-// on edit have a white color display (non default blue), so don`t know what it will look like for you
+// Maps user brightness setting 0-9 to a non-linear contrast curve
+// This provides better visual steps at lower brightness levels
 static void applyBrightness() {
     uint8_t s = g_Settings[Brightness].param;
 
@@ -98,7 +100,7 @@ static void applyBrightness() {
 void showSplashScreen() {
     oled.clear();
 
-    drawInverted(26, 1, F("ATS-20* V5.9"), false);
+    drawInverted(26, 1, F("ATS-20* V6.0"), false);
     drawInverted(32, 3, F("MOD NO RDS"), false);
 
 #if ANIMATE_SPLASH
@@ -184,7 +186,8 @@ static int renderFrequencyString(const char* freqDisplay, int startX, int pixelY
     return curX - DIGIT_SPACING;
 }
 
-//Draw frequency on display.
+// Renders main frequency using large seven-segment digits
+// Handles different formats for AM, FM, and SSB to match standard radio displays
 static void showFrequency(bool cleanDisplay = false) {
     RETURN_IF_SETTINGS_ACTIVE();
 
@@ -239,7 +242,8 @@ static void showBandTag() {
     drawInverted(0, 0, name_buffer, invert);
 }
 
-// determine the indicator character based on mode
+// Overloads a single screen position for multiple status indicators
+// Shows 'L'/'U' for CW sideband, 'S' for SSB sync, or '*' for FM stereo
 void updateStereoIndicator() {
     char c = (g_currentMode == CW)
         ? (g_lastCWMode == LSB ? 'L' : 'U')
@@ -277,10 +281,18 @@ static void showVolume() {
     drawInverted(114, 0, buf, invert);
 }
 
+// Displays a confirmation message when a station is saved to favorites
+void showSavedConfirmation() {
+    oled.setCursor(45, 3);
+    oled.print(F("SAVED"));
+    delay(500);
+    showStatus(true); // Redraw the main screen to clear the message
+}
+
 // Displays the current signal quality value (RSSI)
 static void showSignalQuality() {
     if (g_settingsActive
-#if ENABLE_FM_FAV
+#if ENABLE_FAVORITES
         || g_favoritesActive
 #endif
         ) return;
@@ -368,65 +380,190 @@ void showStatus(bool cleanFreq) {
 
 // --- UI: Favorites Menu Drawing ---
 
-#if ENABLE_FM_FAV
-// Draws a single item in the favorites list, called by showFav
-static inline void drawFavItem(uint8_t index, uint8_t y_pos, bool selected) {
-    oled.setCursor(0, y_pos);
-    oled.print(selected ? '>' : ' ');
-    oled.print('0');
-    oled.print(index + 1);
-    oled.print(':');
+#if ENABLE_FAVORITES
 
-    uint16_t f_copy = g_fmFavorites[index].frequency;
-    uint8_t megahertz = sw_div(f_copy, 100);
+// Defines layout constants for favorites menu for easy adjustments
+static constexpr uint8_t FAV_HEADER_ROW = 0;
+static constexpr uint8_t FAV_LIST_START_ROW = 2;    // Start list at row 2 for spacing
+static constexpr uint8_t FAV_ROW_GAP = 2;           // Use 2 character rows
+static constexpr uint8_t FAV_ITEMS_PER_PG = 3;      // 3 items per page
 
-    if (megahertz < 100) oled.print(' ');
-    if (megahertz < 10) oled.print(' ');
-
-    oled.print(megahertz);
-    oled.print('.');
-
-    uint8_t first_decimal = sw_div(f_copy, 10);
-    oled.print(first_decimal);
-    oled.print(F(" MHZ  "));
+// Calculates page number for a given favorite index
+static inline uint8_t fav_pageOf(uint8_t index) {
+    return (g_totalFavorites > 0) ? (index / FAV_ITEMS_PER_PG) : 0;
 }
 
-// Display favorites menu
-static void showFav() {
-    drawInverted(0, 0, F("     FM FAVORITES    "), true);
+// Calculates start and end indices for a given page
+static inline void fav_getPageBounds(uint8_t page, uint8_t& start, uint8_t& end) {
+    start = page * FAV_ITEMS_PER_PG;
+    end = (start + FAV_ITEMS_PER_PG < g_totalFavorites) ? (start + FAV_ITEMS_PER_PG) : g_totalFavorites;
+}
 
-    if (!g_totalFavorites) {
-        drawInverted(30, 3, F("NO SAVED"), false);
-        return;
-    }
+// Calculates character row for a favorite index on its page
+static inline uint8_t fav_rowForIndex(uint8_t index, uint8_t page_start_index) {
+    return FAV_LIST_START_ROW + (index - page_start_index) * FAV_ROW_GAP;
+}
 
-    uint8_t start = (g_favoriteSelected >> 1) << 1;
-    uint8_t end = start + 2;
-    if (end > g_totalFavorites) end = g_totalFavorites;
+// Calculates padding spaces for right-aligning header counter
+static inline uint8_t fav_calcHeaderPadding(uint8_t selected, uint8_t total) {
+    uint8_t selDigits = (selected > 9) ? 2 : 1;
+    uint8_t totDigits = (total > 9) ? 2 : 1;
+    uint8_t counterWidth = selDigits + 1 + totDigits;   // "XX|XX"
+    return (21 - 16) - counterWidth;                    // 21 chars total
+}
 
-    for (uint8_t i = start; i < end; i++) {
-        drawFavItem(i, 2 + ((i - start) << 1), i == g_favoriteSelected);
-    }
-
-    if (end == start + 1) {
-        // Since drawFavItem sets the cursor - clear by coordinates
-        clearBox(0, 4 * 8, 128, 8); // y is in pixels
-    }
-
-    oled.setCursor(0, 7);
+// Draws list prefix: selection cursor '>' and padded item number '01'
+static inline void fav_drawPrefix(uint8_t idx, bool sel) {
+    oled.print(sel ? '>' : ' ');
+    if (idx + 1 < 10) oled.print('0');
+    oled.print(idx + 1);
     oled.print(' ');
-    oled.print(g_favoriteSelected + 1);
-    oled.print('/');
-    oled.print(g_totalFavorites);
-    oled.print(F(" DEL:BW"));
 }
-#endif
+
+// Renders FM frequency with manual padding for right-alignment
+// to handle varying number of digits (e.g., 88.5 vs 107.5)
+static inline void fav_drawFreqFM(const FavoriteStation& fav) {
+    uint16_t ip = fav.frequency / 100;
+    uint8_t  dp = (fav.frequency % 100) / 10;
+    oled.print("    ");
+    if (ip < 100) oled.print(' ');
+    oled.print(ip);
+    oled.print('.');
+    oled.print(dp);
+}
+
+// Renders AM/SSB frequency, applying BFO for an accurate display
+static inline void fav_drawFreqAMSSB(const FavoriteStation& fav) {
+    char buf[8];
+    uint16_t khz = fav.frequency, tl = 0;
+
+    if (fav.modulation == LSB || fav.modulation == USB || fav.modulation == CW) {
+        // Apply BFO to show precise tuned frequency
+        int16_t d = fav.bfo / 1000, r = fav.bfo % 1000;
+        if (r < 0) { r += 1000; d--; }
+        khz += d; tl = r / 10;
+    }
+
+    convertToChar(buf, khz, 5, 0, '.', ' ');
+    oled.print(buf);
+    oled.print('.');
+    if (tl < 10) oled.print('0'); // Ensure two decimal places
+    oled.print(tl);
+}
+
+// Renders mode label (AM/LSB/etc) at a fixed position for column alignment
+static inline void fav_drawModeLabel(const FavoriteStation& fav, uint8_t row) {
+    oled.setCursor(14 * 6, row);
+    oled.print(g_bandModeDesc[fav.modulation]);
+}
+
+// Orchestrates drawing a single favorite station entry
+static inline void fav_drawLine(uint8_t idx, uint8_t row, bool sel) {
+    const auto& fav = g_favorites[idx];
+
+    clearBox(0, row * 8, 128, 8);
+    oled.setCursor(0, row);
+
+    fav_drawPrefix(idx, sel);
+
+    if (fav.modulation == FM) {
+        fav_drawFreqFM(fav);
+    } else {
+        fav_drawFreqAMSSB(fav);
+    }
+
+    fav_drawModeLabel(fav, row);
+}
+
+// Renders header with integrated status info
+static void fav_drawHeader() {
+    oled.setCursor(0, FAV_HEADER_ROW);
+    oled.invertText(true);
+    oled.print(F("DEL:BW FAVORITES"));
+
+    if (g_totalFavorites > 0) {
+        uint8_t total = g_totalFavorites;
+        uint8_t selected = g_favoriteSelected + 1;
+
+        uint8_t padding = fav_calcHeaderPadding(selected, total);
+        while (padding--) oled.print(' ');
+
+        oled.print(selected);
+        oled.print('|');
+        oled.print(total);
+    } else {
+        oled.print(F("     "));
+    }
+
+    oled.invertText(false);
+}
+
+// Renders the visible page of favorites
+static void fav_drawPage(uint8_t page) {
+    clearBox(0, (FAV_LIST_START_ROW - 1) * 8, 128, 7 * 8);
+
+    uint8_t start, end;
+    fav_getPageBounds(page, start, end);
+
+    for (uint8_t i = start; i < end; ++i) {
+        uint8_t row = fav_rowForIndex(i, start);
+        fav_drawLine(i, row, i == g_favoriteSelected);
+    }
+}
+
+// Updates only selection cursors for fast, non-flickering navigation
+static void fav_updateCursors(uint8_t page) {
+    if (g_totalFavorites > 0) {
+        uint8_t start, end;
+        fav_getPageBounds(page, start, end);
+
+        for (uint8_t i = start; i < end; ++i) {
+            uint8_t row = fav_rowForIndex(i, start);
+            oled.setCursor(0, row);
+            oled.print(i == g_favoriteSelected ? '>' : ' ');
+        }
+    }
+}
+
+// Decides whether to redraw header and updates it if selection changes
+static void fav_handleHeader(bool force_redraw) {
+    static uint8_t prev_selected = 0xFF;
+
+    if (force_redraw || prev_selected != g_favoriteSelected) {
+        fav_drawHeader();
+    }
+    prev_selected = g_favoriteSelected;
+}
+
+// Decides whether to redraw the full list or just update cursors
+static void fav_handleContent(bool force_redraw) {
+    static uint8_t prev_page = 0xFF;
+    uint8_t page = fav_pageOf(g_favoriteSelected);
+
+    if (force_redraw || page != prev_page) {
+        prev_page = page;
+        if (!g_totalFavorites) {
+            clearBox(0, (FAV_LIST_START_ROW - 1) * 8, 128, 7 * 8);
+            drawInverted(36, 4, F("EMPTY LIST"), false);
+        } else {
+            fav_drawPage(page);
+        }
+    } else {
+        fav_updateCursors(page);
+    }
+}
+
+// Main function to draw favorites menu, orchestrates header and content drawing
+static void showFavorites(bool force_redraw) {
+    fav_handleHeader(force_redraw);
+    fav_handleContent(force_redraw);
+}
+
+#endif  // ENABLE_FAVORITES
 
 // --- UI: Settings Menu Drawing ---
 
-// Maps a setting parameter to its UI display string
-// case handles DisplayOff due to non-sequential text indices,
-// while other types use direct or data-driven mapping from PROGMEM
+// Translates internal setting parameters into user-facing text like "AUT", "ON", or "75"
 static inline void handleSwitchParam(
     char* buf, uint8_t idx,
     int8_t param, uint8_t type) {
