@@ -31,13 +31,11 @@
 
 #include "Defines.h"
 #include "SI4735_fixed.h"
-#include <EEPROM.h>
-#include "SSD1306_OLED.h"
-GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
-
-#if DEBUG_MODE
+#include <avr/eeprom.h>
 #include <avr/pgmspace.h>
-#endif
+#include "SSD1306_OLED.h"
+
+GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 
 #include "Rotary.h"
 #include "SimpleButton.h"
@@ -53,18 +51,6 @@ GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 // ==========================================
 // ===== CORE UTILITIES & DEFINITIONS =======
 // ==========================================
-
-static bool isSSB() {
-    return g_currentMode > AM && g_currentMode < FM;
-}
-
-// Helper function to get the current context (AM or SSB/CW)
-static ModeContext getModeContext() {
-    if (isSSB()) {
-        return MODE_CONTEXT_SSB;
-    }
-    return MODE_CONTEXT_AM;
-}
 
 // most state is already in the band list
 // only need to sync the single live frequency variable
@@ -84,42 +70,12 @@ void loadActiveStateFromBand() {
     g_currentFrequency = g_bandList[g_bandIndex].currentFreq;
 }
 
-//For saving features
-static inline void resetEepromDelay() {
-    g_storeTime = millis();
-    g_previousFrequency = 0;
-}
-
-// register user activity and mark the state as dirty before save in EEPROM
-static inline void markStateAsDirty() {
-    g_lastUserActivityTime = millis() / 1000;
-    g_stateIsDirty = true;
-}
-
 static inline bool checkStopSeeking() {
     bool result;
     noInterrupts();  // race protection
     result = g_seekStop || !(PINC & (1 << (ENCODER_BUTTON - 14)));
     interrupts();
     return result;
-}
-
-// snaps frequency to the step grid after a band switch
-static inline void snapToNewStep(uint16_t* freq, bool isUp) {
-    uint16_t step_khz = g_tabStep[SSB_STEP_OFFSET + g_bandList[g_bandIndex].stepIdxSSB] / 1000;
-    if (step_khz == 0) return;
-
-    uint16_t remainder = *freq % step_khz;
-    // if frequency is not on the grid - snap it
-    if (remainder != 0) {
-        if (isUp) {
-            // to next grid step
-            *freq += step_khz - remainder;
-        } else {
-            // to current grid step
-            *freq -= remainder;
-        }
-    }
 }
 
 // performs bfo rollover with integrated boundary checks and a max bfo limit
@@ -380,7 +336,11 @@ static void configureFMMode() {
 // - Handles optional SSB patch reload on major mode changes
 // - Differentiates between SSB and CW disabling DSP AFC for CW reception
 // - Applies all user-defined settings for filters audio and soft mute
-static void configureSSBMode(uint16_t minFreq, uint16_t maxFreq, bool extraSSBReset) {
+static void configureSSBMode(
+    uint16_t minFreq,
+    uint16_t maxFreq,
+    bool extraSSBReset
+) {
     Band& current_band = g_bandList[g_bandIndex];
 
     if (current_band.bwIdxSSB >= g_bwSSBMaxIdx)
@@ -411,11 +371,17 @@ static void configureSSBMode(uint16_t minFreq, uint16_t maxFreq, bool extraSSBRe
     }
 
     // Use SoftMute setting from storage for SSB
-    g_si4735.setAmSoftMuteMaxAttenuation(g_modeSettings[MODE_SETTING_SOFT_MUTE][MODE_CONTEXT_SSB]);
+    g_si4735.setAmSoftMuteMaxAttenuation(
+        g_modeSettings[MODE_SETTING_SOFT_MUTE][MODE_CONTEXT_SSB]
+    );
     g_si4735.setAMSoftMuteSnrThreshold(g_Settings[SoftMuteThr].param);
 
     // Use bandwidth index from the current band state
-    g_si4735.setSSBAudioBandwidth((g_currentMode == CW) ? g_bwSSBIdx[0] : g_bwSSBIdx[current_band.bwIdxSSB]);
+    g_si4735.setSSBAudioBandwidth(
+        (g_currentMode == CW)
+        ? g_bwSSBIdx[0]
+        : g_bwSSBIdx[current_band.bwIdxSSB]
+    );
     updateBFO();
     g_si4735.setSSBSoftMute(g_Settings[SSM].param);
 }
@@ -434,7 +400,9 @@ static void configureAMMode(uint16_t minFreq, uint16_t maxFreq) {
         g_tabStep[current_band.stepIdxAM]);
 
     // Use SoftMute setting from storage for AM
-    g_si4735.setAmSoftMuteMaxAttenuation(g_modeSettings[MODE_SETTING_SOFT_MUTE][MODE_CONTEXT_AM]);
+    g_si4735.setAmSoftMuteMaxAttenuation(
+        g_modeSettings[MODE_SETTING_SOFT_MUTE][MODE_CONTEXT_AM]
+    );
     g_si4735.setAMSoftMuteSnrThreshold(g_Settings[SoftMuteThr].param);
     g_si4735.setBandwidth(g_bwAMIdx[current_band.bwIdxAM], 1);
 }
@@ -471,7 +439,8 @@ static void applyAgcSettings() {
 // Applies shared settings like AGC and refreshes display to reflect new state
 static void applyBandConfiguration(bool extraSSBReset) {
     // detects a major mode switch (FM <-> non-FM) to safely toggle amp
-    bool switchingBetweenFMandAM = (g_currentMode == FM) != (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE);
+    bool isFmBand = (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE);
+    bool switchingBetweenFMandAM = (g_currentMode == FM) != isFmBand;
 
     if (switchingBetweenFMandAM)
         setAmpState(false);
@@ -480,10 +449,10 @@ static void applyBandConfiguration(bool extraSSBReset) {
 
     g_signalQualityValue = 255; // not keeping old value on screen temporarily (save 8 bytes)
 
-    uint8_t cap_value = (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE) ? 1 : g_Settings[AntennaCap].param;
+    uint8_t cap_value = isFmBand ? 1 : g_Settings[AntennaCap].param;
     g_si4735.setTuneFrequencyAntennaCapacitor(cap_value);
 
-    if (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE) {
+    if (isFmBand) {
         configureFMMode();
     } else {
         uint16_t minFreq = g_bandList[g_bandIndex].minimumFreq;
@@ -763,22 +732,25 @@ static void switchSettingsPage() {
     showSettings();
 }
 
-// Syncs mode-dependent settings between the live g_Settings buffer
-// and the g_modeSettings persistent storage
-static void syncModeDependentSettings(bool load) {
-    const uint8_t m = getModeContext();
-
-    // Sync AGC / ATT
-    (load ? g_Settings[ATT].param : g_modeSettings[MODE_SETTING_AGC][m])
-        = (load ? g_modeSettings[MODE_SETTING_AGC][m] : g_Settings[ATT].param);
-
-    // Sync Soft-Mute
-    (load ? g_Settings[SoftMute].param : g_modeSettings[MODE_SETTING_SOFT_MUTE][m])
-        = (load ? g_modeSettings[MODE_SETTING_SOFT_MUTE][m] : g_Settings[SoftMute].param);
-
-    // Sync AVC
-    (load ? g_Settings[AutoVolControl].param : g_modeSettings[MODE_SETTING_AVC][m])
-        = (load ? g_modeSettings[MODE_SETTING_AVC][m] : g_Settings[AutoVolControl].param);
+// Syncs mode-dependent settings between UI buffer (g_Settings)
+// and persistent storage (g_modeSettings)
+// When loading (true) it uses current mode context
+// When saving (false) it populates ALL mode contexts for a full factory reset
+void syncModeDependentSettings(bool load) {
+    if (load) {
+        // LOAD from storage into UI, based on current mode context
+        const uint8_t m = getModeContext();
+        g_Settings[ATT].param = g_modeSettings[MODE_SETTING_AGC][m];
+        g_Settings[SoftMute].param = g_modeSettings[MODE_SETTING_SOFT_MUTE][m];
+        g_Settings[AutoVolControl].param = g_modeSettings[MODE_SETTING_AVC][m];
+    } else {
+        // SAVE from UI into storage, for ALL mode contexts
+        for (uint8_t m = 0; m < MODE_CONTEXT_COUNT; m++) {
+            g_modeSettings[MODE_SETTING_AGC][m] = g_Settings[ATT].param;
+            g_modeSettings[MODE_SETTING_SOFT_MUTE][m] = g_Settings[SoftMute].param;
+            g_modeSettings[MODE_SETTING_AVC][m] = g_Settings[AutoVolControl].param;
+        }
+    }
 }
 
 //Switch between main screen and settings mode
@@ -805,29 +777,92 @@ static void switchSettings() {
     }
 }
 
-#if ENABLE_FM_FAV
-// Add current frequency to RAM and set dirty flag
-static void addFav() {
-    if (g_totalFavorites >= MAX_FM_FAVORITES) return;
-    for (uint8_t i = 0; i < g_totalFavorites; i++)
-        if (g_fmFavorites[i].frequency == g_currentFrequency) return;
+#if ENABLE_FAVORITES
+// Add current station details to RAM and set dirty flag
+static void addFavorite() {
+    if (g_totalFavorites >= MAX_FAVORITES) return;
 
-    g_fmFavorites[g_totalFavorites++].frequency = g_currentFrequency;
+    // Prevent adding a station if the same frequency and mode already exist
+    for (uint8_t i = 0; i < g_totalFavorites; i++) {
+        if (g_favorites[i].frequency == g_currentFrequency &&
+            g_favorites[i].modulation == g_currentMode) {
+            return;
+        }
+    }
+
+    // Frequencies are saved as-is in kHz (FM 107.0 MHz is saved as 10700)
+    g_favorites[g_totalFavorites] = {
+        g_currentFrequency,
+        g_currentMode,
+        (int16_t)g_currentBFO
+    };
+
+    g_totalFavorites++;
     g_favoritesDirty = true;
 }
 
 // Delete selected favorite from RAM and set dirty flag
-static void delFav() {
+static void deleteFavorite() {
     if (!g_totalFavorites) return;
 
-    for (uint8_t i = g_favoriteSelected; i < g_totalFavorites - 1; i++)
-        g_fmFavorites[i] = g_fmFavorites[i + 1];
+    // Shift all subsequent items one position to the left to fill the gap
+    for (uint8_t i = g_favoriteSelected; i < g_totalFavorites - 1; i++) {
+        g_favorites[i] = g_favorites[i + 1];
+    }
 
     g_totalFavorites--;
-    if (g_totalFavorites && g_favoriteSelected >= g_totalFavorites)
+
+    // If the last item was deleted, move the selection to the new last item
+    if (g_totalFavorites &&
+        g_favoriteSelected >= g_totalFavorites) {
         g_favoriteSelected = g_totalFavorites - 1;
+    }
 
     g_favoritesDirty = true;
+}
+
+// Finds the band index that matches favorites frequency and modulation
+static inline uint8_t findBandForFavorite(const FavoriteStation& fav) {
+    for (uint8_t i = 0; i < g_bandCount; ++i) {
+        // Band must match both frequency range and modulation type (AM/SSB vs FM)
+        bool isFmMod = (fav.modulation == FM);
+        bool isFmBand = (g_bandList[i].bandType == FM_BAND_TYPE);
+
+        if (isFmMod == isFmBand &&
+            fav.frequency >= g_bandList[i].minimumFreq &&
+            fav.frequency <= g_bandList[i].maximumFreq) {
+            return i;   // Found a matching band
+        }
+    }
+    return g_bandIndex; // Fallback to current band if no match is found
+}
+
+// Applies all settings from the selected favorite to the receiver
+void tuneToSelectedFavorite() {
+    if (!g_totalFavorites) return;
+
+    BandType previousBandType = g_bandList[g_bandIndex].bandType;
+
+    const FavoriteStation& fav = g_favorites[g_favoriteSelected];
+    setAmpState(false);
+
+    g_currentMode = fav.modulation;
+    g_ssbLoaded = isSSB();
+
+    uint8_t targetBand = findBandForFavorite(fav);
+
+    if (g_bandIndex != targetBand) {
+        syncActiveStateToBand();
+        g_bandIndex = targetBand;
+    }
+
+    g_bandList[g_bandIndex].currentFreq = fav.frequency;
+    g_currentBFO = fav.bfo;
+
+    bool forceReset = (previousBandType != g_bandList[g_bandIndex].bandType);
+    applyBandConfiguration(forceReset);
+
+    setAmpState(true);
 }
 #endif
 
@@ -1197,7 +1232,7 @@ static inline void handleSignalAndStereoUpdates() {
 
     // updates prevent while in any menu
     if (g_settingsActive
-#if ENABLE_FM_FAV
+#if ENABLE_FAVORITES
         || g_favoritesActive
 #endif
         ) return;
@@ -1220,13 +1255,19 @@ static inline void handleCommandTimeout() {
             if (g_settingsActive) {
                 g_settingsActive = false;
                 switchSettings();
-                g_lastAdjustmentTime = 0;
-            } else {
-                resetCommandMode();
             }
+            resetCommandMode();
         }
     }
 }
+
+#if ENABLE_FAVORITES
+// Provides auto-exit for the favorites menu on inactivity
+static inline void handleFavoritesTimeout() {
+    if (g_favoritesActive && (millis() - g_lastAdjustmentTime > SETTINGS_MENU_TIMEOUT))
+        exitFavoritesMenu();
+}
+#endif
 
 // settings saved to EEPROM if they have been marked as changed
 static inline void handleSettingsSave() {
@@ -1303,7 +1344,7 @@ static inline void handleEEPROMReset() {
     // Force EEPROM reset if specific buttons are held on startup
     if (!(PINC & (1 << (ENCODER_BUTTON - 14))) || !(PINB & (1 << (AGC_BUTTON - 8)))) {
         // Invalidate version to trigger reset logic
-        EEPROM.write(EEPROM_VERSION_ADDRESS, 0);
+        eeprom_update_byte((uint8_t*)EEPROM_VERSION_ADDRESS, 0);
     } else {
 #if ENABLE_SPLASH_SCREEN
         showSplashScreen();
@@ -1328,8 +1369,8 @@ static inline void loadReceiverConfig() {
     // Load configuration from EEPROM or initialize with defaults
     readAllReceiverInformation();
 
-#if ENABLE_FM_FAV
-    loadFMFav();
+#if ENABLE_FAVORITES
+    loadFavorites();
 #endif
 }
 
@@ -1350,6 +1391,10 @@ static inline void applyInitialConfiguration() {
 
 // Initialize controller
 void setup() {
+#if DEBUG_MODE
+    initDebugUART();
+    debugPrint_P(PSTR("\n\n--- ATS_EX DEBUG START ---\n"));
+#endif
     initHardwarePins();
     initOLED();
     handleEEPROMReset();
@@ -1366,10 +1411,11 @@ void loop() {
     updateEncoderState();
     checkDisplayTimeout();
 
-#if ENABLE_FM_FAV
+#if ENABLE_FAVORITES
     if (g_favoritesActive) {
         handleFavoritesMenu();
         processButtonEvents();
+        handleFavoritesTimeout();
         return;
     }
 #endif

@@ -1,4 +1,5 @@
 #pragma once
+
 #include "Globals.h"
 
 // ======================================================================
@@ -60,6 +61,8 @@ static uint8_t volumeEvent(uint8_t event, uint8_t pin) {
 static uint8_t simpleEvent(uint8_t event, uint8_t pin) {
     if (pin != MODE_SWITCH
         && pin != STEP_BUTTON
+        && pin != AGC_BUTTON
+        && pin != BANDWIDTH_BUTTON
         && event == BUTTONEVENT_FIRSTLONGPRESS) {
         return BUTTONEVENT_SHORTPRESS;
     }
@@ -84,15 +87,19 @@ static uint8_t bandEvent(uint8_t event, uint8_t pin) {
 }
 
 
-#if ENABLE_FM_FAV
-// Handle exiting FM favorites menu
-// saves changes to EEPROM only if needed to reduce wear
+#if ENABLE_FAVORITES
+// =======================================================================
+// ===== FAVORITES MENU LOGIC ============================================
+// =======================================================================
+
+// Save favorites to EEPROM only on exit and only if changed to reduce wear
 static inline void exitFavoritesMenu() {
     if (g_favoritesDirty) {
-        saveFMFav();
+        saveFavorites();
         g_favoritesDirty = false;
     }
     g_favoritesActive = false;
+    g_lastAdjustmentTime = 0; // Reset auto-exit timer
     oled.clear();
     showStatus();
 }
@@ -141,6 +148,7 @@ static void handleBandDownShortPress() {
 // Primary action toggles mute
 // saves current volume for seamless restore
 static void handleVolumeDownShortPress() {
+    RETURN_IF_SETTINGS_ACTIVE();
     if (g_activeCommand != CMD_VOLUME) {
         uint8_t vol = g_si4735.getCurrentVolume();
         if (vol && !g_muteVolume) {
@@ -157,7 +165,8 @@ static void handleVolumeDownShortPress() {
 // Toggles display power for power saving
 // disabled in settings
 static void handleAgcShortPress() {
-    if (!g_settingsActive || !g_displayOn) {
+    RETURN_IF_SETTINGS_ACTIVE();
+    if (!g_displayOn) {
         g_displayOn = !g_displayOn;
         setCpuPrescaler(g_displayOn ? g_Settings[SettingsIndex::CPUSpeed].param : 1);
         oled.setPower(g_displayOn);
@@ -165,10 +174,39 @@ static void handleAgcShortPress() {
     }
 }
 
-// Long press is a context-aware shortcut
-// toggles LSB/USB in SSB or handles special CW action
+// handler for long press on AGC (Save Favorite)
+static void handleAgcLongDone() {
+    RETURN_IF_SETTINGS_ACTIVE();
+#if ENABLE_FAVORITES
+    addFavorite();
+    showSavedConfirmation();
+#endif
+}
+
+// Long press on STEP opens or closes the favorites menu
 static void handleStepLongDone() {
     RETURN_IF_SETTINGS_ACTIVE();
+#if ENABLE_FAVORITES
+    if (g_favoritesActive) {
+        exitFavoritesMenu();
+    } else {
+        g_favoritesActive = true;
+        g_favoriteSelected = 0;
+        g_lastAdjustmentTime = millis();    // Start timer on entry
+        showFavorites(true);                // Force a full redraw on entry
+    }
+#endif
+}
+
+// Handles sideband switching on long press
+static void handleBandwidthLongDone() {
+    // This action should only be available on the main screen
+    if (g_settingsActive
+#if ENABLE_FAVORITES
+        || g_favoritesActive
+#endif
+        ) return;
+
     if (g_currentMode == LSB || g_currentMode == USB) {
         g_currentMode = (g_currentMode == LSB) ? USB : LSB;
         applyBandConfiguration();
@@ -177,40 +215,17 @@ static void handleStepLongDone() {
     }
 }
 
-// Repurpose Mode button in FM to open favorites
-// otherwise it cycles through AM/SSB/CW
-static inline void processModeButtonShortPress() {
-#if ENABLE_FM_FAV
-    if (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE) {
-        g_favoritesActive = true;
-        g_favoriteSelected = 0;
-        oled.clear();
-        showFav();
-        return;
-    }
-#endif
+// Short press on Mode button cycles through AM/SSB/CW, but is disabled in FM
+static void handleModeShortPress() {
+    if (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE) return;
+    RETURN_IF_SETTINGS_ACTIVE();
     cycleAmSsbCwModes();
 }
 
-static void handleModeShortPress() {
-    RETURN_IF_SETTINGS_ACTIVE();
-    processModeButtonShortPress();
-}
-
-// Long press is a context-aware shortcut
-// saves station in FM or toggles sync in SSB
+// Long press on Mode toggles SYNC in SSB mode
 static void handleModeLongDone() {
     RETURN_IF_SETTINGS_ACTIVE();
-#if ENABLE_FM_FAV
-    if (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE) {
-        addFav();
-        oled.setCursor(45, 3);
-        oled.print(F("SAVED"));
-        delay(500);
-        showStatus(true);
-    } else
-#endif
-        if (isSSB()) doSync(0);
+    if (isSSB()) doSync(0);
 }
 
 
@@ -236,34 +251,40 @@ struct ButtonAction {
 // Simple actions (like switching to CMD_VOLUME) now use cmdToSwitch
 // which removes the need for many small, single-purpose handler functions
 static ButtonAction buttonActions[] = {
-    { btn_Encoder,   simpleEvent, handleEncoderShortPress,    nullptr,               CMD_NONE },
-    { btn_Bandwidth, simpleEvent, nullptr,                    nullptr,               CMD_BW },
-    { btn_BandUp,    bandEvent,   handleBandUpShortPress,     nullptr,               CMD_NONE },
-    { btn_BandDn,    bandEvent,   handleBandDownShortPress,   nullptr,               CMD_NONE },
-    { btn_VolumeUp,  volumeEvent, nullptr,                    nullptr,               CMD_VOLUME },
-    { btn_VolumeDn,  volumeEvent, handleVolumeDownShortPress, nullptr,               CMD_NONE },
-    { btn_AGC,       simpleEvent, handleAgcShortPress,        nullptr,               CMD_NONE },
-    { btn_Step,      simpleEvent, nullptr,                    handleStepLongDone,    CMD_STEP },
-    { btn_Mode,      simpleEvent, handleModeShortPress,       handleModeLongDone,    CMD_NONE },
+    { btn_Encoder,   simpleEvent, handleEncoderShortPress,    nullptr,                  CMD_NONE },
+    { btn_Bandwidth, simpleEvent, nullptr,                    handleBandwidthLongDone,  CMD_BW },
+    { btn_BandUp,    bandEvent,   handleBandUpShortPress,     nullptr,                  CMD_NONE },
+    { btn_BandDn,    bandEvent,   handleBandDownShortPress,   nullptr,                  CMD_NONE },
+    { btn_VolumeUp,  volumeEvent, nullptr,                    nullptr,                  CMD_VOLUME },
+    { btn_VolumeDn,  volumeEvent, handleVolumeDownShortPress, nullptr,                  CMD_NONE },
+    { btn_AGC,       simpleEvent, handleAgcShortPress,        handleAgcLongDone,        CMD_NONE },
+    { btn_Step,      simpleEvent, nullptr,                    handleStepLongDone,       CMD_STEP },
+    { btn_Mode,      simpleEvent, handleModeShortPress,       handleModeLongDone,       CMD_NONE },
 };
 
-#if ENABLE_FM_FAV
-// Handles all button presses when the FM favorites menu is active
+#if ENABLE_FAVORITES
+// Handles all button inputs when the favorites menu is active
+// It acts as a simple dispatcher, calling other functions for complex actions
 static void processFavoritesMenuControls() {
+    // Encoder press - select favorite and tune to it
     if (BUTTONEVENT_SHORTPRESS == btn_Encoder.checkEvent(simpleEvent)) {
-        if (g_totalFavorites) {
-            g_currentFrequency = g_fmFavorites[g_favoriteSelected].frequency;
-            g_si4735.setFrequency(g_currentFrequency);
-        }
+        tuneToSelectedFavorite();
         exitFavoritesMenu();
+        return;
     }
+
+    // Bandwidth press -  delete selected favorite
     if (BUTTONEVENT_SHORTPRESS == btn_Bandwidth.checkEvent(simpleEvent)) {
-        delFav();
-        oled.clear();
-        showFav();
+        deleteFavorite();
+        showFavorites(true);
+        g_lastAdjustmentTime = millis();
+        return;
     }
-    if (BUTTONEVENT_SHORTPRESS == btn_Mode.checkEvent(simpleEvent)) {
+
+    // Step press - exit menu without tuning
+    if (BUTTONEVENT_SHORTPRESS == btn_Step.checkEvent(simpleEvent)) {
         exitFavoritesMenu();
+        return;
     }
 }
 #endif
@@ -271,7 +292,7 @@ static void processFavoritesMenuControls() {
 // Central dispatcher for button presses
 // giving priority to favorites menu with its unique control scheme
 void processButtonEvents() {
-#if ENABLE_FM_FAV
+#if ENABLE_FAVORITES
     if (g_favoritesActive) {
         processFavoritesMenuControls();
         return;
@@ -314,6 +335,7 @@ void refreshCommandIndicators() {
 // Activate a specific command mode for the encoder
 // pressing same button again deactivates it
 void switchCommand(CommandMode mode) {
+    RETURN_IF_SETTINGS_ACTIVE();
     g_activeCommand = (g_activeCommand != mode) ? mode : CMD_NONE;
     if (g_activeCommand != CMD_NONE) {
         g_lastAdjustmentTime = millis();
@@ -333,15 +355,16 @@ void resetCommandMode() {
     }
 }
 
-#if ENABLE_FM_FAV
+#if ENABLE_FAVORITES
 // Handle encoder rotation for favorites list
 // enabling circular navigation
 static void handleFavoritesMenu() {
     if (g_safeEncoderMovement) {
+        g_lastAdjustmentTime = millis(); // Reset timer on encoder rotation
         if (g_totalFavorites > 0) {
-            g_favoriteSelected = (g_favoriteSelected + g_safeEncoderMovement + g_totalFavorites)
-                % g_totalFavorites;
-            showFav();
+            // Using doSwitchLogic for clean, wraparound navigation
+            doSwitchLogic((int8_t&)g_favoriteSelected, 0, g_totalFavorites - 1, g_safeEncoderMovement);
+            showFavorites();
         }
         g_safeEncoderMovement = 0;
     }
@@ -432,7 +455,13 @@ bool processEncoderActions() {
 
     if (g_settingsActive) {
         processEncoderForSettings(g_safeEncoderMovement);
-    } else {
+    }
+#if ENABLE_FAVORITES
+    else if (g_favoritesActive) {
+        handleFavoritesMenu();
+    }
+#endif
+    else {
         was_tuning_event = processEncoderForCommands(g_safeEncoderMovement);
     }
 

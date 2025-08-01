@@ -1,5 +1,3 @@
-// Globals.h
-
 #pragma once
 
 // =================================================================================================
@@ -26,8 +24,8 @@
 const uint8_t g_SettingsMaxPages = 3;       // pages number in settings menu
 const int16_t CW_PITCH_OFFSET_HZ = 500;     // 500 Hz pitch for CW tone generation
 
-#if ENABLE_FM_FAV
-const uint8_t MAX_FM_FAVORITES = 10;
+#if ENABLE_FAVORITES
+const uint8_t MAX_FAVORITES = 20;
 #endif
 
 const uint8_t g_bandCount = 28;             // Number of bands for seamless coverage
@@ -125,10 +123,12 @@ void debugPrintNum(int16_t num);
 // --- Memory Handling Orchestrators (using in EEPROM) ---
 void syncActiveStateToBand();
 void loadActiveStateFromBand();
+void syncModeDependentSettings(bool load);
 
 // --- Input Handling Orchestrators (called by loop) ---
 bool processEncoderActions();
 void processButtonEvents();
+static void handleFavoritesTimeout();
 static void updateEncoderState();
 static void refreshCommandIndicators();
 static void switchSettings();
@@ -147,15 +147,17 @@ static void doFrequencyTune();
 static void doVolume(int8_t v);
 static void doStep(int8_t v);
 static void doBandwidth(uint8_t v);
-static void addFav();
-static void delFav();
-static void saveFMFav();
+static void addFavorite();
+static void deleteFavorite();
+static void saveFavorites();
+static void loadFavorites();
 static void setCpuPrescaler(uint8_t prescaler);
 static void resetEepromDelay();
 
 // --- UI Drawing (needed by Input.h) ---
 static void DrawSetting(uint8_t idx, bool full);
-static void showFav();
+static void showFavorites(bool force_redraw = false);
+void showSavedConfirmation();
 static void showVolume();
 static void showStep();
 static void showBandwidth();
@@ -163,6 +165,7 @@ static void showModulation();
 
 // --- Other Global Prototypes ---
 static void applyBandConfiguration(bool extraSSBReset = false);
+static void setAmpState(bool on);
 static void bandSwitch(bool up, bool loadStoredFreq = true);
 static void doCWSwitch();
 static void applyBrightness();
@@ -194,6 +197,7 @@ void showSplashScreen();
 void showStatus(bool cleanFreq = false);
 void updateAndShowBattery(bool forceShow);
 void updateStereoIndicator();
+void tuneToSelectedFavorite();
 
 // =================================================================================================
 // Data Structures
@@ -233,9 +237,11 @@ struct Band {
     int8_t bwIdxFM;
 };
 
-#if ENABLE_FM_FAV
-struct FMFavorite {
+#if ENABLE_FAVORITES
+struct FavoriteStation {
     uint16_t frequency;
+    uint8_t  modulation;
+    int16_t  bfo;
 };
 #endif
 
@@ -273,7 +279,7 @@ int8_t g_SettingSelected;
 int8_t g_SettingsPage = 1;
 bool g_SettingEditing;
 
-#if ENABLE_FM_FAV
+#if ENABLE_FAVORITES
 bool g_favoritesActive;
 bool g_favoritesDirty;
 uint8_t g_favoriteSelected;
@@ -513,8 +519,8 @@ const char PROGMEM paramTexts[][4] = {
 // Timeout values in seconds for the display-off feature, indexed by the setting parameter
 const uint16_t T[5] PROGMEM = { 0, 600, 900, 1800, 3600 };
 
-const char g_bandModeDesc[][4] = { "AM ", "LSB", "USB", "CW ", "FM " };
+extern const char g_bandModeDesc[][4];
 
-#if ENABLE_FM_FAV
-FMFavorite g_fmFavorites[MAX_FM_FAVORITES];
+#if ENABLE_FAVORITES
+FavoriteStation g_favorites[MAX_FAVORITES];
 #endif

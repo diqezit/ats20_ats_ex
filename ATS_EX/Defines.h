@@ -2,20 +2,21 @@
 
 // =================================================================================================
 // EEPROM Memory Map
-// This map describes how data is organized in the receiver's non-volatile memory.
+// This map defines the layout for all persistent data.
+// A compact layout saves space and simplifies block operations.
 //
-// Address Range | Allotted | Used     | Symbol(s)                      | Description
-//---------------|----------|----------|--------------------------------|----------------------------------
-// 0             | 1 B      | 1 B      | EEPROM_APP_ID_ADDRESS          | Custom ID to validate data structure
-// 1             | 1 B      | 1 B      | EEPROM_VERSION_ADDRESS         | Firmware version for compatibility
+// Address Range | Allotted | Used     | Free    | Symbol(s)                      | Description
+//---------------|----------|----------|---------|--------------------------------|----------------------------------
+// 0             | 1 B      | 1 B      | 0 B     | EEPROM_APP_ID_ADDRESS          | Custom ID to validate data structure
+// 1             | 1 B      | 1 B      | 0 B     | EEPROM_VERSION_ADDRESS         | Firmware version for compatibility
 //
-// 10 - 19       | 10 B     | 6 B      | EEPROM_HEADER_START            | Global state header (volume, mode etc.)
-// 20 - 243      | 224 B    | 224 B    | EEPROM_BANDS_START             | State for all 28 bands (28 * 8 bytes)
-// 250 - 299     | 50 B     | ~18 B    | EEPROM_SETTINGS_START          | Global settings array `g_Settings` 
-// 300 - 319     | 20 B     | 6 B      | EEPROM_MODE_SETTINGS_START     | Mode-dependent settings
+// 10 - 19       | 10 B     | 6 B      | 4 B     | EEPROM_HEADER_START            | Global state header (volume, mode etc.)
+// 20 - 159      | 140 B    | 140 B    | 0 B     | EEPROM_BANDS_START             | State for all 28 bands (28 * 5 bytes)
+// 160 - 209     | 50 B     | ~18 B    | ~32 B   | EEPROM_SETTINGS_START          | Global settings array `g_Settings` 
+// 210 - 229     | 20 B     | 6 B      | 14 B    | EEPROM_MODE_SETTINGS_START     | Mode-dependent settings
 //
-// 400 - 419     | 20 B     | 20 B     | EEPROM_FM_FAVORITES_START      | FM favorite stations (10 * 2 bytes)
-// 420           | 1 B      | 1 B      | EEPROM_FM_FAVORITES_COUNT      | Count of saved FM favorites
+// 230 - 329     | 100 B    | 100 B    | 0 B     | EEPROM_FAVORITES_START         | Unified favorite stations (20 stations * 5 bytes)
+// 330           | 1 B      | 1 B      | 0 B     | EEPROM_FAVORITES_COUNT         | Count of saved favorites
 // =================================================================================================
 
 // --- Core EEPROM Validation ---
@@ -26,13 +27,13 @@ constexpr auto EEPROM_VERSION_ADDRESS = 1;
 // --- Data Block Start Addresses ---
 constexpr auto EEPROM_HEADER_START = 10;
 constexpr auto EEPROM_BANDS_START = 20;
-constexpr auto EEPROM_SETTINGS_START = 250;
-constexpr auto EEPROM_MODE_SETTINGS_START = 300;
-constexpr auto EEPROM_FM_FAVORITES_START = 400;
-constexpr auto EEPROM_FM_FAVORITES_COUNT = 420;
+constexpr auto EEPROM_SETTINGS_START = 160;
+constexpr auto EEPROM_MODE_SETTINGS_START = 210;
+constexpr auto EEPROM_FAVORITES_START = 230;
+constexpr auto EEPROM_FAVORITES_COUNT = 330;
 
 
-constexpr auto APP_VERSION = 59; // Version number for compatibility checks
+constexpr auto APP_VERSION = 60;                        // Version number for compatibility checks
 
 
 // Behavior
@@ -92,7 +93,7 @@ constexpr auto MIN_SETFREQ_INTERVAL_MS = 25UL;
 #define ANIMATE_SPLASH 1                    // Set to 1 to animate splash screen, 0 to disable
 
 // IC options
-#define ENABLE_FM_FAV 1                     // Set to 1 to use FM favorites, 0 to disable (must disable some other features to compile & work)
+#define ENABLE_FAVORITES 1                  // Set to 1 to use unified favorites, 0 to disable
 #define DISABLE_FM 0                        // not implemented yet
 
 #define ENABLE_ADVANCED_BATTERY_LOGIC 1     // Set to 1 to enable advanced battery logic, 0 to disable (must disable some other features to compile & work)

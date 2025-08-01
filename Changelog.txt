@@ -704,15 +704,28 @@ This version introduces the ability to save your favorite FM stations.
 
 ------------------------------------------------------------------------------------------------------------
 
-### **MOD_NO_RDS v5.9**
+### **MOD_NO_RDS v6.0**
+
+*   **[New] Universal Favorites System:**
+    *   The previous FM-only feature has been replaced with a powerful memory system for **all modes** (AM, LSB, USB, CW, FM).
+    *   Each memory slot now saves the frequency, modulation, and the **precise BFO offset**, allowing for one-touch recall of perfectly tuned SSB/CW stations.
+    *   The control scheme has been redesigned for intuitive access:
+        *   **Long-press `AGC`:** Save current station.
+        *   **Long-press `STEP`:** Open/Close the Favorites menu.
+
+*   **[Improved] Favorites Menu UI:**
+    *   The screen is now designed for clarity, displaying **5 stations per page** with clean spacing.
+    *   A perfectly aligned, multi-column layout shows the frequency (with BFO) and modulation for each entry, adapting its format for AM/SSB and FM.
+    *   Redrawing is optimized to **prevent flicker** when scrolling within a single page.
+    *   An **auto-exit timer** now closes the menu after a period of inactivity, matching the behavior of the main settings menu.
 
 *   **[Improved] Intuitive Display Wake-up:**
-    *   The display can now be reactivated from its auto-timeout state by pressing **any button**, not just by interacting with the encoder.
-    *   The first button press is used solely to wake the display. 
-		This prevents accidental changes to frequency, volume, or mode when you simply want to turn the screen on.
-		
+    *   The display now wakes from its auto-timeout state on **any button press**.
+    *   The first press only reactivates the screen, preventing accidental changes to frequency or settings.
+	
 *   **[Fix] Fixed FM Stereo Indicator Logic:**
     *   Corrected the function call to ensure the UI is updated safely after the internal state is changed, 
 	making the stereo indicator (`*`) work reliably.
 
 
+------------------------------------------------------------------------------------------------------------
