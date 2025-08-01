@@ -32,7 +32,7 @@ constexpr auto EEPROM_FM_FAVORITES_START = 400;
 constexpr auto EEPROM_FM_FAVORITES_COUNT = 420;
 
 
-constexpr auto APP_VERSION = 58; // Version number for compatibility checks
+constexpr auto APP_VERSION = 59; // Version number for compatibility checks
 
 
 // Behavior

@@ -98,7 +98,7 @@ static void applyBrightness() {
 void showSplashScreen() {
     oled.clear();
 
-    drawInverted(26, 1, F("ATS-20* V5.8.1"), false);
+    drawInverted(26, 1, F("ATS-20* V5.9"), false);
     drawInverted(32, 3, F("MOD NO RDS"), false);
 
 #if ANIMATE_SPLASH
