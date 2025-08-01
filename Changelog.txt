@@ -703,3 +703,16 @@ This version introduces the ability to save your favorite FM stations.
 	
 
 ------------------------------------------------------------------------------------------------------------
+
+### **MOD_NO_RDS v5.9**
+
+*   **[Improved] Intuitive Display Wake-up:**
+    *   The display can now be reactivated from its auto-timeout state by pressing **any button**, not just by interacting with the encoder.
+    *   The first button press is used solely to wake the display. 
+		This prevents accidental changes to frequency, volume, or mode when you simply want to turn the screen on.
+		
+*   **[Fix] Fixed FM Stereo Indicator Logic:**
+    *   Corrected the function call to ensure the UI is updated safely after the internal state is changed, 
+	making the stereo indicator (`*`) work reliably.
+
+

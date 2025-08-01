@@ -9,7 +9,7 @@
 // 02.2024
 // http://github.com/goshante
 // ----------------------------------------------------------------------
-// MOD_NO_RDS_v5.8 by diqezit
+// MOD_NO_RDS by diqezit
 // More info for this mod you can get below
 // https://github.com/diqezit/ats20_ats_ex
 // ----------------------------------------------------------------------
@@ -1181,13 +1181,12 @@ static inline void updateSignalQuality() {
 // helper for FM stereo indicator logic
 static inline void updateFmStereoIndicator() {
     if (g_currentMode != FM || millis() <= 3000) return;
-    g_si4735.getCurrentReceivedSignalQuality(0);
 
     bool stereo = g_si4735.getCurrentPilot();
 
     if (stereo != g_stereoStatus) {
-        updateStereoIndicator();
         g_stereoStatus = stereo;
+        updateStereoIndicator();
     }
 }
 

@@ -134,6 +134,7 @@ static void refreshCommandIndicators();
 static void switchSettings();
 static void switchCommand(CommandMode mode);
 static void resetCommandMode();
+static void wakeUpDisplayIfNeeded();
 
 // --- Core Utilities & State Management (needed by Input.h) ---
 static bool isSSB();

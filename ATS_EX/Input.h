@@ -280,6 +280,12 @@ void processButtonEvents() {
 
     for (auto& action : buttonActions) {
         uint8_t evt = action.btn.checkEvent(action.checkFn);
+
+        if (evt && !g_displayOn && autoDisplayOff) {
+            wakeUpDisplayIfNeeded();
+            return;
+        }
+
         if (evt == BUTTONEVENT_SHORTPRESS) {
             if (action.onShortPress) {
                 action.onShortPress();
