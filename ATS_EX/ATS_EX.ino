@@ -837,15 +837,20 @@ static inline uint8_t findBandForFavorite(const FavoriteStation& fav) {
     return g_bandIndex; // Fallback to current band if no match is found
 }
 
-// Applies all settings from the selected favorite to the receiver
+// Applies settings from selected favorite
+// Must handle AM to SSB mode switch, which requires a full SSB patch reload
+// to enable sideband reception
 void tuneToSelectedFavorite() {
     if (!g_totalFavorites) return;
 
+    // Capture receiver state before any changes
     BandType previousBandType = g_bandList[g_bandIndex].bandType;
+    bool ssbWasLoaded = g_ssbLoaded;
 
     const FavoriteStation& fav = g_favorites[g_favoriteSelected];
     setAmpState(false);
 
+    // Update global state to match favorite station target
     g_currentMode = fav.modulation;
     g_ssbLoaded = isSSB();
 
@@ -859,7 +864,11 @@ void tuneToSelectedFavorite() {
     g_bandList[g_bandIndex].currentFreq = fav.frequency;
     g_currentBFO = fav.bfo;
 
-    bool forceReset = (previousBandType != g_bandList[g_bandIndex].bandType);
+    // Force full reconfig for FM/AM type switch or to load required SSB patch
+    bool forceReset =
+        (previousBandType != g_bandList[g_bandIndex].bandType) ||
+        (g_ssbLoaded && !ssbWasLoaded);
+
     applyBandConfiguration(forceReset);
 
     setAmpState(true);
