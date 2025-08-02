@@ -729,3 +729,13 @@ This version introduces the ability to save your favorite FM stations.
 
 
 ------------------------------------------------------------------------------------------------------------
+
+### **MOD_NO_RDS v6.0.1**
+
+*   **[Fix] SSB/CW Mode Activation from Favorites:**
+    *   Fixed bug where selecting an SSB/CW favorite while in AM mode would change the display indicator but not the actual audio. 
+	Receiver now reliably engages the correct mode.
+
+
+
+------------------------------------------------------------------------------------------------------------

@@ -1,9 +1,26 @@
 ### **ATS-20+ Firmware Modifications (diqezit's Fork)**
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Firmware-ATS--20+-blueviolet?style=for-the-badge&logo=github">
+  <img src="https://img.shields.io/badge/status-active-success?style=for-the-badge">
+  <img src="https://img.shields.io/github/languages/top/diqezit/ats20_ats_ex?style=for-the-badge">
+  <img src="https://img.shields.io/github/last-commit/diqezit/ats20_ats_ex?style=for-the-badge">
+</p>
+<p align="center">
+  <a href="https://translate.google.com/translate?sl=en&tl=ru&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex"><img src="https://img.shields.io/badge/Translate_to-Russian-blue?style=for-the-badge"></a>
+  <a href="https://translate.google.com/translate?sl=en&tl=es&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex"><img src="https://img.shields.io/badge/Translate_to-Spanish-blue?style=for-the-badge"></a>
+  <a href="https://translate.google.com/translate?sl=en&tl=de&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex"><img src="https://img.shields.io/badge/Translate_to-German-lightgrey?style=for-the-badge"></a>
+  <a href="https://translate.google.com/translate?sl=en&tl=fr&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex"><img src="https://img.shields.io/badge/Translate_to-French-blue?style=for-the-badge"></a>
+  <a href="https://translate.google.com/translate?sl=en&tl=it&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex"><img src="https://img.shields.io/badge/Translate_to-Italian-green?style=for-the-badge"></a>
+  <a href="https://translate.google.com/translate?sl=en&tl=pl&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex"><img src="https://img.shields.io/badge/Translate_to-Polish-red?style=for-the-badge"></a>
+  <a href="https://translate.google.com/translate?sl=en&tl=ja&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex"><img src="https://img.shields.io/badge/Translate_to-Japanese-purple?style=for-the-badge"></a>
+  <a href="https://translate.google.com/translate?sl=en&tl=zh-CN&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex"><img src="https://img.shields.io/badge/Translate_to-Chinese-red?style=for-the-badge"></a>
+</p>
+
 This repository is a fork of the original `goshante/ats20_ats_ex` firmware, dedicated to custom modifications, bug fixes, and new features. All discussion regarding these new versions should take place here.
 
 Your feedback and suggestions are welcome!
-**Please**, put star to raise the firmware higher up on the global list, **thanks :)**
+**Please**, put a star on the repository to raise the firmware higher up on the global list. **Thanks :)**
 
 You can find the original project here: [goshante/ats20_ats_ex](https://github.com/goshante/ats20_ats_ex)
 
@@ -13,10 +30,10 @@ You can find the original project here: [goshante/ats20_ats_ex](https://github.c
 
 This fork introduces two main branches of improvements over the original firmware:
 
-1.  **Audio Pop/Click Elimination (Hardware & Software Mod):** A modification that completely removes pops and clicks when switching modes. It requires a minor physical change to the receiver's circuit.
-2.  **`MOD_NO_RDS` Firmware Series:** An alternative firmware branch where the RDS feature was removed to free up space for new functionality, including an FM Favorites menu, along with dozens of other fixes and improvements.
+1.  **Audio Pop/Click Elimination (Hardware & Software Mod):** A modification that completely removes pops and clicks when switching modes. It requires a minor physical change to the receiver circuit.
+2.  **`MOD_NO_RDS` Firmware Series:** An alternative firmware branch where the RDS feature was removed to free up program space (from first modifications). This enabled the addition of new functionality, most notably a **unified Favorites system for all bands (AM, FM, SSB, CW)**, along with dozens of other fixes and improvements in code.
 
-**Important:** Pops`s issue improvement only affects the speaker output, as the headphone jack is connected before the amplifier.
+**Important:** This audio improvement only affects the speaker output, as the headphone jack is connected before the amplifier.
 
 `I strongly recommend to connect the voltage divider as close to the pin as possible - use for this a two - 10kOm resistors.
 In order to eliminate possible interference with ADC readout distortion`
@@ -86,7 +103,6 @@ This guide explains how to upload firmware to your ATS-20(+) receiver
 
 ------------------------------------------------------------------------------------------------------------
 
-
 # **ATS-20+ EX Firmware - The Complete User Guide**
 
 This manual provides a comprehensive overview of the ATS-20+ EX firmware's features and controls.
@@ -109,7 +125,7 @@ This manual provides a comprehensive overview of the ATS-20+ EX firmware's featu
 4.  **Section 3: System Functions**
     *   [Station Scanning](#31-station-scanning)
     *   [The Settings Menu: A Deep Dive](#32-the-settings-menu-a-deep-dive)
-    *   [FM Favorites Management](#33-fm-favorites-management)
+    *   [Favorites Management](#33-favorites-management)
 5.  **Section 4: Maintenance & Support**
     *   [Factory Reset (EEPROM Reset)](#41-factory-reset-eeprom-reset)
 6.  **Quick Reference Button Chart**
@@ -119,12 +135,15 @@ This manual provides a comprehensive overview of the ATS-20+ EX firmware's featu
 
 ### **1. Core Concepts: Understanding the Interface**
 
-The firmware's UI is based on the **"Active Command"** paradigm.
+The firmware's UI is based on the **"Active Command"** paradigm. This model allows the encoder to serve multiple purposes without complex menus.
 
 *   **Default State:** By default, the **encoder knob** controls the **frequency**.
-*   **Active Command:** A short press on `VOL+`, `STEP`, `BW`, or `BAND+` makes that function the "Active Command". The corresponding UI element becomes inverted, and the **encoder knob temporarily controls that function** (e.g., volume, step size).
+*   **Active Command:** A short press on `VOL+`, `STEP`, `BW`, or `BAND+` makes that function the "Active Command". The corresponding UI element becomes inverted, and the **encoder knob temporarily controls that function**.
 
-To exit an Active Command, either wait for the automatic timeout or short-press the **encoder button** to cancel immediately.
+**Example: Changing Volume**
+1. Short-press `VOL+`. The volume value becomes inverted.
+2. Rotate the encoder to set the desired level.
+3. Short-press the encoder button to exit immediately, or simply wait 3 seconds for it to time out. The encoder will then revert to controlling the frequency.
 
 ---
 
@@ -132,14 +151,14 @@ To exit an Active Command, either wait for the automatic timeout or short-press 
 
 #### **1.1. Power Management & Screen Control**
 
-*   **Screen Off Mode:** A short press on the **`AGC`** button toggles the screen's power. The receiver continues to operate, significantly reducing battery consumption.
+*   **Screen Off Mode:** A short press on the **`AGC`** button toggles the screen's power. The receiver continues to operate with minimal power drain, significantly extending battery life. Press any button to wake the screen.
 
 #### **1.2. Frequency Tuning & Step Control**
 
 *   **Tuning Step Selection:**
     1.  Short-press **`STEP`**. The "STEP" value on the display will be highlighted.
     2.  **Rotate the encoder** to select the desired step size.
-    3.  Short-press the **encoder button** to confirm.
+    3.  Short-press the **encoder button** to confirm and exit, or wait for the timeout.
 
 #### **1.3. Volume Control & Mute**
 
@@ -150,11 +169,11 @@ To exit an Active Command, either wait for the automatic timeout or short-press 
 #### **1.4. Band Navigation**
 
 *   **Quick Jump:** Short-press **`BAND+`**, then **rotate the encoder** to jump between pre-defined bands.
-*   **Seamless Tuning:** Tune past the edge of the current band to automatically switch to the adjacent one.
+*   **Seamless Tuning:** Tune past the edge of the current band to automatically switch to the adjacent one. Note: This applies between AM/SW bands; tuning past the SW band edge will not roll over into the FM band.
 
 #### **1.5. Mode Switching**
 
-*   **Short-press `MODE`** to cycle through reception modes: `AM` → `LSB`/`USB` → `CW` → `AM`.
+*   **Short-press `MODE`** to cycle through reception modes: `AM` → `LSB`/`USB` → `CW` → `AM`. This function is disabled on FM bands.
 
 ---
 
@@ -163,27 +182,27 @@ To exit an Active Command, either wait for the automatic timeout or short-press 
 #### **2.1. SSB Mode Operation**
 
 1.  **Enter SSB Mode:** Use the `MODE` button until `LSB` or `USB` is displayed.
-2.  **Sideband Selection:** **Press and hold the `STEP` button** for 1-2 seconds to switch between `LSB` and `USB`.
-3.  **Fine-Tuning (BFO vs. VFO):**
-    *   Select a **small step** (e.g., `10 Hz`, `50 Hz`) to adjust the **BFO**. This changes the audio pitch for voice clarification.
-    *   Select a **large step** (e.g., `1 kHz`) to adjust the **VFO** (main frequency).
+2.  **Sideband Selection:** **Press and hold the `BW` button** for 1-2 seconds to switch between `LSB` and `USB`.
+3.  **Two-Stage Tuning:** SSB requires a two-stage process for clear audio:
+    *   **Coarse Tune (Frequency):** Select a **large step** (e.g., `1 kHz`, `5 kHz`). Tune the main frequency until you hear intelligible, but still high or low-pitched audio.
+    *   **Fine-Tune Pitch (Clarifier):** Select a **small step** (e.g., `10 Hz`, `50 Hz`). Now, tuning only adjusts the audio pitch to make voices sound natural, without changing the main frequency.
 
 #### **2.2. CW (Morse Code) Mode Operation**
 
 1.  **Enter CW Mode:** Use the `MODE` button to select `CW`.
-2.  **CW Sideband:** **Press and hold `STEP`** to switch the reception sideband. This can help isolate a signal from interference. An `L` or `U` indicator will appear.
-3.  **Tuning:** The receiver's CW pitch is fixed at ~500 Hz. Tune the main frequency until the signal's tone matches this pitch.
+2.  **CW Sideband:** **Press and hold `BW`** to switch the reception sideband (`L` for LSB, `U` for USB). This is a powerful tool to eliminate nearby interference.
+3.  **Tuning:** The receiver's CW pitch is fixed at ~500 Hz. Tune the main frequency until the Morse code signal's tone is clear and distinct. Tip: Use a narrow BW filter (e.g., 0.5 kHz) in CW mode to isolate the signal.
 
 #### **2.3. Bandwidth (BW) Filter Adjustment**
 
 1.  Short-press the **`BW`** button.
 2.  **Rotate the encoder** to change the filter width.
-    *   **Narrower (e.g., 1.8 kHz):** Reduces or eliminates adjacent channel interference.
+    *   **Narrower (e.g., 1.8 kHz):** Rejects adjacent channel interference, improving clarity in crowded bands.
     *   **Wider (e.g., 4.0 kHz):** Provides better audio fidelity on strong, clear signals.
 
 #### **2.4. Sync Feature (Synchronous Detector)**
 
-*   While in SSB mode, **press and hold the `MODE` button** to toggle the Sync feature. An `S` indicator will appear when active.
+*   While in SSB mode, **press and hold the `MODE` button** to toggle the Sync feature. An `S` indicator will appear when active. This helps stabilize weak or drifting signals by locking the receiver's internal oscillator to the incoming signal, reducing fading and distortion.
 
 ---
 
@@ -199,48 +218,57 @@ To exit an Active Command, either wait for the automatic timeout or short-press 
 To enter and exit the settings menu, perform a **short press** on the **`BAND-`** button. The menu is organized into three pages.
 
 *   **Navigation:** Rotate the encoder to select an item. Short-press **`BAND+`** to switch between pages.
-*   **Editing:** Select an item, then short-press the encoder to enter "Edit Mode" (a `>` will appear). Rotate the encoder to change the value. Press the encoder again to confirm.
-*   **Save & Exit:** The menu will close automatically after 10 seconds of inactivity, or you can exit manually by pressing `BAND-`. All changes are saved to EEPROM.
+*   **Editing:** Select an item, then short-press the encoder to enter "Edit Mode" (a `>` appears next to the value). Rotate the encoder to change the value. Press the encoder again to confirm.
+*   **Save & Exit:** The menu closes automatically after 10 seconds of inactivity, or you can exit manually by pressing `BAND-`. All changes are saved to EEPROM upon exit.
 
 ##### **Page 1: General & Audio**
 
 | Name | Detailed Description | Type | Range |
 | :--- | :--- | :--- | :--- |
-| `ATT` | **Attenuator.** Manages the receiver's front-end gain. **`AUT`:** Standard **Automatic Gain Control (AGC)** mode. **Manual values:** Disables AGC and sets a **fixed attenuation level**. Higher values mean stronger signal reduction. Max level is `37` for AM/SSB and `26` for FM. | Selection | `AUT`, `1`..`37` |
-| `SCN` | **Scan Switch.** Determines the function of a short encoder press in AM/FM modes. **`On`:** Starts a **Seek** for the next station. **`Off`:** Activates **Step selection mode** (`STEP`). **Note:** In SSB/CW, an encoder press **always** activates `STEP` mode. | Switch | `On` / `Off` |
-| `AVC` | **AVC Max Gain.** Defines the aggressiveness of the volume leveling system for AM/SSB. **Important:** This setting is only active when `ATT` is in `AUT` mode. | Number | `12`..`90` |
-| `SMA` | **Soft Mute Attenuation.** Defines *how much* the audio will be attenuated when the signal is weak. `0` disables this feature. **Note:** Has no effect in FM mode. | Number | `0`..`32` |
-| `SMT` | **Soft Mute Threshold.** Sets the **minimum SNR** below which soft mute is activated. Helps eliminate hiss between stations. **Note:** Has no effect in FM mode. | Number | `0`..`63` |
-| `DE` | **FM De-Emphasis.** Selects the de-emphasis time constant for FM radio. **`50u`:** Europe/Asia. **`75u`:** North America. **Note:** Only active in FM mode. | Selection | `50u` / `75u` |
+| `ATT` | **Attenuator.** Manages gain. **`AUT`:** Standard **Automatic Gain Control (AGC)**. **Manual values:** Disables AGC and sets a **fixed attenuation level**. Use this to prevent overload from strong local stations. **Key Interaction:** When `ATT` is manual, the `AVC` setting is ignored. | Selection | `AUT`, `1`..`37` |
+| `SCN` | **Scan Switch.** Determines the encoder button's function. **`On`:** Quick **Seek**. **`Off`:** Quick **Step** adjustment. This lets you choose your preferred shortcut. **Note:** In SSB/CW, the encoder press **always** activates `STEP` mode. | Switch | `On` / `Off` |
+| `AVC` | **AVC Max Gain.** Defines the aggressiveness of the volume leveling for AM/SSB. Higher values make weak stations louder. **Important:** This setting is only active when `ATT` is in `AUT` mode. | Number | `12`..`90` |
+| `SMA` | **Soft Mute Attenuation.** Defines *how much* the audio is attenuated on weak signals. `0` disables it. **Note:** This feature is not used in FM mode, as it has its own optimized audio profile. | Number | `0`..`32` |
+| `SMT` | **Soft Mute Threshold.** Sets the **minimum SNR** below which soft mute activates. Helps eliminate static hiss between stations. **Note:** Not used in FM mode. | Number | `0`..`63` |
+| `DE` | **FM De-Emphasis.** Matches the regional broadcast standard. **`50u`:** Europe/Asia. **`75u`:** North America. **Note:** Only active in FM mode. | Selection | `50u` / `75u` |
 
 ##### **Page 2: SSB & Display**
 
 | Name | Detailed Description | Type | Range |
 | :--- | :--- | :--- | :--- |
-| `BFO` | **BFO Calibration.** Precisely calibrates the Beat Frequency Oscillator for correct SSB/CW demodulation. Each step changes the offset by 100 Hz (range: -2.5 kHz to +2.5 kHz). | Number | `-25`..`+25` |
+| `BFO` | **BFO Calibration.** Calibrates the oscillator for SSB/CW. If all SSB stations sound consistently off-pitch, use this setting to correct the global offset. Each step is 100 Hz. | Number | `-25`..`+25` |
 | `SSM` | **SSB Soft Mute.** Enables an alternative soft muting algorithm specifically adapted for SSB mode. | Switch | `On` / `Off` |
 | `SVC` | **SSB Volume Control.** Activates a separate automatic volume control system that works only in LSB, USB, and CW modes. | Switch | `On` / `Off` |
-| `COF` | **SSB Cutoff Filter.** Manages an additional high-pass filter. **`AUT`:** Filter is chosen based on the current bandwidth (BW). **`1` and `2`:** Manual selection for precise interference rejection. | Selection | `AUT`, `1`, `2` |
-| `SYN` | **SSB Sync.** Activates the **DSP AFC (Automatic Frequency Control)** function. Helps to "lock on" to an SSB signal by compensating for frequency drift. **Note:** Not active in CW mode. | Switch | `On` / `Off` |
-| `SCR` | **Screen Brightness.** Adjusts the brightness of the OLED display. `1` is minimum, `10` is maximum. | Number | `1`..`10` |
+| `COF` | **SSB Cutoff Filter.** Manages an additional high-pass filter. **`AUT`:** Filter is chosen based on the current bandwidth (BW). **`1` and `2`:** Manual selection for precise low-frequency interference rejection. | Selection | `AUT`, `1`, `2` |
+| `SYN` | **SSB Sync.** Activates the **DSP AFC (Automatic Frequency Control)**. This helps to "lock on" to an SSB signal, compensating for frequency drift. **Note:** Not active in CW mode. | Switch | `On` / `Off` |
+| `SCR` | **Screen Brightness.** Adjusts the OLED display brightness. `1` is minimum, `10` is maximum. | Number | `1`..`10` |
 
 ##### **Page 3: Hardware & Miscellaneous**
 
 | Name | Detailed Description | Type | Range |
 | :--- | :--- | :--- | :--- |
-| `CAP` | **Antenna Capacitor.** Controls an extra capacitor at the antenna input. **`AUT`:** Engaged for the FM band only. **`On`:** Forced on for all bands. May improve SW/MW reception. | Switch | `AUT` / `On` |
-| `CPU` | **CPU Speed.** Changes the microcontroller's clock speed. **`16MHz`:** Max performance. **`8MHz`:** Low-power mode, increases battery life. | Switch | `16MHz` / `8MHz` |
+| `CAP` | **Antenna Capacitor.** Controls an extra capacitor at the antenna input. **`AUT`:** Engaged for the FM band only. **`On`:** Forced on for all bands. May improve reception on some antennas, especially for SW/MW. | Switch | `AUT` / `On` |
+| `CPU` | **CPU Speed.** Changes the microcontroller's clock speed. **`16MHz`:** Max performance. **`8MHz`:** Low-power mode, noticeably increases battery life at the cost of slightly slower UI response. | Switch | `16MHz` / `8MHz` |
 | `BAP` | **Battery Pin.** Selects the analog port (`A1` or `A2`) for measuring battery voltage. Must match your board's hardware layout for a correct reading. | Selection | `A1` / `A2` |
 | `SWU` | **SW Units.** Changes the frequency display format for Shortwave (SW) bands. **`kHz`:** e.g., `7100 kHz`. **`MHz`:** e.g., `7.10 MHz`. | Selection | `kHz` / `MHz` |
-| `RSI` | **Disable RSSI in AM.** On some units, RSSI polling in AM can cause audible clicks. **`On`:** Disables RSSI updates in AM to prevent this, but the signal meter will not update. **`Off`:** Standard mode. | Switch | `On` / `Off` |
-| `DIS` | **Display Off Timer.** Automatically turns off the screen after inactivity to save battery. **`Off`:** Always on. **`10m`..`60m`:** Time in minutes until display turns off. | Selection | `Off`, `10m`..`60m` |
+| `RSI` | **Disable RSSI in AM.** On some hardware variants, RSSI polling in AM can cause audible clicks. This is a troubleshooting option. **`On`:** Disables RSSI updates in AM, but the signal meter will not update. **`Off`:** Standard mode. | Switch | `On` / `Off` |
+| `DIS` | **Display Off Timer.** Automatically turns off the screen after a period of inactivity to save battery. The receiver remains on. **`Off`:** Always on. **`10m`..`60m`:** Time in minutes. | Selection | `Off`, `10m`..`60m` |
 
-#### **3.3. FM Favorites Management**
+#### **3.3. Favorites Management**
 
-*   **Save Station:** Tune to an FM station, then **press and hold `MODE`**.
-*   **Access List:** In FM mode, short-press **`MODE`**.
-*   **Navigate & Tune:** **Rotate the encoder** to select, then **short-press the encoder button** to tune.
-*   **Delete Station:** In the list, highlight a station and press **`BW`**.
+This feature saves a complete station profile: frequency, mode (AM/LSB/USB/CW/FM), and the precise BFO offset for SSB/CW signals. This allows for one-press recall of a perfectly tuned station, which is especially useful for SSB.
+
+*   **To Save a Station:**
+    1.  Tune to any station and adjust it for optimal reception (including fine-tuning the pitch in SSB/CW).
+    2.  **Press and hold `AGC`**. A "SAVED" confirmation will appear on the screen.
+    3.  **Note:** The system prevents saving duplicate entries (same frequency and mode).
+
+*   **To Access and Use the Favorites List:**
+    1.  **Press and hold `STEP`** to open the Favorites menu.
+    2.  **Navigate:** **Rotate the encoder** to scroll through your saved stations.
+    3.  **Tune:** Highlight the desired station and **short-press the encoder button**. The receiver will instantly reconfigure itself to match all the favorite's saved parameters, including switching modes and applying the BFO offset if necessary.
+    4.  **Delete:** To remove a station, highlight it in the list and press the **`BW`** button.
+    5.  **Exit:** To close the menu without tuning, **short-press `STEP`**.
 
 ---
 
@@ -248,12 +276,14 @@ To enter and exit the settings menu, perform a **short press** on the **`BAND-`*
 
 #### **4.1. Factory Reset**
 
-This procedure resets all parameters to their firmware defaults.
+This procedure resets all settings, band states, and clears all saved favorites.
 
 1.  Power the receiver **off**.
 2.  **Press and hold the encoder button**.
 3.  While holding the button, **power the receiver on**.
 4.  The screen will display "EEPROM RST". The reset is complete.
+
+**Alternative Method:** If the encoder button is faulty, you can perform a reset by **holding the `AGC` button** during power-on instead.
 
 If you encounter any persistent issues or suspect a bug after a reset, please open an issue on our GitHub page:
 **[https://github.com/diqezit/ats20_ats_ex/issues](https://github.com/diqezit/ats20_ats_ex/issues)**
@@ -266,14 +296,14 @@ If you encounter any persistent issues or suspect a bug after a reset, please op
 
 | Button | Short Press (Tap) | Long Press (Hold 1-2 sec) |
 | :--- | :--- | :--- |
-| **`MODE`** | Cycle Mode (`AM`→`SSB`→`CW`) | **SSB:** Toggle Sync. **FM:** Save Favorite. |
-| **`STEP`** | Activate Step selection | **SSB/CW:** Switch sideband (LSB↔USB) |
-| **`BW`** | Activate Bandwidth selection | (No function) |
+| **`MODE`** | Cycle Mode (`AM`→`SSB`→`CW`) | Toggle Sync *(SSB only)* |
+| **`STEP`** | Activate Step selection | Open/Close Favorites Menu |
+| **`BW`** | Activate Bandwidth selection | Switch Sideband *(SSB/CW only)* |
 | **`BAND+`** | Activate Band selection | (No function) |
 | **`BAND-`** | Open/Close Settings Menu | (No function) |
 | **`VOL+`** | Activate Volume control | Increase volume continuously |
 | **`VOL-`** | Toggle Mute | Decrease volume continuously |
-| **`AGC`** | Toggle Screen Power On/Off | (No function) |
+| **`AGC`** | Toggle Screen Power On/Off | Save Current Station to Favorites |
 | **Encoder** | Activate Step OR Start Scan (depends on `SCN` setting) | (No function) |
 
 ------------------------------------------------------------------------------------------------------------
