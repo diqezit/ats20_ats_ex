@@ -49,7 +49,7 @@ GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 #include "UI.h"
 
 // ==========================================
-// ===== CORE UTILITIES & DEFINITIONS =======
+// ===== CORE UTILITIES & STATE SYNC ========
 // ==========================================
 
 // most state is already in the band list
@@ -70,6 +70,27 @@ void loadActiveStateFromBand() {
     g_currentFrequency = g_bandList[g_bandIndex].currentFreq;
 }
 
+// Syncs mode-dependent settings between UI buffer (g_Settings)
+// and persistent storage (g_modeSettings)
+// When loading (true) it uses current mode context
+// When saving (false) it populates ALL mode contexts for a full factory reset
+void syncModeDependentSettings(bool load) {
+    if (load) {
+        // LOAD from storage into UI, based on current mode context
+        const uint8_t m = getModeContext();
+        g_Settings[ATT].param = g_modeSettings[MODE_SETTING_AGC][m];
+        g_Settings[SoftMute].param = g_modeSettings[MODE_SETTING_SOFT_MUTE][m];
+        g_Settings[AutoVolControl].param = g_modeSettings[MODE_SETTING_AVC][m];
+    } else {
+        // SAVE from UI into storage, for ALL mode contexts
+        for (uint8_t m = 0; m < MODE_CONTEXT_COUNT; m++) {
+            g_modeSettings[MODE_SETTING_AGC][m] = g_Settings[ATT].param;
+            g_modeSettings[MODE_SETTING_SOFT_MUTE][m] = g_Settings[SoftMute].param;
+            g_modeSettings[MODE_SETTING_AVC][m] = g_Settings[AutoVolControl].param;
+        }
+    }
+}
+
 static inline bool checkStopSeeking() {
     bool result;
     noInterrupts();  // race protection
@@ -78,57 +99,16 @@ static inline bool checkStopSeeking() {
     return result;
 }
 
-// performs bfo rollover with integrated boundary checks and a max bfo limit
-// this is the core of the stability system for ssb tuning
-// see: https://github.com/goshante/ats20_ats_ex/issues/42#issuecomment-3015265184
-static inline void performBfoRolloverWithBandCheck(uint16_t* freq, int32_t* bfo) {
-
-    const int32_t BFOMax = 13000;
-    const int16_t KHZ = 1000;
-
-    if (abs(*bfo) >= BFOMax) {
-        // fast - for large jumps work directly with kHz steps
-        int16_t steps_khz = *bfo / KHZ;
-        *freq += steps_khz;
-        *bfo %= KHZ;
-
-        if (*freq >= g_bandList[g_bandIndex].maximumFreq ||
-            *freq < g_bandList[g_bandIndex].minimumFreq) {
-            bandSwitch(steps_khz > 0, false);
-        }
-
-        snapToNewStep(freq, steps_khz > 0);
-    } else {
-        // precise - for fine-tuning near the rollover point
-        long absolute_freq_hz = ((long)(*freq) * KHZ) + *bfo;
-        long min_freq_hz = (long)g_bandList[g_bandIndex].minimumFreq * KHZ;
-        long max_freq_hz = (long)g_bandList[g_bandIndex].maximumFreq * KHZ;
-
-        if (absolute_freq_hz >= max_freq_hz || absolute_freq_hz < min_freq_hz) {
-            bool direction_is_up = (*bfo > 0);
-            bandSwitch(direction_is_up, false);
-
-            // after band switch recalculate freq/bfo from the absolute Hz value
-            int32_t new_freq_khz = absolute_freq_hz / KHZ;
-            int32_t new_bfo_hz = absolute_freq_hz % KHZ;
-
-            // corrects negative BFO back into  positive range 0-999
-            // and adjusts main frequency down by 1 kHz to compensate
-            if (new_bfo_hz < 0) {
-                new_bfo_hz += KHZ;
-                new_freq_khz -= 1;
-            }
-
-            *freq = (uint16_t)new_freq_khz;
-            *bfo = new_bfo_hz;
-
-            snapToNewStep(freq, direction_is_up);
-        }
-    }
+// Settings: CPU Frequency divider helper
+static void setCpuPrescaler(uint8_t prescaler) {
+    noInterrupts();
+    CLKPR = 0x80;
+    CLKPR = prescaler;
+    interrupts();
 }
 
 // ==========================================
-// ===== HARDWARE CONTROL SUBSYSTEM =========
+// ===== LOW-LEVEL HARDWARE CONTROL =========
 // ==========================================
 
 // Controls the MD8002A amplifier state (on/off)
@@ -152,6 +132,25 @@ static inline void setAgcHardware(int8_t att_val) {
     g_si4735.setAutomaticGainControl(disableAgc, agcNdx);
 }
 
+// Corrected CW BFO offset logic to match standard radio behavior
+// The Si4735 IC requires an inverted BFO value, so the math is reversed here to compensate
+// To get a positive BFO offset for USB, the value must be negative before the final inversion
+// See: https://github.com/goshante/ats20_ats_ex/issues/42#issuecomment-3015265184
+static void updateBFO() {
+
+    int16_t finalBfo = g_currentBFO + (g_Settings[BFO].param * BFO_CALIBRATION_MULTIPLIER);
+
+    if (g_currentMode == CW) {
+        if (g_lastCWMode == USB) { // 1 = USB
+            finalBfo -= CW_PITCH_OFFSET_HZ;
+        } else { // 0 = LSB
+            finalBfo += CW_PITCH_OFFSET_HZ;
+        }
+    }
+
+    g_si4735.setSSBBfo(finalBfo * -1);
+}
+
 //Saves more flash image size
 static void updateSSBCutoffFilter() {
     uint8_t idx = g_bwSSBIdx[g_bandList[g_bandIndex].bwIdxSSB];
@@ -161,18 +160,22 @@ static void updateSSBCutoffFilter() {
         g_si4735.setSSBSidebandCutoffFilter(g_Settings[SettingsIndex::CutoffFilter].param - 1);
 }
 
+// ==========================================
+// ===== HARDWARE CONFIGURATION =============
+// ==========================================
+
 // This function is required for using SSB. Si473x controllers do not support SSB by-default.
 // But we can patch internal RAM of Si473x with special patch to make it work in SSB mode.
 // Patch must be applied every time we enable SSB after AM or FM.
 static void loadSSBPatch() {
     setAmpState(false);
 
-    g_si4735.setI2CFastModeCustom(500000);
+    g_si4735.setI2CFastModeCustom(I2C_SSB_PATCH_SPEED_HZ);
 
     g_si4735.queryLibraryId();
 
     g_si4735.patchPowerUp();
-    delay(50);
+    delay(PATCH_LOAD_DELAY_MS);
     g_si4735.downloadCompressedPatch(ssb_patch_content, sizeof(ssb_patch_content), cmd_0x15, sizeof(cmd_0x15));
 
     // use bw from the current band's state
@@ -185,50 +188,6 @@ static void loadSSBPatch() {
     // allows the step setting for SSB to persist for each band individually for now
 
     setAmpState(true);
-}
-
-// Configures hardware seek parameters before starting a scan
-// dynamic seek step feature for AM bands, where the scan step matches the user selected manual tuning step
-static inline void setupSeekParameters(uint16_t minLimit, uint16_t maxLimit) {
-    if (g_bandList[g_bandIndex].bandType != FM_BAND_TYPE) {
-        // for AM/SW seek step is dynamically tied to the user current manual step setting
-        uint16_t current_step = g_tabStep[g_bandList[g_bandIndex].stepIdxAM];
-        uint8_t seek_spacing = (current_step > 10) ? 10 : current_step;
-
-        // Si4735 has specific limitations on supported seek steps
-        // we always send a valid value, defaulting to 5kHz if the user step isnt supported hardware
-        if (seek_spacing != 1 && seek_spacing != 5 && seek_spacing != 9 && seek_spacing != 10)
-            seek_spacing = 5;
-
-        g_si4735.setSeekAmLimits(minLimit, maxLimit);
-        g_si4735.setSeekAmSpacing(seek_spacing);
-    } else {
-        // For FM seek parameters fixed
-        g_si4735.setSeekFmLimits(minLimit, maxLimit);
-        g_si4735.setSeekFmSpacing(10);
-    }
-}
-
-// sets up the station seek boundaries and step
-static inline uint16_t executeHardwareSeek() {
-    g_si4735.setFrequency(g_currentFrequency);
-    delay(30);
-
-    //  for limits (strict for LW/MW, full for SW)
-    uint16_t minLimit = (g_bandList[g_bandIndex].bandType == SW_BAND_TYPE)
-        ? SW_MIN_FREQ : g_bandList[g_bandIndex].minimumFreq;
-    uint16_t maxLimit = (g_bandList[g_bandIndex].bandType == SW_BAND_TYPE)
-        ? SW_MAX_FREQ : g_bandList[g_bandIndex].maximumFreq;
-
-    setupSeekParameters(minLimit, maxLimit);
-
-    noInterrupts();
-    g_seekStop = false;
-    interrupts();
-
-    g_si4735.seekStationProgress(showFrequencySeek, checkStopSeeking, g_seekDirection);
-
-    return g_si4735.getFrequency();
 }
 
 // Applies curated audio profile for FM band
@@ -275,25 +234,6 @@ static void FMAudioConfigure() {
     g_si4735.setProperty(0x1904, FM_PROP_NB_ADC_OVER_DELAY);
 }
 
-// Corrected CW BFO offset logic to match standard radio behavior
-// The Si4735 IC requires an inverted BFO value, so the math is reversed here to compensate
-// To get a positive BFO offset for USB, the value must be negative before the final inversion
-// See: https://github.com/goshante/ats20_ats_ex/issues/42#issuecomment-3015265184
-static void updateBFO() {
-
-    int16_t finalBfo = g_currentBFO + (g_Settings[BFO].param * 100);
-
-    if (g_currentMode == CW) {
-        if (g_lastCWMode == USB) { // 1 = USB
-            finalBfo -= CW_PITCH_OFFSET_HZ;
-        } else { // 0 = LSB
-            finalBfo += CW_PITCH_OFFSET_HZ;
-        }
-    }
-
-    g_si4735.setSSBBfo(finalBfo * -1);
-}
-
 // Orchestrates complete Si4735 setup for FM mode
 // Main entry point when switching to any FM band
 // - Sets essential parameters like frequency limits and step from band data
@@ -319,8 +259,8 @@ static void configureFMMode() {
     g_si4735.setSeekFmSpacing(10);
 
     // Set custom seek thresholds to improve seek on weak stations
-    g_si4735.setProperty(0x1403, 2);  // FM_SEEK_TUNE_SNR_THRESHOLD (Default: 3)
-    g_si4735.setProperty(0x1404, 5);  // FM_SEEK_TUNE_RSSI_THRESHOLD (Default: 20)
+    g_si4735.setProperty(FM_SEEK_TUNE_SNR_THRESHOLD_PROP, FM_SEEK_SNR_THRESHOLD_VAL);
+    g_si4735.setProperty(FM_SEEK_TUNE_RSSI_THRESHOLD_PROP, FM_SEEK_RSSI_THRESHOLD_VAL);
 
     g_ssbLoaded = false;
 
@@ -421,8 +361,8 @@ static void configureAMCommon(uint16_t minFreq, uint16_t maxFreq) {
     g_si4735.setSeekAmLimits(minFreq, maxFreq);
 
     // Custom seek thresholds to improve seek on weak stations
-    g_si4735.setProperty(AM_SEEK_SNR_THRESHOLD, 3);     // AM_SEEK_TUNE_SNR_THRESHOLD (Default: 5)
-    g_si4735.setProperty(AM_SEEK_RSSI_THRESHOLD, 10);   // AM_SEEK_TUNE_RSSI_THRESHOLD (Default: 25)
+    g_si4735.setProperty(AM_SEEK_SNR_THRESHOLD_PROP, AM_SEEK_SNR_THRESHOLD_VAL);
+    g_si4735.setProperty(AM_SEEK_RSSI_THRESHOLD_PROP, AM_SEEK_RSSI_THRESHOLD_VAL);
 }
 
 // Applies AGC settings based on current mode and stored values
@@ -447,7 +387,7 @@ static void applyBandConfiguration(bool extraSSBReset) {
 
     loadActiveStateFromBand();
 
-    g_signalQualityValue = 255; // not keeping old value on screen temporarily (save 8 bytes)
+    g_signalQualityValue = INVALID_RSSI_VALUE;
 
     uint8_t cap_value = isFmBand ? 1 : g_Settings[AntennaCap].param;
     g_si4735.setTuneFrequencyAntennaCapacitor(cap_value);
@@ -481,9 +421,137 @@ static void applyBandConfiguration(bool extraSSBReset) {
     g_previousFrequency = g_currentFrequency;
 }
 
+// Configures hardware seek parameters before starting a scan
+// dynamic seek step feature for AM bands, where the scan step matches the user selected manual tuning step
+static inline void setupSeekParameters(uint16_t minLimit, uint16_t maxLimit) {
+    if (g_bandList[g_bandIndex].bandType != FM_BAND_TYPE) {
+        // for AM/SW seek step is dynamically tied to the user current manual step setting
+        uint16_t current_step = g_tabStep[g_bandList[g_bandIndex].stepIdxAM];
+        uint8_t seek_spacing = (current_step > 10) ? 10 : current_step;
+
+        // Si4735 has specific limitations on supported seek steps
+        // we always send a valid value, defaulting to 5kHz if the user step isnt supported hardware
+        if (seek_spacing != 1 && seek_spacing != 5 && seek_spacing != 9 && seek_spacing != 10)
+            seek_spacing = 5;
+
+        g_si4735.setSeekAmLimits(minLimit, maxLimit);
+        g_si4735.setSeekAmSpacing(seek_spacing);
+    } else {
+        // For FM seek parameters fixed
+        g_si4735.setSeekFmLimits(minLimit, maxLimit);
+        g_si4735.setSeekFmSpacing(10);
+    }
+}
+
+
 // ==========================================
-// ===== ACTION & STATE MANAGEMENT ==========
+// ===== STATE & ACTION MANAGEMENT ==========
 // ==========================================
+
+// performs bfo rollover with integrated boundary checks and a max bfo limit
+// this is the core of the stability system for ssb tuning
+// See: https://github.com/goshante/ats20_ats_ex/issues/42#issuecomment-3015265184
+static inline void performBfoRolloverWithBandCheck(uint16_t* freq, int32_t* bfo) {
+
+    if (abs(*bfo) >= BFO_ROLLOVER_MAX_HZ) {
+        // fast - for large jumps work directly with kHz steps
+        int16_t steps_khz = *bfo / HZ_PER_KHZ;
+        *freq += steps_khz;
+        *bfo %= HZ_PER_KHZ;
+
+        if (*freq >= g_bandList[g_bandIndex].maximumFreq ||
+            *freq < g_bandList[g_bandIndex].minimumFreq) {
+            bandSwitch(steps_khz > 0, false);
+        }
+
+        snapToNewStep(freq, steps_khz > 0);
+    } else {
+        // precise - for fine-tuning near the rollover point
+        long absolute_freq_hz = ((long)(*freq) * HZ_PER_KHZ) + *bfo;
+        long min_freq_hz = (long)g_bandList[g_bandIndex].minimumFreq * HZ_PER_KHZ;
+        long max_freq_hz = (long)g_bandList[g_bandIndex].maximumFreq * HZ_PER_KHZ;
+
+        if (absolute_freq_hz >= max_freq_hz || absolute_freq_hz < min_freq_hz) {
+            bool direction_is_up = (*bfo > 0);
+            bandSwitch(direction_is_up, false);
+
+            // after band switch recalculate freq/bfo from the absolute Hz value
+            int32_t new_freq_khz = absolute_freq_hz / HZ_PER_KHZ;
+            int32_t new_bfo_hz = absolute_freq_hz % HZ_PER_KHZ;
+
+            // corrects negative BFO back into  positive range 0-999
+            // and adjusts main frequency down by 1 kHz to compensate
+            if (new_bfo_hz < 0) {
+                new_bfo_hz += HZ_PER_KHZ;
+                new_freq_khz -= 1;
+            }
+
+            *freq = (uint16_t)new_freq_khz;
+            *bfo = new_bfo_hz;
+
+            snapToNewStep(freq, direction_is_up);
+        }
+    }
+}
+
+// sets up the station seek boundaries and step
+static inline uint16_t executeHardwareSeek() {
+    g_si4735.setFrequency(g_currentFrequency);
+    delay(DEFAULT_SEEK_DELAY_MS);
+
+    //  for limits (strict for LW/MW, full for SW)
+    uint16_t minLimit = (g_bandList[g_bandIndex].bandType == SW_BAND_TYPE)
+        ? SW_MIN_FREQ : g_bandList[g_bandIndex].minimumFreq;
+    uint16_t maxLimit = (g_bandList[g_bandIndex].bandType == SW_BAND_TYPE)
+        ? SW_MAX_FREQ : g_bandList[g_bandIndex].maximumFreq;
+
+    setupSeekParameters(minLimit, maxLimit);
+
+    noInterrupts();
+    g_seekStop = false;
+    interrupts();
+
+    g_si4735.seekStationProgress(showFrequencySeek, checkStopSeeking, g_seekDirection);
+
+    return g_si4735.getFrequency();
+}
+
+// Manages the seek process and updates the application state.
+static void doSeek() {
+    uint16_t f = executeHardwareSeek();
+    if (!f) return;
+
+    g_currentFrequency = f;
+
+    switch (g_bandList[g_bandIndex].bandType) {
+    case SW_BAND_TYPE:
+        for (uint8_t i = 2; i <= g_lastBand; ++i) {
+            // Cache pointer to current element
+            // avoid re-calculating g_bandList + i * sizeof(Band) multiple times
+            const Band* current_band_ptr = &g_bandList[i];
+            if (f >= current_band_ptr->minimumFreq &&
+                f <= current_band_ptr->maximumFreq) {
+                g_bandIndex = i;
+                break;
+            }
+        }
+        break;
+
+    case FM_BAND_TYPE:
+        g_currentFrequency -= f % 10;
+        break;
+
+    default: break;
+    }
+
+    g_si4735.setFrequency(g_currentFrequency);
+    doBandwidth(0);
+    syncActiveStateToBand();
+    showStatus(true);
+    resetEepromDelay();
+
+    g_previousFrequency = g_currentFrequency;
+}
 
 // switches band index and immediately applies the new band's default state
 static void bandSwitch(bool up, bool loadStoredFreq) {
@@ -522,43 +590,6 @@ static void bandSwitch(bool up, bool loadStoredFreq) {
         // long for major mode changes (like to/from FM - in AM/LW/MW (SSB too)
         applyBandConfiguration();
     }
-}
-
-// Manages the seek process and updates the application state.
-static void doSeek() {
-    uint16_t f = executeHardwareSeek();
-    if (!f) return;
-
-    g_currentFrequency = f;
-
-    switch (g_bandList[g_bandIndex].bandType) {
-    case SW_BAND_TYPE:
-        for (uint8_t i = 2; i <= g_lastBand; ++i) {
-            // Cache pointer to current element
-            // avoid re-calculating g_bandList + i * sizeof(Band) multiple times
-            const Band* current_band_ptr = &g_bandList[i];
-            if (f >= current_band_ptr->minimumFreq &&
-                f <= current_band_ptr->maximumFreq) {
-                g_bandIndex = i;
-                break;
-            }
-        }
-        break;
-
-    case FM_BAND_TYPE:
-        g_currentFrequency -= f % 10;
-        break;
-
-    default: break;
-    }
-
-    g_si4735.setFrequency(g_currentFrequency);
-    doBandwidth(0);
-    syncActiveStateToBand();
-    showStatus(true);
-    resetEepromDelay();
-
-    g_previousFrequency = g_currentFrequency;
 }
 
 // handles frequency tuning for am/fm
@@ -711,6 +742,7 @@ static inline void performModeCycle(int8_t bw) {
 
 // handles the complex logic of cycling through AM, LSB, USB, and CW modes
 static inline void cycleAmSsbCwModes() {
+    resetCommandMode();
     int8_t bw;
     prepareModeSwitch(bw);
     performModeCycle(bw);
@@ -719,6 +751,10 @@ static inline void cycleAmSsbCwModes() {
     if (!g_ssbLoaded && g_currentMode == AM)
         setAmpState(true);
 }
+
+// ==========================================
+// ===== USER ACTION HANDLERS (SETTINGS) ====
+// ==========================================
 
 // --- Settings & Parameter Handlers ---
 
@@ -730,27 +766,6 @@ static void switchSettingsPage() {
     oled.clear();
     showSettingsTitle();
     showSettings();
-}
-
-// Syncs mode-dependent settings between UI buffer (g_Settings)
-// and persistent storage (g_modeSettings)
-// When loading (true) it uses current mode context
-// When saving (false) it populates ALL mode contexts for a full factory reset
-void syncModeDependentSettings(bool load) {
-    if (load) {
-        // LOAD from storage into UI, based on current mode context
-        const uint8_t m = getModeContext();
-        g_Settings[ATT].param = g_modeSettings[MODE_SETTING_AGC][m];
-        g_Settings[SoftMute].param = g_modeSettings[MODE_SETTING_SOFT_MUTE][m];
-        g_Settings[AutoVolControl].param = g_modeSettings[MODE_SETTING_AVC][m];
-    } else {
-        // SAVE from UI into storage, for ALL mode contexts
-        for (uint8_t m = 0; m < MODE_CONTEXT_COUNT; m++) {
-            g_modeSettings[MODE_SETTING_AGC][m] = g_Settings[ATT].param;
-            g_modeSettings[MODE_SETTING_SOFT_MUTE][m] = g_Settings[SoftMute].param;
-            g_modeSettings[MODE_SETTING_AVC][m] = g_Settings[AutoVolControl].param;
-        }
-    }
 }
 
 //Switch between main screen and settings mode
@@ -935,13 +950,48 @@ static void doVolume(int8_t v) {
     showVolume();
 }
 
+// handles bandwidth adjustment
+static void doBandwidth(uint8_t v) {
+
+    if (g_currentMode == CW) return;
+
+    Band& band = g_bandList[g_bandIndex];
+
+    // SSB mode
+    if (isSSB()) {
+        doSwitchLogic(band.bwIdxSSB, 0, MAX_INDEX(bw_ssb_map), v);
+        g_si4735.setSSBAudioBandwidth(g_bwSSBIdx[band.bwIdxSSB]);
+        updateSSBCutoffFilter();
+    }
+    // AM and FM modes
+    else {
+        const bool is_am = (g_currentMode == AM);
+
+        // pointer to an int8_t to target the correct index variable
+        // (bwIdxAM or bwIdxFM)
+        int8_t* idx = is_am ? (int8_t*)&band.bwIdxAM : (int8_t*)&band.bwIdxFM;
+        int8_t  max = is_am ? MAX_INDEX(bw_am_map) : MAX_INDEX(bw_fm_map);
+
+        int8_t step = is_am ? v : -v;
+
+        doSwitchLogic(*idx, 0, max, step);
+
+        // сall hardware func
+        if (is_am)
+            g_si4735.setBandwidth(g_bwAMIdx[*idx], 1);
+        else
+            g_si4735.setFmBandwidth(*idx);
+    }
+    showBandwidth();
+}
+
 // Settings: Attenuation (ATT)
 // manual control over the receiver front-end gain, which handled by the Automatic Gain Control (AGC)
 // 'AUT' (Auto) is the standard mode.
 // can be useful to prevent overload from very strong local stations
 // (by increasing attenuation)
 void doAttenuation(int8_t v) {
-    uint8_t max_att_value = (g_currentMode == FM) ? 26 : 37;
+    uint8_t max_att_value = (g_currentMode == FM) ? MAX_ATTENUATION_FM_DB : MAX_ATTENUATION_AM_DB;
     doSwitchLogic(g_Settings[ATT].param, 0, max_att_value, v);
 
     setAgcHardware(g_Settings[ATT].param);
@@ -952,7 +1002,7 @@ void doAttenuation(int8_t v) {
 // A higher value means stronger muting, making the receiver almost silent on noisy frequencies
 // Setting it to 0 - disables soft mute feature
 void doSoftMute(int8_t v) {
-    doSwitchLogic(g_Settings[SoftMute].param, 0, 32, v);
+    doSwitchLogic(g_Settings[SoftMute].param, 0, SOFT_MUTE_MAX_ATTENUATION, v);
 
     if (g_currentMode != FM)
         g_si4735.setAmSoftMuteMaxAttenuation(g_Settings[SoftMute].param);
@@ -963,7 +1013,7 @@ void doSoftMute(int8_t v) {
 // It sets a minimum signal quality (SNR) threshold
 // If the signal drops below this level, the audio will be muted by the amount set in 'SMA'
 void doSoftMuteThreshold(int8_t v) {
-    doSwitchLogic(g_Settings[SoftMuteThr].param, 0, 63, v);
+    doSwitchLogic(g_Settings[SoftMuteThr].param, 0, SOFT_MUTE_MAX_SNR_THRESHOLD, v);
     if (!g_si4735.isCurrentTuneFM())
         g_si4735.setAMSoftMuteSnrThreshold(g_Settings[SoftMuteThr].param);
 }
@@ -973,7 +1023,7 @@ void doBrightness(int8_t v) {
     int8_t new_setting = g_Settings[Brightness].param + v;
 
     // clamp the value of to the [0, 9]
-    new_setting = constrain(new_setting, 0, 9);
+    new_setting = constrain(new_setting, 0, BRIGHTNESS_MAX_LEVEL);
 
     g_Settings[Brightness].param = new_setting;
     applyBrightness();
@@ -993,7 +1043,7 @@ void doSSBAVC(int8_t v) {
 // between strong and weak stations
 // higher value allows for more aggressive leveling, making quiet stations louder
 void doAvc(int8_t v) {
-    doSwitchLogic(g_Settings[AutoVolControl].param, 12, 90, v);
+    doSwitchLogic(g_Settings[AutoVolControl].param, AVC_MAX_GAIN_MIN, AVC_MAX_GAIN_MAX, v);
 
     if (g_currentMode != FM)
         g_si4735.setAvcAmMaxGain(g_Settings[AutoVolControl].param);
@@ -1037,18 +1087,10 @@ void doSSBSoftMuteMode(int8_t v) {
 
 //Settings: SSB Cutoff filter
 void doCutoffFilter(int8_t v) {
-    doSwitchLogic(g_Settings[CutoffFilter].param, 0, 2, v);
+    doSwitchLogic(g_Settings[CutoffFilter].param, 0, CUTOFF_FILTER_MAX_VALUE, v);
 
     if (isSSB())
         updateSSBCutoffFilter();
-}
-
-// Settings: CPU Frequency divider helper
-static void setCpuPrescaler(uint8_t prescaler) {
-    noInterrupts();
-    CLKPR = 0x80;
-    CLKPR = prescaler;
-    interrupts();
 }
 
 //Settings: CPU Frequency divider
@@ -1061,7 +1103,7 @@ void doCPUSpeed(int8_t v) {
 void doBFOCalibration(int8_t v) {
     // Expanded range to -25..+25. With a x100 multiplier in updateBFO(),
     // this provides a +/- 2.5kHz calibration range in 100Hz step
-    doSwitchLogic(g_Settings[BFO].param, -25, 25, v);
+    doSwitchLogic(g_Settings[BFO].param, BFO_CALIBRATION_MIN, BFO_CALIBRATION_MAX, v);
 
     if (isSSB()) {
         updateBFO();
@@ -1079,15 +1121,14 @@ void doScanSwitch(int8_t v) {
 static inline void doCWSwitch() {
     if (g_currentMode != CW) return;
 
-    constexpr int16_t COMPENSATION_KHZ = (2 * CW_PITCH_OFFSET_HZ) / 1000;
     uint16_t original_freq = g_currentFrequency;
 
     // Toggles g_lastCWMode between LSB (1) and USB (2)
-    g_lastCWMode = 3 - g_lastCWMode;
+    g_lastCWMode = SIDEBAND_TOGGLE_LSB_USB - g_lastCWMode;
     // Calculates direction: -1 for LSB (1), +1 for USB (2)
     int8_t direction = (g_lastCWMode << 1) - 3; // (mode * 2) - 3
 
-    g_currentFrequency += direction * COMPENSATION_KHZ;
+    g_currentFrequency += direction * CW_SIDEBAND_COMPENSATION_KHZ;
     g_si4735.setFrequency(g_currentFrequency);
     updateBFO();
     g_currentFrequency = original_freq;
@@ -1112,39 +1153,7 @@ void doRSSIAMOff(int8_t v) {
 
 //Settings: Display timeout switch
 void doDisplayOff(int8_t v) {
-    doSwitchLogic(g_Settings[DisplayOff].param, 0, 4, v);
-}
-
-// handles bandwidth adjustment
-static void doBandwidth(uint8_t v) {
-    Band& band = g_bandList[g_bandIndex];
-
-    // SSB mode
-    if (isSSB()) {
-        doSwitchLogic(band.bwIdxSSB, 0, LEN(bw_ssb_map), v);
-        g_si4735.setSSBAudioBandwidth(g_bwSSBIdx[band.bwIdxSSB]);
-        updateSSBCutoffFilter();
-    }
-    // AM and FM modes
-    else {
-        const bool is_am = (g_currentMode == AM);
-
-        // pointer to an int8_t to target the correct index variable
-        // (bwIdxAM or bwIdxFM)
-        int8_t* idx = is_am ? (int8_t*)&band.bwIdxAM : (int8_t*)&band.bwIdxFM;
-        int8_t  max = is_am ? LEN(bw_am_map) : LEN(bw_fm_map);
-
-        int8_t step = is_am ? v : -v;
-
-        doSwitchLogic(*idx, 0, max, step);
-
-        // сall hardware func
-        if (is_am)
-            g_si4735.setBandwidth(g_bwAMIdx[*idx], 1);
-        else
-            g_si4735.setFmBandwidth(*idx);
-    }
-    showBandwidth();
+    doSwitchLogic(g_Settings[DisplayOff].param, 0, DISPLAY_OFF_TIMER_MAX_LEVEL, v);
 }
 
 // ==========================================
@@ -1191,7 +1200,7 @@ static void handleDelayedFrequencyUpdate() {
 // get RSSI in AM mode using non-interrupting "soft update"
 static inline uint8_t getAmSignalValue() {
     if (g_Settings[RSSI_AM_Off].param == 1)
-        return 255;
+        return INVALID_RSSI_VALUE;
 
     // 1sec quiet after interaction
     // prevents RSSI from flickering while the encoder is actively being turned
@@ -1214,7 +1223,7 @@ static inline void updateSignalQuality() {
         ? getFmSignalValue()
         : ((g_currentMode == AM)
             ? getAmSignalValue()
-            : 255);
+            : INVALID_RSSI_VALUE);
 
     if (g_signalQualityValue != new_value) {
         g_signalQualityValue = new_value;
@@ -1301,7 +1310,7 @@ static inline void checkDisplayTimeout() {
         g_displayOn = false;
 
         // on auto-timeout engage deep power save mode at 2 MHz to maximize battery life
-        setCpuPrescaler(3); // 3 = 2 MHz , 2 = 4 MHz , 1 = 8 MHz
+        setCpuPrescaler(CPU_PRESCALER_DEEP_SLEEP); // 3 = 2 MHz , 2 = 4 MHz , 1 = 8 MHz
 
         oled.setPower(false);
         autoDisplayOff = true;
@@ -1318,7 +1327,6 @@ static void handlePeriodicTasks() {
 #endif
 }
 
-
 // ==========================================
 // ===== MAIN APPLICATION ENTRY POINTS ======
 // ==========================================
@@ -1332,7 +1340,7 @@ static inline void initHardwarePins() {
     PORTD |= (1 << ENCODER_PIN_A) | (1 << ENCODER_PIN_B);
 
     // get the correct pin for the initial connection check (lf in Battery.h)
-    g_voltagePinConnnected = analogRead(getBatteryPin()) > 300;
+    g_voltagePinConnnected = (uint16_t)analogRead(getBatteryPin()) > ADC_CONNECTED_THRESHOLD;
 }
 
 // Helper to initialize OLED display
@@ -1370,7 +1378,7 @@ static inline void initSi4735() {
     g_si4735.setup(RESET_PIN, MW_BAND_TYPE);
     g_si4735.setMaxSeekTime(SEEK_TIME);
 
-    delay(500);
+    delay(SYSTEM_INIT_DELAY_MS);
 }
 
 // Helper to load receiver configuration from EEPROM
