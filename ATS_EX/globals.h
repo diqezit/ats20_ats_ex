@@ -22,7 +22,6 @@
 #define PACK_STR4(s) {s[0], s[1], s[2], s[3]}
 
 const uint8_t g_SettingsMaxPages = 3;       // pages number in settings menu
-const int16_t CW_PITCH_OFFSET_HZ = 500;     // 500 Hz pitch for CW tone generation
 
 #if ENABLE_FAVORITES
 const uint8_t MAX_FAVORITES = 20;

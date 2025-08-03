@@ -739,3 +739,30 @@ This version introduces the ability to save your favorite FM stations.
 
 
 ------------------------------------------------------------------------------------------------------------
+
+### **MOD_NO_RDS v6.0.2**
+
+`ATS_EX.ino`, `Input.h`, `SI4735_fixed.h`
+
+*   **[Improved] Accelerated SSB/CW Mode Switching:**
+    *   Optimized the SSB patch algorithm for linear O(N) complexity, eliminating 62,000 redundant loop iterations per patch load. 
+	This CPU optimization, combined with an increased I2C bus speed to 800kHz, significantly reduces the activation delay for SSB/CW modes.
+
+*   **[Improved] Robust SSB Patch Loading:**
+    *   Implemented a per-segment status check during patch download as per the AN332 datasheet. 
+	This guarantees data integrity by detecting I2C transmission errors, preventing potential device instability or lock-ups.
+
+*   **[Fixed] Independent CW Mode Bandwidth:**
+    *   The bandwidth parameter is now fully independent and non-adjustable in CW mode. 
+	This prevents the user LSB/USB bandwidth setting from being altered, ensuring it is correctly preserved when switching back from CW.
+
+*   **[Refactored] Streamlined Mode Switching UI:**
+    *   The active command mode (e.g., Volume, Step, BW) is now automatically reset when cycling through modulation types (AM/SSB/CW)
+
+*   **[Code] Centralized Configuration Constants:**
+    *   Refactored all magic numbers for timings, thresholds, and algorithm parameters into named constants within `Defines.h` 
+		to improve readability and simplify future tuning.
+
+------------------------------------------------------------------------------------------------------------
+
+

@@ -335,6 +335,9 @@ void refreshCommandIndicators() {
 // Activate a specific command mode for the encoder
 // pressing same button again deactivates it
 void switchCommand(CommandMode mode) {
+
+    if (mode == CMD_BW && g_currentMode == CW) return;
+    
     RETURN_IF_SETTINGS_ACTIVE();
     g_activeCommand = (g_activeCommand != mode) ? mode : CMD_NONE;
     if (g_activeCommand != CMD_NONE) {
