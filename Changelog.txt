@@ -817,4 +817,23 @@ This version introduces the ability to save your favorite FM stations.
 
 ------------------------------------------------------------------------------------------------------------
 
+
+### **MOD_NO_RDS v6.1.1**
+
+`Input.h`
+
+*   **[Fix] Restored Display Wake-Up and Manual Power-Off Functionality:**
+    *   Fixed a regression from v6.0 that prevented waking the display if it timed out while in the settings menu.
+		The wake-up action is now correctly prioritized in all modes.
+    *   Restored the ability to manually turn the display off with a short press of the `AGC` button on the main screen. 
+		This feature was unintentionally lost during a previous refactoring.
+    *   The code was refactored to use a new helper function (`setDisplayPower`) eliminating code duplication 
+		and clarifying the logic for both waking and manually turning off the display.
 	
+	*   **[Code] Refactored Property Settings:**
+    *   Created a new `applyProperties` helper to set Si4735 properties from `PROGMEM` tables.
+    *   Refactored audio configuration functions (`FMAudioConfigure`, `applyAMNoiseBlankerSettings`) to use this new declarative method,
+		improving saving memory.
+	
+------------------------------------------------------------------------------------------------------------
+
