@@ -327,36 +327,42 @@ static void configureSSBMode(
 }
 
 // Configures chip for standard AM reception
-// - Reads all parameters like frequency step and bandwidth from current band state
-// - Applies mode-specific settings for audio properties like soft mute
+// consolidating all critical audio and gain settings into single block immediately
+// following setAM command it resolves
 static void configureAMMode(uint16_t minFreq, uint16_t maxFreq) {
     g_currentMode = AM;
     const Band& current_band = g_bandList[g_bandIndex];
+    ModeContext modeCtx = getModeContext();
 
+    // Set primary mode and frequency
     g_si4735.setAM(
         minFreq,
         maxFreq,
         current_band.currentFreq,
         g_tabStep[current_band.stepIdxAM]);
 
-    // Use SoftMute setting from storage for AM
-    g_si4735.setAmSoftMuteMaxAttenuation(
-        g_modeSettings[MODE_SETTING_SOFT_MUTE][MODE_CONTEXT_AM]
-    );
-    g_si4735.setAMSoftMuteSnrThreshold(g_Settings[SoftMuteThr].param);
+    // Bandwidth
     g_si4735.setBandwidth(g_bwAMIdx[current_band.bwIdxAM], 1);
+
+    // Soft Mute settings
+    g_si4735.setAmSoftMuteMaxAttenuation(g_modeSettings[MODE_SETTING_SOFT_MUTE][modeCtx]);
+    g_si4735.setAMSoftMuteSnrThreshold(g_Settings[SoftMuteThr].param);
+
+    // AGC settings - deliberate duplication
+    int8_t att_val = g_modeSettings[MODE_SETTING_AGC][modeCtx];
+    setAgcHardware(att_val);
+
+    // AVC Gain - must be set unconditionally
+    g_si4735.setAvcAmMaxGain(g_modeSettings[MODE_SETTING_AVC][modeCtx]);
 }
 
 // Centralizes setup for properties shared between AM and SSB to avoid code duplication
-// - Conditionally applies AVC max gain only when AGC is in automatic mode
+// - Unconditionally applies AVC max gain to ensure correct audio levels
 // - Sets custom seek thresholds for improved weak station performance
 static void configureAMCommon(uint16_t minFreq, uint16_t maxFreq) {
     ModeContext modeCtx = getModeContext();
 
-    // Apply AVC MAX GAIN from storage for the current mode
-    // but only if the AGC enabled (ATT setting is in AUT mode)
-    if (g_modeSettings[MODE_SETTING_AGC][modeCtx] == 0)
-        g_si4735.setAvcAmMaxGain(g_modeSettings[MODE_SETTING_AVC][modeCtx]);
+    g_si4735.setAvcAmMaxGain(g_modeSettings[MODE_SETTING_AVC][modeCtx]);
 
     g_si4735.setSeekAmLimits(minFreq, maxFreq);
 
@@ -1287,12 +1293,21 @@ static inline void handleFavoritesTimeout() {
 }
 #endif
 
-// settings saved to EEPROM if they have been marked as changed
+// Manages saving settings to EEPROM based on user activity
 static inline void handleSettingsSave() {
-    if (g_settingsDirty || (g_stateIsDirty && (millis() - g_lastUserActivityTime > SAVE_ON_IDLE_TIMEOUT))) {
-        saveAllReceiverInformation(g_settingsDirty); // full_save if settings changed, partial if idle
+    // save menu settings immediately on exit for predictable behavior
+    if (g_settingsDirty) {
+        saveAllReceiverInformation(true);
         g_settingsDirty = false;
-        g_stateIsDirty = false;
+        g_stateIsDirty = false;             // settings include state, reset both flags
+        return;
+    }
+
+    // save frequency state on idle to prevent EEPROM wear during active tuning
+    // and to ensure last frequency is saved before a potential power-off
+    if (g_stateIsDirty && ((uint16_t)(millis() / 1000) - g_lastUserActivityTime > (SAVE_ON_IDLE_TIMEOUT / 1000))) {
+        saveAllReceiverInformation(false); // partial save for frequency only
+        g_stateIsDirty = false;            // reset flag only after successful save
     }
 }
 
