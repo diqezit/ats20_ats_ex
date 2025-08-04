@@ -107,6 +107,19 @@ static void setCpuPrescaler(uint8_t prescaler) {
     interrupts();
 }
 
+// Applies a series of properties to the Si4735 from a PROGMEM array
+// This helper function simplifies applying multiple settings by using a declarative data table
+// reducing repetitive setProperty calls from SI473z lib
+// Property list must be terminated with a {0, 0} pair to mark its end
+static void applyProperties(const uint16_t props[][2]) {
+    for (int i = 0; ; ++i) {
+        uint16_t prop_addr = pgm_read_word(&props[i][0]);
+        if (prop_addr == 0) break;
+        uint16_t prop_val = pgm_read_word(&props[i][1]);
+        g_si4735.setProperty(prop_addr, prop_val);
+    }
+}
+
 // ==========================================
 // ===== LOW-LEVEL HARDWARE CONTROL =========
 // ==========================================
@@ -197,63 +210,72 @@ static void loadSSBPatch() {
 // - Activates an experimental noise blanker to reduce impulse noise
 // - Delegates mono/stereo control to dedicated handler
 static void FMAudioConfigure() {
+    static const uint16_t soft_mute_props[][2] PROGMEM = {
+        {0x1300, FM_PROP_SOFTMUTE_RATE},
+        {0x1301, FM_PROP_SOFTMUTE_SLOPE},
+        {0x1302, FM_PROP_SOFTMUTE_MAX_ATTN},
+        {0x1303, FM_PROP_SOFTMUTE_SNR_THRESH},
+        {0x1304, FM_PROP_SOFTMUTE_REL_RATE},
+        {0x1305, FM_PROP_SOFTMUTE_ATT_RATE},
+        {0, 0} // terminator
+    };
+    static const uint16_t noise_blanker_props[][2] PROGMEM = {
+        {0x1900, FM_PROP_NB_REJ_THRESH},
+        {0x1901, FM_PROP_NB_ATT_RATE},
+        {0x1902, FM_PROP_NB_REL_RATE},
+        {0x1903, FM_PROP_NB_ADC_OVER_THRESH},
+        {0x1904, FM_PROP_NB_ADC_OVER_DELAY},
+        {0, 0} // terminator
+    };
+    static const uint16_t hicut_speaker_eq_props[][2] PROGMEM = {
+        {FM_PROP_HICUT_ENABLE, 1},
+        {0x1A01, FM_PROP_HICUT_WINDOW},
+        {0x1A02, FM_PROP_HICUT_SNR_THRESH},
+        {0x1A03, FM_PROP_HICUT_ATT_RATE},
+        {0x1A04, FM_PROP_HICUT_REL_RATE},
+        {0x1A05, FM_PROP_HICUT_MPX_THRESH},
+        {0x1A06, FM_PROP_HICUT_CUTOFF},
+        {0, 0} // terminator
+    };
+    static const uint16_t hicut_default_props[][2] PROGMEM = {
+        {FM_PROP_HICUT_ENABLE, 0},
+        {0x1A06, 0x0000},
+        {0, 0} // terminator
+    };
 
-    // --- Aggressive Soft Mute ---
-    // properties make the soft mute react instantly and attenuate deeply when SNR drops
-    // silences static hiss when tuning between stations
-    g_si4735.setProperty(0x1300, FM_PROP_SOFTMUTE_RATE);
-    g_si4735.setProperty(0x1301, FM_PROP_SOFTMUTE_SLOPE);
-    g_si4735.setProperty(0x1302, FM_PROP_SOFTMUTE_MAX_ATTN);
-    g_si4735.setProperty(0x1303, FM_PROP_SOFTMUTE_SNR_THRESH);
-    g_si4735.setProperty(0x1304, FM_PROP_SOFTMUTE_REL_RATE);
-    g_si4735.setProperty(0x1305, FM_PROP_SOFTMUTE_ATT_RATE);
+    // apply universal enhancements that are always on
+    applyProperties(soft_mute_props);
+    applyProperties(noise_blanker_props);
 
-    // --- Experimental Noise Blanker ---
-    // configure a digital filter to detect and suppress short noise spikes
-    // this feature is undocumented for Si473x but present in related chips
-    // testing shows no audio degradation when enabled
-    g_si4735.setProperty(0x1900, FM_PROP_NB_REJ_THRESH);
-    g_si4735.setProperty(0x1901, FM_PROP_NB_ATT_RATE);
-    g_si4735.setProperty(0x1902, FM_PROP_NB_REL_RATE);
-    g_si4735.setProperty(0x1903, FM_PROP_NB_ADC_OVER_THRESH);
-    g_si4735.setProperty(0x1904, FM_PROP_NB_ADC_OVER_DELAY);
-
-    // --- User-selectable Speaker EQ via Hi-Cut Filter ---
+    // apply user-selectable speaker EQ or restore defaults
     if (g_Settings[FMAudioProfile].param == 1) {
-        // --- PROFILE ON: Applying Speaker EQ ---
-
-        // --- Hi-Cut Filter as Audio Equalizer ---
-        // The code below re-purposes the hi-cut filter as a static EQ to create a warmer sound
-
-        // dynamic hi-cut filter is re-purposed as a static audio filter
-        // forced active to tailor the audio output for the small speaker,
-        // reducing high-frequency harshness
-        g_si4735.setProperty(0x1A01, FM_PROP_HICUT_WINDOW);
-        g_si4735.setProperty(0x1A02, FM_PROP_HICUT_SNR_THRESH);
-        g_si4735.setProperty(0x1A03, FM_PROP_HICUT_ATT_RATE);
-        g_si4735.setProperty(0x1A04, FM_PROP_HICUT_REL_RATE);
-        g_si4735.setProperty(0x1A05, FM_PROP_HICUT_MPX_THRESH);
-        g_si4735.setProperty(0x1A06, FM_PROP_HICUT_CUTOFF);
-        g_si4735.setProperty(FM_PROP_HICUT_ENABLE, 1);  // Always enable Hi-Cut for this profile
-
+        applyProperties(hicut_speaker_eq_props);
     } else {
-        // --- PROFILE OFF: Restoring Default Hi-Cut Settings for Headphones ---
-        g_si4735.setProperty(FM_PROP_HICUT_ENABLE, 0);
-        g_si4735.setProperty(0x1A06, 0x0000);
+        applyProperties(hicut_default_props);
     }
 }
 
-// Applies or disables the AM Noise Blanker based on user settings
+// Applies or disables AM Noise Blanker based on user settings
 static void applyAMNoiseBlankerSettings() {
+    static const uint16_t am_nb_on_props[][2] PROGMEM = {
+        {AM_NB_DETECT_THRESHOLD_PROP, AM_NB_THRESHOLD_DEFAULT},
+        {AM_NB_INTERVAL_PROP,         AM_NB_INTERVAL_DEFAULT},
+        {AM_NB_RATE_PROP,             AM_NB_RATE_DEFAULT},
+        {AM_NB_IIR_FILTER_PROP,       AM_NB_IIR_FILTER_DEFAULT},
+        {AM_NB_DELAY_PROP,            AM_NB_DELAY_DEFAULT},
+        {0, 0} // terminator
+    };
+    static const uint16_t am_nb_off_props[][2] PROGMEM = {
+        // setting threshold to 0 disables feature per datasheet
+        {AM_NB_DETECT_THRESHOLD_PROP, 0},
+        {0, 0} // terminator
+    };
+
+    // apply appropriate set of properties based on user setting
     if (g_Settings[AMNoiseBlanker].param == 1) {
-        g_si4735.setProperty(AM_NB_DETECT_THRESHOLD_PROP, AM_NB_THRESHOLD_DEFAULT);
-        g_si4735.setProperty(AM_NB_INTERVAL_PROP, AM_NB_INTERVAL_DEFAULT);
-        g_si4735.setProperty(AM_NB_RATE_PROP, AM_NB_RATE_DEFAULT);
-        g_si4735.setProperty(AM_NB_IIR_FILTER_PROP, AM_NB_IIR_FILTER_DEFAULT);
-        g_si4735.setProperty(AM_NB_DELAY_PROP, AM_NB_DELAY_DEFAULT);
+        applyProperties(am_nb_on_props);
     } else {
-        // Disable Noise Blanker
-        g_si4735.setProperty(AM_NB_DETECT_THRESHOLD_PROP, 0);
+        applyProperties(am_nb_off_props);
     }
 }
 

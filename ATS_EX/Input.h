@@ -8,6 +8,32 @@
 // ======================================================================
 
 // ==========================================
+// =============== INPUT: HELPERS ===========
+// ==========================================
+
+// Helper function to manage display power and CPU speed
+// Consolidates logic for turning the display on or off
+static inline void setDisplayPower(bool on) {
+    g_displayOn = on;
+    if (on) {
+        setCpuPrescaler(g_Settings[SettingsIndex::CPUSpeed].param);
+        oled.setPower(true);
+    } else {
+        setCpuPrescaler(1);         // 8 MHz for responsive handler
+        oled.setPower(false);
+    }
+    autoDisplayOff = false;         // always manual action or wake-up fo reset autoflag
+}
+
+// Wake display on user activity but only if it was turned off by timeout
+static inline void wakeUpDisplayIfNeeded() {
+    if (!g_displayOn && autoDisplayOff) {
+        setDisplayPower(true);
+        g_lastUserActivityTime = millis() / 1000;
+    }
+}
+
+// ==========================================
 // ===== INPUT: ROTARY ENCODER & BUTTONS ====
 // ==========================================
 
@@ -162,16 +188,19 @@ static void handleVolumeDownShortPress() {
     }
 }
 
-// Toggles display power for power saving
-// disabled in settings
+// Toggles display power or wakes it from sleep
+// On main screen a short press toggles the display ON/OFF
+// If display has turned off by timeout, the first press will only wake it
 static void handleAgcShortPress() {
-    RETURN_IF_SETTINGS_ACTIVE();
+
     if (!g_displayOn) {
-        g_displayOn = !g_displayOn;
-        setCpuPrescaler(g_displayOn ? g_Settings[SettingsIndex::CPUSpeed].param : 1);
-        oled.setPower(g_displayOn);
-        if (!g_displayOn) autoDisplayOff = false;
+        setDisplayPower(true);
+        return;
     }
+
+    RETURN_IF_SETTINGS_ACTIVE();
+
+    setDisplayPower(false);
 }
 
 // handler for long press on AGC (Save Favorite)
@@ -337,7 +366,7 @@ void refreshCommandIndicators() {
 void switchCommand(CommandMode mode) {
 
     if (mode == CMD_BW && g_currentMode == CW) return;
-    
+
     RETURN_IF_SETTINGS_ACTIVE();
     g_activeCommand = (g_activeCommand != mode) ? mode : CMD_NONE;
     if (g_activeCommand != CMD_NONE) {
@@ -432,18 +461,6 @@ static inline bool processEncoderForCommands(int encoder_delta) {
         return true;
     }
     return false;
-}
-
-// Wake display on user activity
-// but only if it was turned off by timeout not manually
-static inline void wakeUpDisplayIfNeeded() {
-    if (!g_displayOn && autoDisplayOff) {
-        g_displayOn = true;
-        setCpuPrescaler(g_Settings[SettingsIndex::CPUSpeed].param);
-        oled.setPower(true);
-        autoDisplayOff = false;
-        g_lastUserActivityTime = millis() / 1000;
-    }
 }
 
 // Main orchestrator for encoder actions
