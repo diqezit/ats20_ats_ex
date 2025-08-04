@@ -100,7 +100,7 @@ static void applyBrightness() {
 void showSplashScreen() {
     oled.clear();
 
-    drawInverted(26, 1, F("ATS-20* V6.0.3"), false);
+    drawInverted(26, 1, F("ATS-20* V6.1"), false);
     drawInverted(32, 3, F("MOD NO RDS"), false);
 
 #if ANIMATE_SPLASH
@@ -245,10 +245,18 @@ static void showBandTag() {
 // Overloads a single screen position for multiple status indicators
 // Shows 'L'/'U' for CW sideband, 'S' for SSB sync, or '*' for FM stereo
 void updateStereoIndicator() {
-    char c = (g_currentMode == CW)
-        ? (g_lastCWMode == LSB ? 'L' : 'U')
-        : (isSSB() && g_Settings[Sync].param == 1) ? 'S'
-        : (g_currentMode == FM && g_stereoStatus) ? '*' : ' ';
+    char c;
+
+    if (g_currentMode == FM) {
+        // Show stereo indicator '*' only if stereo is active AND mono is NOT forced by the user
+        c = (g_stereoStatus && g_Settings[ForceMono].param == 0) ? '*' : ' ';
+    } else if (g_currentMode == CW) {
+        c = (g_lastCWMode == LSB) ? 'L' : 'U';
+    } else if (isSSB() && g_Settings[Sync].param == 1) {
+        c = 'S';
+    } else {
+        c = ' ';
+    }
 
     oled.setCursor(24, 7);
     oled.print(c);

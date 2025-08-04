@@ -10,13 +10,16 @@
 // 0             | 1 B      | 1 B      | 0 B     | EEPROM_APP_ID_ADDRESS          | Custom ID to validate data structure
 // 1             | 1 B      | 1 B      | 0 B     | EEPROM_VERSION_ADDRESS         | Firmware version for compatibility
 //
-// 10 - 19       | 10 B     | 6 B      | 4 B     | EEPROM_HEADER_START            | Global state header (volume, mode etc.)
-// 20 - 159      | 140 B    | 140 B    | 0 B     | EEPROM_BANDS_START             | State for all 28 bands (28 * 5 bytes)
-// 160 - 209     | 50 B     | ~18 B    | ~32 B   | EEPROM_SETTINGS_START          | Global settings array `g_Settings`
-// 210 - 229     | 20 B     | 6 B      | 14 B    | EEPROM_MODE_SETTINGS_START     | Mode-dependent settings
+// 10 - 25       | 16 B     | 6 B      | 10 B    | EEPROM_HEADER_START            | Global state header (volume, mode etc.)
 //
-// 230 - 329     | 100 B    | 100 B    | 0 B     | EEPROM_FAVORITES_START         | Unified favorite stations (20 stations * 5 bytes)
-// 330           | 1 B      | 1 B      | 0 B     | EEPROM_FAVORITES_COUNT         | Count of saved favorites
+// 26 - 165      | 140 B    | 140 B    | 0 B     | EEPROM_BANDS_START             | State for all 28 bands (28 * 5 bytes)
+//
+// 176 - 196     | 21 B     | 21 B     | 0 B     | EEPROM_SETTINGS_START          | Global settings array `g_Settings` (21 items)
+//
+// 207 - 212     | 6 B      | 6 B      | 0 B     | EEPROM_MODE_SETTINGS_START     | Mode-dependent settings
+//
+// 223 - 322     | 100 B    | 100 B    | 0 B     | EEPROM_FAVORITES_START         | Unified favorite stations (20 * 5 bytes)
+// 333           | 1 B      | 1 B      | 0 B     | EEPROM_FAVORITES_COUNT         | Count of saved favorites
 // =================================================================================================
 
 // --- Core EEPROM Validation ---
@@ -25,15 +28,27 @@ constexpr auto EEPROM_APP_ID_ADDRESS = 0;
 constexpr auto EEPROM_VERSION_ADDRESS = 1;
 
 // --- Data Block Start Addresses ---
-constexpr auto EEPROM_HEADER_START = 10;
-constexpr auto EEPROM_BANDS_START = 20;
-constexpr auto EEPROM_SETTINGS_START = 160;
-constexpr auto EEPROM_MODE_SETTINGS_START = 210;
-constexpr auto EEPROM_FAVORITES_START = 230;
-constexpr auto EEPROM_FAVORITES_COUNT = 330;
+// These addresses are calculated manually to avoid include-order issues
+// 10-byte gap is reserved between blocks for future expansion
+//
+// BLOCK SIZES FOR CALCULATION:
+// ReceiverHeader:      6 bytes
+// BandStatePacked:     5 bytes (x28 bands = 140 bytes)
+// Settings:            21 bytes (SETTINGS_MAX = 21 items * 1 byte each)
+// ModeSettings:        6 bytes (MODE_SETTINGS_COUNT * MODE_CONTEXT_COUNT = 3 * 2)
+// FavoriteStation:     5 bytes (x20 stations = 100 bytes)
+// FavoritesCount:      1 byte
+
+constexpr auto EEPROM_HEADER_START = 10;                // Size: 6.  End: 16.
+constexpr auto EEPROM_BANDS_START = 26;                 // Size: 140. End: 166.
+constexpr auto EEPROM_SETTINGS_START = 176;             // Size: 21.  End: 197.
+constexpr auto EEPROM_MODE_SETTINGS_START = 207;        // Size: 6.   End: 213.
+constexpr auto EEPROM_FAVORITES_START = 223;            // Size: 100. End: 323.
+constexpr auto EEPROM_FAVORITES_COUNT = 333;            // Size: 1.   End: 334.
 
 
-constexpr auto APP_VERSION = 60;                        // Version number for compatibility checks
+// Increment APP_VERSION to force EEPROM reset due to layout changes
+constexpr auto APP_VERSION = 61;
 
 
 // Behavior
@@ -43,7 +58,7 @@ constexpr auto ADJUSTMENT_ACTIVE_TIMEOUT = 3000;
 constexpr auto SETTINGS_MENU_TIMEOUT = 10000UL;
 #define BAND_DELAY                2
 constexpr auto MIN_ELAPSED_TIME = 100;
-constexpr auto SEEK_TIME = 65535UL;         // 65535 ms = 65.535 seconds
+constexpr auto SEEK_TIME = 65535UL;                     // 65535 ms = 65.535 seconds
 
 // for signal polling timing
 constexpr auto RSSI_POLL_INTERVAL_MS = 1000UL;          // How often to check RSSI/Stereo when idle.
@@ -110,12 +125,12 @@ constexpr auto MIN_SETFREQ_INTERVAL_MS = 25UL;
 
 
 // =================================================================================================
-// --------------- FM Audio Enhancement Profile Constants ------------------------------------------
+// --------------- Audio Enhancement Profile Constants ---------------------------------------------
 // =================================================================================================
-// Defines a curated audio profile for FM reception
-// Values are derived from experimental testing from users and Si47XX AN332 programming guide
+// Defines curated audio profiles for both FM and AM/SSB modes
+// Values are derived from experimental testing and the Si47XX AN332 programming guide
 
-// --- Aggressive Soft Mute for Quiet Tuning ---
+// --- FM: Aggressive Soft Mute for Quiet Tuning ---
 // Eliminate static hiss when tuning between stations
 // Properties are set for instant reaction and deep attenuation when SNR drops
 // These values are aggressive. Reducing them will result in a softer mute
@@ -135,18 +150,19 @@ const auto FM_PROP_SOFTMUTE_SLOPE = 4;                  // Default: 2. Range: 0-
 // A higher value results in a deeper mute. 22dB is used for near-silence
 const auto FM_PROP_SOFTMUTE_MAX_ATTN = 22;              // Default: 16 dB. Range: 0-31
 
-// Property 0x1304 & 0x1305: FM_SOFTMUTE_ATTACK/DECAY_RATE
-// Undocumented properties for fine control over attack/decay times
-// High values ensure the mute engages and disengages rapidly
-const auto FM_PROP_SOFTMUTE_ATT_RATE = 32700;           // Default: Unknown
-const auto FM_PROP_SOFTMUTE_DEC_RATE = 32700;           // Default: Unknown
+// Property 0x1303: FM_SOFT_MUTE_SNR_THRESHOLD
+// Sets SNR threshold to engage soft mute. A higher value makes the mute more
+// aggressive, activating even on moderately weak stations to eliminate hiss
+const auto FM_PROP_SOFTMUTE_SNR_THRESH = 10;            // Default: 4 dB. Range: 0-15
 
-// Property 0x1303: (Undocumented, possibly release rate)
-// This value was found through experimentation for a balanced response
-const auto FM_PROP_SOFTMUTE_REL_RATE = 4;
+// Property 0x1304 & 0x1305: FM_SOFTMUTE_RELEASE/ATTACK_RATE
+// These undocumented properties likely control release/attack rates
+// High values are used to ensure the mute engages and disengages rapidly
+const auto FM_PROP_SOFTMUTE_REL_RATE = 32700;           // Property 0x1304 (Assumed Release Rate)
+const auto FM_PROP_SOFTMUTE_ATT_RATE = 32700;           // Property 0x1305 (Assumed Attack Rate)
 
 
-// --- Hi-Cut Filter as a "Warm Sound" Equalizer ---
+// --- FM: Hi-Cut Filter as a "Warm Sound" Equalizer ---
 // Goal: Reduce high-frequency harshness to suit the small speaker
 // Mechanism: The dynamic hi-cut filter is re-purposed as a static audio filter
 // It is forced active to tailor audio output for the speaker's physical limitations
@@ -156,39 +172,73 @@ const auto FM_PROP_SOFTMUTE_REL_RATE = 4;
 // Enables or disables hi-cut functionality. Forced ON to act as an EQ.
 const auto FM_PROP_HICUT_ENABLE = 1;                    // 1 = On, 0 = Off
 
-// Property 0x1A02: FM_HICUT_SNR_HIGH_THRESHOLD
+// Property 0x1A00: FM_HICUT_SNR_HIGH_THRESHOLD
 // SNR level where the hi-cut filter starts to engage
 // A low value ensures the filter is active on almost all signals for a consistent audio profile
-const auto FM_PROP_HICUT_SNR_THRESH = 10;               // Default: 24 dB. Range: 0-127
+const auto FM_PROP_HICUT_SNR_THRESH = 10;               // Property Address 0x1A00, Default: 24 dB
 
 // Property 0x1A06: FM_HICUT_CUTOFF_FREQUENCY
 // This setting controls the audio tone. It has two parts:
-// - Bits 6:4: Maximum Audio Frequency. Sets a hard limit on the audio path.
-// - Bits 2:0: Hi-Cut Transition Frequency. Sets frequency for filter attenuation.
+// - Bits 6:4: Maximum Audio Frequency. Sets a hard limit on the audio path
+// - Bits 2:0: Hi-Cut Transition Frequency. Sets frequency for filter attenuation
 // Value 0x0055 (binary ...0101 0101) translates to:
-// - Max Audio = 2 (3 kHz). Audio above 3 kHz is sharply cut. This removes piercing highs.
-// - Hi-Cut Freq = 5 (5 kHz). This softens upper mid-range frequencies.
-const auto FM_PROP_HICUT_CUTOFF = 0x0055;               // Default: 0x0000 (Disabled)
+// - Max Audio = 2 (3 kHz). Audio above 3 kHz is sharply cut. This removes piercing highs
+// - Hi-Cut Freq = 5 (6 kHz). This softens upper mid-range frequencies
+const auto FM_PROP_HICUT_CUTOFF = 0x0055;               // Property Address 0x1A06, Default: 0x0000 (Disabled)
 
-// Other Hi-Cut properties for filter behavior. These values ensure a fast and stable response.
-const auto FM_PROP_HICUT_WINDOW = 1;                    // Property 0x1A01. Filter response parameter
-const auto FM_PROP_HICUT_ATT_RATE = 32760;              // Property 0x1A03. Fast attack rate
-const auto FM_PROP_HICUT_REL_RATE = 1;                  // Property 0x1A04. (Undocumented)
-const auto FM_PROP_HICUT_MPX_THRESH = 100;              // Property 0x1A05. (Undocumented)
+// Other Hi-Cut properties that define filter behavior. These values ensure a fast,
+// stable response when the filter is active, preventing audio pumping or instability
+const auto FM_PROP_HICUT_WINDOW = 1;                    // Property 0x1A01: Sets filter response window for stability
+const auto FM_PROP_HICUT_ATT_RATE = 32760;              // Property 0x1A02: Fast attack rate ensures immediate filter action
+const auto FM_PROP_HICUT_REL_RATE = 1;                  // Property 0x1A03: Fast release rate prevents pumping on signal recovery
+const auto FM_PROP_HICUT_MPX_THRESH = 100;              // Property 0x1A05: High threshold to ignore multipath effects on filter
 
 
-// --- Experimental Noise Blanker ---
-// Potentially reduce impulse noise from sources like car ignitions
-// These properties configure a digital filter to detect and suppress short noise spikes
-// The feature is undocumented for Si473x but present in related chips
-// These values are experimental. Safest fallback is setting all to 0
-// Testing shows no audio degradation when enabled
-const auto FM_PROP_NB_REJ_THRESH = 0;                   // Property 0x1900
-const auto FM_PROP_NB_ATT_RATE = 48;                    // Property 0x1901
-const auto FM_PROP_NB_REL_RATE = 64;                    // Property 0x1902
-const auto FM_PROP_NB_ADC_OVER_THRESH = 300;            // Property 0x1903
-const auto FM_PROP_NB_ADC_OVER_DELAY = 125;             // Property 0x1904
+// --- FM: Experimental Noise Blanker ---
+// Potentially reduces impulse noise from sources like car ignitions
+// Default values from AN332 are used here for base configuration
+const auto FM_PROP_NB_REJ_THRESH = 16;                  // Property 0x1900: Default=16dB. Threshold to detect a noise spike. Set to 0 to disable
+const auto FM_PROP_NB_ATT_RATE = 24;                    // Property 0x1901: Default=24us. Duration for which the signal is blanked
+const auto FM_PROP_NB_REL_RATE = 64;                    // Property 0x1902: Default=64 (6.4kHz). Max rate of blanking events
+const auto FM_PROP_NB_ADC_OVER_THRESH = 300;            // Property 0x1903: Default=300 (465Hz). Bandwidth of noise floor estimator
+const auto FM_PROP_NB_ADC_OVER_DELAY = 170;             // Property 0x1904: Default=170us. Delay before applying blanking
 
+
+// --- AM: Experimental Noise Blanker (NB) ---
+// These properties configure the Noise Blanker for AM/SSB modes
+// It is disabled by default and can be enabled via the settings menu
+// Default values from AN32 are used for base config
+#define AM_NB_DETECT_THRESHOLD_PROP  0x3900             // Property Address for NB Threshold
+#define AM_NB_INTERVAL_PROP          0x3901             // Property Address for NB Interval
+#define AM_NB_RATE_PROP              0x3902             // Property Address for NB Rate
+#define AM_NB_IIR_FILTER_PROP        0x3903             // Property Address for NB IIR Filter
+#define AM_NB_DELAY_PROP             0x3904             // Property Address for NB Delay
+
+// Default=12dB. Threshold for detecting an impulse noise spike
+// Setting this to 0 disables the Noise Blanker feature. Range: 0-90
+constexpr auto AM_NB_THRESHOLD_DEFAULT = 12;
+
+// Default=55us. The duration for which the original audio is replaced
+// with interpolated samples after a noise spike is detected. Range: 15-110
+constexpr auto AM_NB_INTERVAL_DEFAULT = 55;
+
+// Default=64 (6.4kHz). The maximum rate at which the noise blanker
+// is allowed to activate, preventing excessive signal processing. Range: 1-64
+constexpr auto AM_NB_RATE_DEFAULT = 64;
+
+// Default=300 (465Hz). The bandwidth of the filter used to estimate the
+// noise floor, which is the baseline for detecting spikes. Range: 300-1600
+constexpr auto AM_NB_IIR_FILTER_DEFAULT = 300;
+
+// Default=172us. The delay before the blanking is applied, allowing the
+// system to accurately identify the noise impulse. Range: 125-219
+constexpr auto AM_NB_DELAY_DEFAULT = 172;
+
+
+// p. 318 Rev. v 0.8
+// Recommended by SiLabs for classic C40-like performance on D60 chips
+constexpr uint16_t AM_SOFT_MUTE_SLOPE_PROP = 0x3301;
+constexpr uint16_t AM_SOFT_MUTE_SLOPE_RECOMMENDED = 2;
 
 // =================================================================================================
 // --------------- LOGIC AND ALGORITHM CONSTANTS ---------------------------------------------------

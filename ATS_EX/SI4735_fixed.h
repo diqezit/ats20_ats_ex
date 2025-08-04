@@ -100,4 +100,32 @@ public:
         // per  AN332 - RSSI is at the same offset (RESP4) in both responses
         currentStatus.raw[4] = currentRqsStatus.raw[4];
     }
+
+    // Configures FM stereo decoder for forced mono or automatic blend mode
+    // This single function replaces separate On/Off methods to save flash mem
+    void setFmStereoMode(bool force_mono) {
+        // Data is stored as pairs: { address, (auto_value << 8) | mono_value }
+        static const uint16_t fm_settings[] PROGMEM = {
+            0x1800, (49 << 8) | 127,    // FM_BLEND_RSSI_STEREO_THRESHOLD
+            0x1801, (30 << 8) | 127,    // FM_BLEND_RSSI_MONO_THRESHOLD
+            0x1804, (27 << 8) | 127,    // FM_BLEND_SNR_STEREO_THRESHOLD
+            0x1805, (14 << 8) | 127,    // FM_BLEND_SNR_MONO_THRESHOLD
+            0x1808, (20 << 8) | 0,      // FM_BLEND_MULTIPATH_STEREO_THRESHOLD
+            0x1809, (60 << 8) | 0       // FM_BLEND_MULTIPATH_MONO_THRESHOLD
+        };
+
+        const uint8_t entries = (sizeof(fm_settings) / sizeof(fm_settings[0])) / 2;
+
+        for (uint8_t i = 0; i < entries; i++) {
+            // read address and packed values from the flat array
+            uint16_t addr = pgm_read_word(&fm_settings[i * 2]);
+            uint16_t packed = pgm_read_word(&fm_settings[i * 2 + 1]);
+
+            // unpack the two 8-bit values
+            uint8_t autoVal = packed >> 8;
+            uint8_t monoVal = packed & 0xFF;
+
+            sendProperty(addr, force_mono ? monoVal : autoVal);
+        }
+    }
 };

@@ -790,3 +790,31 @@ This version introduces the ability to save your favorite FM stations.
 	
 	
 ------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v6.1**
+
+`ATS_EX.ino`, `Globals.h`, `Defines.h`, `SI4735_fixed.h`
+
+*   **[New] Selectable FM Audio Profile:**
+    *   Added a new "FM Audio Profile" (`FMP`) setting to toggle the built-in speaker equalization.
+    *   **ON (Default):** Optimizes audio for the internal speaker, providing a warmer sound.
+    *   **OFF:** Disables the EQ for a clean audio output for headphones.
+	
+*   **[Improved] Optimized FM Audio Profile:**
+    *   Edit FM Noise Blanker with safe values to reduce impulse noise
+    *   Increased the Soft Mute SNR threshold suppression of static hiss between stations
+    *   All related constants in `Defines.h` were verified against the datasheet, corrected, and better documented.
+	
+*   **[New] Selectable AM Noise Blanker:**
+    *   Added a new "AM Noise Blanker" (`ANB`) setting, disabled by default
+    *   When enabled it activates an experimental digital filter using factory-default values from the AN332 datasheet
+    *   This feature helps(?) reduce impulse noise in AM mode
+
+*   **[New] Selectable FM Force Mono:**
+    *   Return back and fixed new "Force Mono" (`FMO`) setting for the FM band, disabled by default.
+    *   When enabled, it forces the receiver into mono mode by comprehensively adjusting all three stereo blend mechanisms (RSSI, SNR, and Multipath)
+
+------------------------------------------------------------------------------------------------------------
+
+	
