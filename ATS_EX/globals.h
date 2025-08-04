@@ -21,7 +21,7 @@
 // A macro to convert a 4-character string literal into a char array without a null terminator
 #define PACK_STR4(s) {s[0], s[1], s[2], s[3]}
 
-const uint8_t g_SettingsMaxPages = 3;       // pages number in settings menu
+const uint8_t g_SettingsMaxPages = 4;       // pages number in settings menu
 
 #if ENABLE_FAVORITES
 const uint8_t MAX_FAVORITES = 20;
@@ -90,6 +90,11 @@ enum SettingsIndex {
     SWUnits,        // SWU
     RSSI_AM_Off,    // RSI
     DisplayOff,     // DIS (Display Off Timeout)
+
+    // --- Page 4: Audio Test ---
+    FMAudioProfile, // FMP (FM Audio Profile for Speaker EQ)
+    AMNoiseBlanker, // ANB (AM Noise Blanker)
+    ForceMono,      // FMO (Force Mono Reception)
 
     SETTINGS_MAX
 };
@@ -191,6 +196,9 @@ void doScanSwitch(int8_t v = 0);
 void doRSSIAMOff(int8_t v = 0);
 void doAntennaCapacitor(int8_t v = 0);
 void doDisplayOff(int8_t v = 0);
+void doFMAudioProfile(int8_t v = 0);
+void doAMNoiseBlanker(int8_t v = 0);
+void doForceMono(int8_t v = 0);
 void doBatteryPinSelect(int8_t v = 0);
 void showSplashScreen();
 void showStatus(bool cleanFreq = false);
@@ -375,6 +383,12 @@ SettingsItem g_Settings[] =
     { "SWU", 0,  SettingType::Switch,     doSWUnits           },
     { "RSI", 1,  SettingType::Switch,     doRSSIAMOff         },
     { "DIS", 0,  SettingType::Switch,     doDisplayOff        },
+
+    // Page 4
+    { "FMP", 1,  SettingType::Switch,     doFMAudioProfile    },
+    { "ANB", 0,  SettingType::Switch,     doAMNoiseBlanker    },
+    { "FMO", 0,  SettingType::Switch,     doForceMono         },
+
 };
 
 // defines the text conversion rules ONLY for settings of type 'Switch'
@@ -401,6 +415,11 @@ const PROGMEM SwitchMapEntry switch_setting_map[] = {
     [SWUnits] = {5, false},
     [RSSI_AM_Off] = {1, true},
     [DisplayOff] = {0, false},
+
+    // Page 4
+    [FMAudioProfile] = {1, false},
+    [AMNoiseBlanker] = {1, false},
+    [ForceMono] = {2, true},
 };
 
 // -------------------------------------------------------------------------------------------------

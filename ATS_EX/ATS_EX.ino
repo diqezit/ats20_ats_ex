@@ -204,24 +204,9 @@ static void FMAudioConfigure() {
     g_si4735.setProperty(0x1300, FM_PROP_SOFTMUTE_RATE);
     g_si4735.setProperty(0x1301, FM_PROP_SOFTMUTE_SLOPE);
     g_si4735.setProperty(0x1302, FM_PROP_SOFTMUTE_MAX_ATTN);
-    g_si4735.setProperty(0x1303, FM_PROP_SOFTMUTE_REL_RATE);
-    g_si4735.setProperty(0x1304, FM_PROP_SOFTMUTE_ATT_RATE);
-    g_si4735.setProperty(0x1305, FM_PROP_SOFTMUTE_DEC_RATE);
-
-
-    // --- Hi-Cut Filter as Audio Equalizer ---
-    // The code below re-purposes the hi-cut filter as a static EQ to create a warmer sound
-
-    // dynamic hi-cut filter is re-purposed as a static audio filter
-    // forced active to tailor the audio output for the small speaker,
-    // reducing high-frequency harshness
-    g_si4735.setProperty(0x1A01, FM_PROP_HICUT_WINDOW);
-    g_si4735.setProperty(0x1A02, FM_PROP_HICUT_SNR_THRESH);
-    g_si4735.setProperty(0x1A03, FM_PROP_HICUT_ATT_RATE);
-    g_si4735.setProperty(0x1A04, FM_PROP_HICUT_REL_RATE);
-    g_si4735.setProperty(0x1A05, FM_PROP_HICUT_MPX_THRESH);
-    g_si4735.setProperty(0x1A06, FM_PROP_HICUT_CUTOFF);
-    g_si4735.setProperty(FM_PROP_HICUT_ENABLE, 1); // Always enable Hi-Cut for this profile
+    g_si4735.setProperty(0x1303, FM_PROP_SOFTMUTE_SNR_THRESH);
+    g_si4735.setProperty(0x1304, FM_PROP_SOFTMUTE_REL_RATE);
+    g_si4735.setProperty(0x1305, FM_PROP_SOFTMUTE_ATT_RATE);
 
     // --- Experimental Noise Blanker ---
     // configure a digital filter to detect and suppress short noise spikes
@@ -232,6 +217,49 @@ static void FMAudioConfigure() {
     g_si4735.setProperty(0x1902, FM_PROP_NB_REL_RATE);
     g_si4735.setProperty(0x1903, FM_PROP_NB_ADC_OVER_THRESH);
     g_si4735.setProperty(0x1904, FM_PROP_NB_ADC_OVER_DELAY);
+
+    // --- User-selectable Speaker EQ via Hi-Cut Filter ---
+    if (g_Settings[FMAudioProfile].param == 1) {
+        // --- PROFILE ON: Applying Speaker EQ ---
+
+        // --- Hi-Cut Filter as Audio Equalizer ---
+        // The code below re-purposes the hi-cut filter as a static EQ to create a warmer sound
+
+        // dynamic hi-cut filter is re-purposed as a static audio filter
+        // forced active to tailor the audio output for the small speaker,
+        // reducing high-frequency harshness
+        g_si4735.setProperty(0x1A01, FM_PROP_HICUT_WINDOW);
+        g_si4735.setProperty(0x1A02, FM_PROP_HICUT_SNR_THRESH);
+        g_si4735.setProperty(0x1A03, FM_PROP_HICUT_ATT_RATE);
+        g_si4735.setProperty(0x1A04, FM_PROP_HICUT_REL_RATE);
+        g_si4735.setProperty(0x1A05, FM_PROP_HICUT_MPX_THRESH);
+        g_si4735.setProperty(0x1A06, FM_PROP_HICUT_CUTOFF);
+        g_si4735.setProperty(FM_PROP_HICUT_ENABLE, 1);  // Always enable Hi-Cut for this profile
+
+    } else {
+        // --- PROFILE OFF: Restoring Default Hi-Cut Settings for Headphones ---
+        g_si4735.setProperty(FM_PROP_HICUT_ENABLE, 0);
+        g_si4735.setProperty(0x1A06, 0x0000);
+    }
+}
+
+// Applies or disables the AM Noise Blanker based on user settings
+static void applyAMNoiseBlankerSettings() {
+    if (g_Settings[AMNoiseBlanker].param == 1) {
+        g_si4735.setProperty(AM_NB_DETECT_THRESHOLD_PROP, AM_NB_THRESHOLD_DEFAULT);
+        g_si4735.setProperty(AM_NB_INTERVAL_PROP, AM_NB_INTERVAL_DEFAULT);
+        g_si4735.setProperty(AM_NB_RATE_PROP, AM_NB_RATE_DEFAULT);
+        g_si4735.setProperty(AM_NB_IIR_FILTER_PROP, AM_NB_IIR_FILTER_DEFAULT);
+        g_si4735.setProperty(AM_NB_DELAY_PROP, AM_NB_DELAY_DEFAULT);
+    } else {
+        // Disable Noise Blanker
+        g_si4735.setProperty(AM_NB_DETECT_THRESHOLD_PROP, 0);
+    }
+}
+
+// Applies user setting for forcing mono or allowing auto-stereo in FM mode
+static void applyFMStereoSettings() {
+    g_si4735.setFmStereoMode(g_Settings[ForceMono].param == 1);
 }
 
 // Orchestrates complete Si4735 setup for FM mode
@@ -270,6 +298,8 @@ static void configureFMMode() {
 
     // after basic FM configuration is done - apply permanent audio enhancement profile
     FMAudioConfigure();
+
+    applyFMStereoSettings();
 }
 
 // Orchestrates Si4735 setup for SSB and CW modes
@@ -345,10 +375,12 @@ static void configureAMMode(uint16_t minFreq, uint16_t maxFreq) {
     g_si4735.setBandwidth(g_bwAMIdx[current_band.bwIdxAM], 1);
 
     // Soft Mute settings
+    g_si4735.setProperty(AM_SOFT_MUTE_SLOPE_PROP, AM_SOFT_MUTE_SLOPE_RECOMMENDED); // new
     g_si4735.setAmSoftMuteMaxAttenuation(g_modeSettings[MODE_SETTING_SOFT_MUTE][modeCtx]);
     g_si4735.setAMSoftMuteSnrThreshold(g_Settings[SoftMuteThr].param);
 
     // AGC settings - deliberate duplication
+    // block is critical for timing on cold start
     int8_t att_val = g_modeSettings[MODE_SETTING_AGC][modeCtx];
     setAgcHardware(att_val);
 
@@ -369,6 +401,8 @@ static void configureAMCommon(uint16_t minFreq, uint16_t maxFreq) {
     // Custom seek thresholds to improve seek on weak stations
     g_si4735.setProperty(AM_SEEK_SNR_THRESHOLD_PROP, AM_SEEK_SNR_THRESHOLD_VAL);
     g_si4735.setProperty(AM_SEEK_RSSI_THRESHOLD_PROP, AM_SEEK_RSSI_THRESHOLD_VAL);
+
+    applyAMNoiseBlankerSettings();
 }
 
 // Applies AGC settings based on current mode and stored values
@@ -1160,6 +1194,27 @@ void doRSSIAMOff(int8_t v) {
 //Settings: Display timeout switch
 void doDisplayOff(int8_t v) {
     doSwitchLogic(g_Settings[DisplayOff].param, 0, DISPLAY_OFF_TIMER_MAX_LEVEL, v);
+}
+
+// Settings: FM Audio Profile (Speaker EQ)
+// Toggles a curated audio profile designed to improve sound on the small internal speaker.
+// When disabled, it restores default chip settings for pure audio output, ideal for headphones.
+void doFMAudioProfile(int8_t v) {
+    toggleSetting(FMAudioProfile);
+    if (g_currentMode == FM) FMAudioConfigure();
+}
+
+// Settings: Force FM Mono
+// Toggles between automatic stereo/mono blend and forced mono reception
+void doForceMono(int8_t v) {
+    toggleSetting(ForceMono);
+    if (g_currentMode == FM) applyFMStereoSettings();
+}
+
+// Settings: AM Noise Blanker
+void doAMNoiseBlanker(int8_t v) {
+    toggleSetting(AMNoiseBlanker);
+    if (g_currentMode != FM) applyAMNoiseBlankerSettings();
 }
 
 // ==========================================
