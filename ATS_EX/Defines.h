@@ -37,7 +37,7 @@ constexpr auto APP_VERSION = 60;                        // Version number for co
 
 
 // Behavior
-constexpr auto SAVE_ON_IDLE_TIMEOUT = 30000UL;
+constexpr auto SAVE_ON_IDLE_TIMEOUT = 15000UL;          // 15 seconds
 constexpr auto DEFAULT_VOLUME = 25;
 constexpr auto ADJUSTMENT_ACTIVE_TIMEOUT = 3000;
 constexpr auto SETTINGS_MENU_TIMEOUT = 10000UL;

@@ -766,3 +766,27 @@ This version introduces the ability to save your favorite FM stations.
 ------------------------------------------------------------------------------------------------------------
 
 
+### **MOD_NO_RDS v6.0.3**
+
+`ats_ex_firmware.ino`, `Defines.h`
+
+*   **[Fix] Resolved Critical AM/SW Audio Bug on Cold Start:**
+    *   Fixed a bug that caused audio to be completely muted or have very low volume on AM/SW bands after powering on the receiver (cold start). 
+		The issue did not occur during "hot" mode switches (e.g., AM -> FM -> AM).
+    *   Сause was traced to a timing-sensitive regression introduced during a code refactoring. 
+		The separation of initialization commands into multiple functions disrupted the delicate command sequence required 
+		by the Si4735 chip DSP after a `POWER_UP` cycle, causing it to incorrectly activate Soft Mute and fail to apply AVC gain settings.
+    *   The fix restores stable behavior of legacy firmware (1.18) by consolidating all critical audio and gain configuration commands 
+		`configureAMMode` function. Аll parameters are sent in a rapid sequence immediately after the main `setAM` command, 
+		reliably preventing the DSP from defaulting to a muted state.
+
+*   **[Improved] More Reliable State Saving Logic:**
+    *   Reworked the EEPROM saving mechanism to significantly reduce the risk of losing the last tuned frequency if the device 
+		is powered off shortly after an adjustment.
+    *   The logic now uses a shorter, more responsive 15-second idle timeout for saving operational state (frequency, band), 
+		while menu setting changes are saved instantly upon exit.
+    *   This dual-path approach ensures both predictable behavior for user settings and better data integrity for tuning actions, 
+		all while protecting the EEPROM from excessive wear.
+	
+	
+------------------------------------------------------------------------------------------------------------
