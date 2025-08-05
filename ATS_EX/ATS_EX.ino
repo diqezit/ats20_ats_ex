@@ -764,16 +764,24 @@ static void doFrequencyTuneSSB() {
     }
 }
 
-// prepare mode switch by storing bandwidth and handling initial state
+// Before saving state - normalize SSB frequency
+// This ensures seamless frequency transition when switching from SSB to other modes like AM
+// Makes the main frequency value accurate for other modes to use
 static inline void prepareModeSwitch(int8_t& bw) {
     Band& current_band = g_bandList[g_bandIndex];
-    // store the bandwidth index to carry it over between am/ssb
     bw = (g_currentMode == AM) ? current_band.bwIdxAM : current_band.bwIdxSSB;
-    syncActiveStateToBand();
 
+    if (isSSB()) {
+        int16_t khz_from_bfo = g_currentBFO / HZ_PER_KHZ;
+        g_currentFrequency += khz_from_bfo;
+        g_currentBFO %= HZ_PER_KHZ;
+    }
+
+    syncActiveStateToBand();
     markStateAsDirty();
 
-    if (g_currentMode == CW) setAmpState(false);
+    if (g_currentMode == CW)
+        setAmpState(false);
 }
 
 // mode cycling logic (AM -> SSB -> CW -> AM)
@@ -797,7 +805,7 @@ static inline void performModeCycle(int8_t bw) {
         g_currentMode = g_lastSsbMode; // restore sideband
         loadSSBPatch();
         current_band.bwIdxSSB = bw;
-        g_processFreqChange = false;   // prevent frequency jump
+        // g_processFreqChange = false;   // prevent frequency jump
         break;
     }
 }
