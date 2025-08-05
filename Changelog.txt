@@ -840,12 +840,19 @@ This version introduces the ability to save your favorite FM stations.
 
 ### **MOD_NO_RDS v6.1.2**
 
-`ATS_EX.ino`
+`ATS_EX.ino`, `Memory.h`
 
 *   **[Critical Fix] Stable Frequency Across Mode Switches (AM/SSB):**
     *   Fixed a critical bug causing the frequency to jump to an old value when switching from SSB to AM. 
 		Was that BFO tuning adjustments were not being applied to the main frequency before saving.
     *   The fix ensures internal state is normalized before a mode switch, receiver stays on the exact tuned frequency.
 
+*   **[Fix] I2C Stability**:
+	*   The I2C bus speed, previously set to 800kHz for faster mode switching, has been adjusted to default 500kHz.
+	*   This change preventing potential device lock-ups in SSB/CW mode activation in some IC.
+
+*   **[Fix] AM Audio on Startup Restored:**
+	*   Fixed muted AM audio on startup by correcting the initialization sequence, 
+		ensuring user settings from EEPROM are loaded *before* the radio chip is configured.
 
 ------------------------------------------------------------------------------------------------------------

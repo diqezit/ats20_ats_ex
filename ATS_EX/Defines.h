@@ -258,16 +258,21 @@ constexpr uint16_t AM_SOFT_MUTE_SLOPE_RECOMMENDED = 2;
 // Defines max BFO deviation before it rolls over into main frequency for seamless tuning
 constexpr int32_t BFO_ROLLOVER_MAX_HZ = 13000;
 constexpr int16_t HZ_PER_KHZ = 1000;
+
 // Standard FM channel spacing for most regions
 constexpr uint8_t FM_SEEK_SPACING_KHZ = 10;
+
 // Short delay after setting frequency to allow hardware to settle before seeking
 constexpr uint16_t DEFAULT_SEEK_DELAY_MS = 30;
+
 // Default to 5kHz for AM seek if user-selected step is not hardware-supported
 constexpr uint8_t AM_SEEK_STEP_DEFAULT_KHZ = 5;
 constexpr uint8_t AM_SEEK_STEP_MAX_KHZ = 10;
+
 // See AN332 for property details
 constexpr uint16_t FM_SEEK_TUNE_SNR_THRESHOLD_PROP = 0x1403;
 constexpr uint16_t FM_SEEK_TUNE_RSSI_THRESHOLD_PROP = 0x1404;
+
 // Lower thresholds help find weaker stations during seek
 constexpr uint8_t  FM_SEEK_SNR_THRESHOLD_VAL = 2;               // Default: 3
 constexpr uint8_t  FM_SEEK_RSSI_THRESHOLD_VAL = 5;              // Default: 20
@@ -278,14 +283,19 @@ constexpr uint8_t  AM_SEEK_RSSI_THRESHOLD_VAL = 10;             // Default: 25
 
 // --- SSB/CW Parameters ---
 
-// Overclocked I2C speed for faster SSB patch loading
-constexpr int32_t I2C_SSB_PATCH_SPEED_HZ = 800000;
+// I2C speed for SSB patch loading
+// Higher speeds (500-800kHz) can shorten patch load time, but speeds above
+// 500kHz have caused lock-ups on some chips. 500kHz is a safe default
+constexpr int32_t I2C_SSB_PATCH_SPEED_HZ = 500000;
+
 // Brief pause after power-up command before sending patch data
 constexpr uint16_t PATCH_LOAD_DELAY_MS = 50;
 constexpr uint8_t SSB_BASE_STEP_KHZ = 1;
+
 // Values to toggle the Si4735 internal DSP Automatic Frequency Control
 constexpr int8_t  SSB_DSP_AFC_OFF = 1;
 constexpr int8_t  SSB_DSP_AFC_ON = 0;
+
 // Values to control AVC behavior when DSP AFC (Sync) is active
 constexpr int8_t  SSB_AVC_DIVIDER_SYNC_OFF = 0;
 constexpr int8_t  SSB_AVC_DIVIDER_SYNC_ON = 3;
@@ -294,6 +304,7 @@ constexpr int8_t  SSB_AVC_DIVIDER_SYNC_ON = 3;
 
 // Special value to indicate RSSI is not currently valid or available
 constexpr uint8_t INVALID_RSSI_VALUE = 255;
+
 // FM de-emphasis values for different broadcast regions
 constexpr int8_t  DEEMPHASIS_50_US = 1;                         // Europe etc
 constexpr int8_t  DEEMPHASIS_75_US = 2;                         // Americas
@@ -303,6 +314,7 @@ constexpr int8_t  DEEMPHASIS_75_US = 2;                         // Americas
 // Max hardware attenuation levels for FM and AM modes
 constexpr uint8_t MAX_ATTENUATION_FM_DB = 26;
 constexpr uint8_t MAX_ATTENUATION_AM_DB = 37;
+
 // Chip attenuation index is user value minus one
 constexpr uint8_t AGC_ATT_INDEX_OFFSET = 1;
 
@@ -310,6 +322,7 @@ constexpr uint8_t AGC_ATT_INDEX_OFFSET = 1;
 
 // Max attenuation level for soft mute feature
 constexpr uint8_t SOFT_MUTE_MAX_ATTENUATION = 32;
+
 // Max SNR threshold for soft mute activation
 constexpr uint8_t SOFT_MUTE_MAX_SNR_THRESHOLD = 63;
 
@@ -324,6 +337,7 @@ constexpr uint8_t AVC_MAX_GAIN_MAX = 90;
 // Range for user BFO calibration to compensate for crystal inaccuracies
 constexpr int8_t  BFO_CALIBRATION_MIN = -25;            // in 100Hz steps
 constexpr int8_t  BFO_CALIBRATION_MAX = 25;             // in 100Hz steps
+
 // Multiplier to convert BFO setting param to Hz
 constexpr int16_t BFO_CALIBRATION_MULTIPLIER = 100;
 
@@ -331,6 +345,7 @@ constexpr int16_t BFO_CALIBRATION_MULTIPLIER = 100;
 
 // Defines the number of available cutoff filter options
 constexpr int8_t CUTOFF_FILTER_MAX_VALUE = 2;
+
 // These are API values for setSSBSidebandCutoffFilter
 constexpr int8_t CUTOFF_FILTER_AUDIO_TAPERED = 1;
 constexpr int8_t CUTOFF_FILTER_HISS_REDUCED = 0;        // The more aggressive filter value
@@ -339,8 +354,10 @@ constexpr int8_t CUTOFF_FILTER_HISS_REDUCED = 0;        // The more aggressive f
 
 // Defines the 0-9 range for the brightness setting
 constexpr uint8_t BRIGHTNESS_MAX_LEVEL = 9;
+
 // Defines the number of available display-off timer settings
 constexpr uint8_t DISPLAY_OFF_TIMER_MAX_LEVEL = 4;
+
 // CPU prescaler for deep power save on display timeout
 constexpr uint8_t CPU_PRESCALER_DEEP_SLEEP = 3;         // Corresponds to 2 MHz
 
@@ -348,14 +365,19 @@ constexpr uint8_t CPU_PRESCALER_DEEP_SLEEP = 3;         // Corresponds to 2 MHz
 
 // ADC threshold to detect if battery measurement pin is connected
 constexpr uint16_t ADC_CONNECTED_THRESHOLD = 300;
+
 // Delay for system initialization to allow components to stabilize
 constexpr uint16_t SYSTEM_INIT_DELAY_MS = 500;
+
 // Common tone frequency for CW reception
 const int16_t CW_PITCH_OFFSET_HZ = 500;
+
 // Frequency shift needed to keep CW tone constant when switching sidebands
 constexpr uint16_t CW_SIDEBAND_COMPENSATION_KHZ = (2 * CW_PITCH_OFFSET_HZ) / HZ_PER_KHZ;
+
 // Simple math to toggle between LSB (1) and USB (2)
 constexpr int8_t   SIDEBAND_TOGGLE_LSB_USB = 3;
+
 // Formula components to calculate direction (-1 for LSB, +1 for USB) from mode
 constexpr int8_t   SIDEBAND_DIRECTION_MULTIPLIER = 2;
 constexpr int8_t   SIDEBAND_DIRECTION_OFFSET = 3;
