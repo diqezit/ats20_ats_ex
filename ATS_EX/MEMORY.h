@@ -210,7 +210,7 @@ static void readAllReceiverInformation() {
         // Now both RAM arrays are pristine and consistent, save them
         saveAllReceiverInformation(true);
         loadActiveStateFromBand();
-        applyBandConfiguration();
+        // applyBandConfiguration();
         return;
     }
 
@@ -250,6 +250,6 @@ static void readAllReceiverInformation() {
     g_previousFrequency = g_currentFrequency;
     if (isSSB()) loadSSBPatch();
 
-    applyBandConfiguration();
+    // applyBandConfiguration();
     g_lastSavedFrequency = g_currentFrequency;
 }
