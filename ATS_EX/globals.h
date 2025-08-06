@@ -95,6 +95,7 @@ enum SettingsIndex {
     FMAudioProfile, // FMP (FM Audio Profile for Speaker EQ)
     AMNoiseBlanker, // ANB (AM Noise Blanker)
     ForceMono,      // FMO (Force Mono Reception)
+    SQL,            // SQL (Squelch)
 
     SETTINGS_MAX
 };
@@ -200,6 +201,7 @@ void doFMAudioProfile(int8_t v = 0);
 void doAMNoiseBlanker(int8_t v = 0);
 void doForceMono(int8_t v = 0);
 void doBatteryPinSelect(int8_t v = 0);
+void doSquelch(int8_t v);
 void showSplashScreen();
 void showStatus(bool cleanFreq = false);
 void updateAndShowBattery(bool forceShow);
@@ -270,6 +272,7 @@ bool g_voltagePinConnnected;
 bool g_ssbLoaded;
 bool g_stereoStatus;
 bool autoDisplayOff;
+bool g_squelchCutoff = false;
 bool g_displayOn = true;
 volatile bool g_seekStop;    // violatile important here!
 uint32_t g_lastAdjustmentTime;
@@ -388,6 +391,7 @@ SettingsItem g_Settings[] =
     { "FMP", 1,  SettingType::Switch,     doFMAudioProfile    },
     { "ANB", 0,  SettingType::Switch,     doAMNoiseBlanker    },
     { "FMO", 0,  SettingType::Switch,     doForceMono         },
+    { "SQL", 0,  SettingType::Num,        doSquelch           },
 
 };
 
@@ -420,6 +424,7 @@ const PROGMEM SwitchMapEntry switch_setting_map[] = {
     [FMAudioProfile] = {1, false},
     [AMNoiseBlanker] = {1, false},
     [ForceMono] = {2, true},
+    [SQL] = {0, false},
 };
 
 // -------------------------------------------------------------------------------------------------

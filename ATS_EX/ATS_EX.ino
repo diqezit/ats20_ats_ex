@@ -136,6 +136,18 @@ static inline void __attribute__((always_inline)) setAmpState(bool on) {
     }
 }
 
+// Manages the audio mute state based on the user-defined Squelch level and current RSSI
+// The function compares the signal strength against the SQL threshold (for non-FM modes)
+static void handleSquelch(void) {
+    uint8_t lvl = g_Settings[SQL].param;
+    bool cut = (lvl && g_currentMode == AM && g_signalQualityValue < lvl);
+
+    if (cut != g_squelchCutoff) {
+        g_si4735.setAudioMute(cut);
+        g_squelchCutoff = cut;
+    }
+}
+
 // AGC hardware control
 static inline void setAgcHardware(int8_t att_val) {
     bool disableAgc = att_val > 0;
@@ -444,8 +456,13 @@ static void applyBandConfiguration(bool extraSSBReset) {
     bool isFmBand = (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE);
     bool switchingBetweenFMandAM = (g_currentMode == FM) != isFmBand;
 
-    if (switchingBetweenFMandAM)
-        setAmpState(false);
+    // Forcefully disable Squelch if it was active before changing the configuration
+    if (g_squelchCutoff) {
+        g_si4735.setAudioMute(false);
+        g_squelchCutoff = false;
+    }
+
+    if (switchingBetweenFMandAM) setAmpState(false);
 
     loadActiveStateFromBand();
 
@@ -477,8 +494,7 @@ static void applyBandConfiguration(bool extraSSBReset) {
 
     // resetEepromDelay() // redundant
 
-    if (switchingBetweenFMandAM)
-        setAmpState(true);
+    if (switchingBetweenFMandAM) setAmpState(true);
 
     g_previousFrequency = g_currentFrequency;
 }
@@ -1247,6 +1263,20 @@ void doAMNoiseBlanker(int8_t v) {
     if (g_currentMode != FM) applyAMNoiseBlankerSettings();
 }
 
+// Settings: Squelch Threshold
+// Handles user input for the Squelch (SQL) setting in the menu
+// Adjusts the RSSI threshold from 0 (OFF) to 60
+// As a safety measure if the squelch is manually disabled (set to 0) while it is actively muting the audio,
+// this function immediately un-mutes receiver
+void doSquelch(int8_t v) {
+    doSwitchLogic(g_Settings[SQL].param, 0, SQUELCH_MAX_LEVEL, v);
+
+    if (g_Settings[SQL].param == 0 && g_squelchCutoff) {
+        g_si4735.setAudioMute(false);
+        g_squelchCutoff = false;
+    }
+}
+
 // ==========================================
 // ===== PERIODIC & TIMED TASKS =============
 // ==========================================
@@ -1287,39 +1317,39 @@ static void handleDelayedFrequencyUpdate() {
     performFrequencyUpdateCheck(now);
 }
 
-// designated path for polling AM signal strength
-// get RSSI in AM mode using non-interrupting "soft update"
-static inline uint8_t getAmSignalValue() {
-    if (g_Settings[RSSI_AM_Off].param == 1)
-        return INVALID_RSSI_VALUE;
+// Fetches signal quality (RSSI) using mode-specific commands
+// SSB/CW is unsupported by this patch query method
+static uint8_t getSignalQuality() {
+    switch (g_currentMode) {
+    case FM:
+        g_si4735.getCurrentReceivedSignalQuality(1);
+        return g_si4735.getCurrentRSSI();
 
-    // 1sec quiet after interaction
-    // prevents RSSI from flickering while the encoder is actively being turned
-    if (((uint16_t)(millis() / 1000) - g_lastUserActivityTime < 1))
-        return g_signalQualityValue;
+    case AM:
+        // Return last value if disabled or user is actively tuning
+        if (g_Settings[RSSI_AM_Off].param == 1 || ((uint16_t)(millis() / 1000) - g_lastUserActivityTime < 1)) {
+            return g_signalQualityValue;
+        }
+        // Soft update prevents audio clicks
+        g_si4735.softAmRssiUpdate();
+        return g_si4735.getReceivedSignalStrengthIndicator();
 
-    // perform "soft update" after checks passed.. 
-    g_si4735.softAmRssiUpdate();
-    return g_si4735.getReceivedSignalStrengthIndicator();
+    case LSB: case USB: case CW:
+    default: return INVALID_RSSI_VALUE;
+    }
 }
 
-static inline uint8_t getFmSignalValue() {
-    g_si4735.getCurrentReceivedSignalQuality(1);
-    return g_si4735.getCurrentRSSI();
-}
-
-// logic for updating the signal quality indicator RSSI value
+// Polls for new signal quality and updates UI only on change
+// also triggers squelch logic after each poll
 static inline void updateSignalQuality() {
-    uint8_t new_value = (g_currentMode == FM)
-        ? getFmSignalValue()
-        : ((g_currentMode == AM)
-            ? getAmSignalValue()
-            : INVALID_RSSI_VALUE);
+    uint8_t new_value = getSignalQuality();
 
     if (g_signalQualityValue != new_value) {
         g_signalQualityValue = new_value;
         showSignalQuality();
     }
+
+    handleSquelch();
 }
 
 // helper for FM stereo indicator logic
