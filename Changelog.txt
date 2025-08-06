@@ -874,4 +874,13 @@ This version introduces the ability to save your favorite FM stations.
 ------------------------------------------------------------------------------------------------------------
 
 
+### **MOD_NO_RDS v6.2.1**
+
+`ATS_EX.ino`, `Defines.h`
+
+*   **[Fix] Corrected CW Auto-Compensation Logic:**
+    *   Fixed a bug causing a 1 kHz frequency drift when switching CW sidebands (CW-L/CW-U).
+    *   The issue was caused by a conflict between manual BFO adjustments and the automatic pitch offset.
+	
+------------------------------------------------------------------------------------------------------------
 
