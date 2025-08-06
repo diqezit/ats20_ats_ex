@@ -157,21 +157,19 @@ static inline void setAgcHardware(int8_t att_val) {
     g_si4735.setAutomaticGainControl(disableAgc, agcNdx);
 }
 
-// Corrected CW BFO offset logic to match standard radio behavior
-// The Si4735 IC requires an inverted BFO value, so the math is reversed here to compensate
-// To get a positive BFO offset for USB, the value must be negative before the final inversion
-// See: https://github.com/goshante/ats20_ats_ex/issues/42#issuecomment-3015265184
+// Sets BFO with user calibration and automatic CW pitch offset
+// Si4735 requires an inverted BFO value for sideband selection
 static void updateBFO() {
 
-    int16_t finalBfo = g_currentBFO + (g_Settings[BFO].param * BFO_CALIBRATION_MULTIPLIER);
+    // Determine automatic CW offset - USB uses a negative offset / LSB a positive one
+    int16_t cwOffset = (g_currentMode == CW)
+        ? ((g_lastCWMode == USB) ? -CW_PITCH_OFFSET_HZ : CW_PITCH_OFFSET_HZ)
+        : 0;
 
-    if (g_currentMode == CW) {
-        if (g_lastCWMode == USB) { // 1 = USB
-            finalBfo -= CW_PITCH_OFFSET_HZ;
-        } else { // 0 = LSB
-            finalBfo += CW_PITCH_OFFSET_HZ;
-        }
-    }
+    // Combine user manual tuning + calibration and any automatic CW offset
+    int16_t finalBfo = g_currentBFO
+        + (g_Settings[BFO].param * BFO_CALIBRATION_MULTIPLIER)
+        + cwOffset;
 
     g_si4735.setSSBBfo(finalBfo * -1);
 }
@@ -800,15 +798,16 @@ static inline void prepareModeSwitch(int8_t& bw) {
         setAmpState(false);
 }
 
-// mode cycling logic (AM -> SSB -> CW -> AM)
+// Manages modulation state transitions AM -> SSB -> CW -> AM
 static inline void performModeCycle(int8_t bw) {
     Band& current_band = g_bandList[g_bandIndex];
 
     switch (g_currentMode) {
     case LSB:
     case USB:
-        g_lastSsbMode = g_currentMode; // remember sideband
+        g_lastSsbMode = g_currentMode;
         g_currentMode = CW;
+        g_currentBFO = 0; // Reset BFO for a clean start in CW
         break;
 
     case CW:
@@ -818,10 +817,9 @@ static inline void performModeCycle(int8_t bw) {
         break;
 
     case AM:
-        g_currentMode = g_lastSsbMode; // restore sideband
+        g_currentMode = g_lastSsbMode;
         loadSSBPatch();
         current_band.bwIdxSSB = bw;
-        // g_processFreqChange = false;   // prevent frequency jump
         break;
     }
 }
@@ -1201,23 +1199,26 @@ void doScanSwitch(int8_t v) {
     toggleSetting(ScanSwitch);
 }
 
-//Settings: CW sideband mode switch (LSB/USB)
-// provides a seamless sideband switch by calculating the required
-// frequency shift to keep the audible CW tone stable
-static inline void doCWSwitch() {
+// Toggles CW sideband between LSB and USB
+// It re-issues the tune command with the new sideband to avoid audio gaps
+// The BFO is then reapplied, triggering auto-compensation in updateBFO
+static void doCWSwitch() {
     if (g_currentMode != CW) return;
 
-    uint16_t original_freq = g_currentFrequency;
-
-    // Toggles g_lastCWMode between LSB (1) and USB (2)
     g_lastCWMode = SIDEBAND_TOGGLE_LSB_USB - g_lastCWMode;
-    // Calculates direction: -1 for LSB (1), +1 for USB (2)
-    int8_t direction = (g_lastCWMode << 1) - 3; // (mode * 2) - 3
 
-    g_currentFrequency += direction * CW_SIDEBAND_COMPENSATION_KHZ;
-    g_si4735.setFrequency(g_currentFrequency);
+    // The Si4735 requires re-sending the TUNE command to change sideband
+    // preventing audio gaps
+    const Band& current_band = g_bandList[g_bandIndex];
+    g_si4735.setSSB(
+        current_band.minimumFreq,
+        current_band.maximumFreq,
+        g_currentFrequency,
+        1, // Hardware step
+        g_lastCWMode
+    );
+
     updateBFO();
-    g_currentFrequency = original_freq;
     showFrequency(true);
     updateStereoIndicator();
 }

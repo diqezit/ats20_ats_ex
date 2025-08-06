@@ -51,7 +51,7 @@ constexpr auto EEPROM_FAVORITES_COUNT = 334;            // Size: 1.   End: 335.
 constexpr auto APP_VERSION = 62;
 
 // Centralizes user-facing strings on main screen
-#define APP_NAME_LINE1 F("ATS-20* V6.2")
+#define APP_NAME_LINE1 F("ATS-20* V6.2.1")
 
 // Behavior
 constexpr auto SAVE_ON_IDLE_TIMEOUT = 15000UL;          // 15 seconds
@@ -377,12 +377,6 @@ constexpr uint16_t SYSTEM_INIT_DELAY_MS = 500;
 // Common tone frequency for CW reception
 const int16_t CW_PITCH_OFFSET_HZ = 500;
 
-// Frequency shift needed to keep CW tone constant when switching sidebands
-constexpr uint16_t CW_SIDEBAND_COMPENSATION_KHZ = (2 * CW_PITCH_OFFSET_HZ) / HZ_PER_KHZ;
-
 // Simple math to toggle between LSB (1) and USB (2)
 constexpr int8_t   SIDEBAND_TOGGLE_LSB_USB = 3;
 
-// Formula components to calculate direction (-1 for LSB, +1 for USB) from mode
-constexpr int8_t   SIDEBAND_DIRECTION_MULTIPLIER = 2;
-constexpr int8_t   SIDEBAND_DIRECTION_OFFSET = 3;
