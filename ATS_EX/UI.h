@@ -591,6 +591,13 @@ static void SettingParamToUI(char* buf, uint8_t idx) {
     const auto& s = g_Settings[idx];
     int8_t param = s.param;
 
+    if (idx == SQL) {
+        if (param == 0) {
+            strcpy_P(buf, paramTexts[2]); // "OFF"
+            return;
+        }
+    }
+
     if (idx == SettingsIndex::BATT_PIN) {
         // LF - named constants in Battery.h for the UI strings
         strcpy_P(buf, (param == 1) ? BATT_PIN_NAME_ALT : BATT_PIN_NAME_DEFAULT);

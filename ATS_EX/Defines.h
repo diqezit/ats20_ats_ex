@@ -14,12 +14,12 @@
 //
 // 26 - 165      | 140 B    | 140 B    | 0 B     | EEPROM_BANDS_START             | State for all 28 bands (28 * 5 bytes)
 //
-// 176 - 196     | 21 B     | 21 B     | 0 B     | EEPROM_SETTINGS_START          | Global settings array `g_Settings` (21 items)
+// 176 - 197     | 22 B     | 22 B     | 0 B     | EEPROM_SETTINGS_START          | Global settings array `g_Settings` (22 items)
 //
-// 207 - 212     | 6 B      | 6 B      | 0 B     | EEPROM_MODE_SETTINGS_START     | Mode-dependent settings
+// 208 - 213     | 6 B      | 6 B      | 0 B     | EEPROM_MODE_SETTINGS_START     | Mode-dependent settings
 //
-// 223 - 322     | 100 B    | 100 B    | 0 B     | EEPROM_FAVORITES_START         | Unified favorite stations (20 * 5 bytes)
-// 333           | 1 B      | 1 B      | 0 B     | EEPROM_FAVORITES_COUNT         | Count of saved favorites
+// 224 - 323     | 100 B    | 100 B    | 0 B     | EEPROM_FAVORITES_START         | Unified favorite stations (20 * 5 bytes)
+// 334           | 1 B      | 1 B      | 0 B     | EEPROM_FAVORITES_COUNT         | Count of saved favorites
 // =================================================================================================
 
 // --- Core EEPROM Validation ---
@@ -34,24 +34,24 @@ constexpr auto EEPROM_VERSION_ADDRESS = 1;
 // BLOCK SIZES FOR CALCULATION:
 // ReceiverHeader:      6 bytes
 // BandStatePacked:     5 bytes (x28 bands = 140 bytes)
-// Settings:            21 bytes (SETTINGS_MAX = 21 items * 1 byte each)
+// Settings:            22 bytes (SETTINGS_MAX = 22 items * 1 byte each)
 // ModeSettings:        6 bytes (MODE_SETTINGS_COUNT * MODE_CONTEXT_COUNT = 3 * 2)
 // FavoriteStation:     5 bytes (x20 stations = 100 bytes)
 // FavoritesCount:      1 byte
 
 constexpr auto EEPROM_HEADER_START = 10;                // Size: 6.  End: 16.
 constexpr auto EEPROM_BANDS_START = 26;                 // Size: 140. End: 166.
-constexpr auto EEPROM_SETTINGS_START = 176;             // Size: 21.  End: 197.
-constexpr auto EEPROM_MODE_SETTINGS_START = 207;        // Size: 6.   End: 213.
-constexpr auto EEPROM_FAVORITES_START = 223;            // Size: 100. End: 323.
-constexpr auto EEPROM_FAVORITES_COUNT = 333;            // Size: 1.   End: 334.
+constexpr auto EEPROM_SETTINGS_START = 176;             // Size: 22.  End: 198.
+constexpr auto EEPROM_MODE_SETTINGS_START = 208;        // Size: 6.   End: 214.
+constexpr auto EEPROM_FAVORITES_START = 224;            // Size: 100. End: 324.
+constexpr auto EEPROM_FAVORITES_COUNT = 334;            // Size: 1.   End: 335.
 
 
 // Increment APP_VERSION to force EEPROM reset due to layout changes
-constexpr auto APP_VERSION = 61;
+constexpr auto APP_VERSION = 62;
 
 // Centralizes user-facing strings on main screen
-#define APP_NAME_LINE1 F("ATS-20* V6.1.2")
+#define APP_NAME_LINE1 F("ATS-20* V6.2")
 
 // Behavior
 constexpr auto SAVE_ON_IDLE_TIMEOUT = 15000UL;          // 15 seconds
@@ -325,6 +325,11 @@ constexpr uint8_t SOFT_MUTE_MAX_ATTENUATION = 32;
 
 // Max SNR threshold for soft mute activation
 constexpr uint8_t SOFT_MUTE_MAX_SNR_THRESHOLD = 63;
+
+// --- Squelch Settings ---
+
+// Defines the maximum RSSI threshold for the Squelch setting
+constexpr uint8_t SQUELCH_MAX_LEVEL = 60;
 
 // --- AVC Settings ---
 

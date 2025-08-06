@@ -856,3 +856,22 @@ This version introduces the ability to save your favorite FM stations.
 		ensuring user settings from EEPROM are loaded *before* the radio chip is configured.
 
 ------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v6.2**
+
+`ATS_EX.ino`, `Defines.h`, `Globals.h`, `UI.h`
+
+*   **[New] Adjustable Squelch for AM:**
+    *   Added a new "Squelch" (`SQL`) setting to the menu, allowing users to set an RSSI threshold from `OFF` to `60`.
+    *   When the signal strength drops below the set level, audio is automatically muted. This feature is disabled in FM mode.
+    *   The function uses the Si4735's internal hardware mute, ensuring it works with both the speaker and headphones.
+    *   The EEPROM memory map has been updated to correctly save the new setting.
+
+*   **[Improved] Signal Polling Logic:**
+    *   Centralized all RSSI retrieval logic into a single getSignalQuality() function. 
+
+------------------------------------------------------------------------------------------------------------
+
+
+
