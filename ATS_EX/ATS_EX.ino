@@ -792,13 +792,16 @@ static void doFrequencyTuneSSB() {
 
 // Prepare AM <-> SSB/CW switch
 // Before saving state - normalize SSB frequency
-// This ensures seamless frequency transition when switching from SSB to other modes like AM
-// Makes the main frequency value accurate for other modes to use
+// Ensures seamless frequency transition when switching from SSB to other modes like AM
+// Save BFO to cache ONLY when exiting LSB/USB (not CW)
 static inline void prepareModeSwitch(int8_t& bw) {
     Band& band = g_bandList[g_bandIndex];
 
     bw = (g_currentMode == AM) ? band.bwIdxAM : band.bwIdxSSB;
 
+    const uint8_t mode_before = g_currentMode;
+
+    // Normalization (gluing whole kHz and remainder in BFO) for SSB/CW
     if (isSSB()) {
         int16_t b = g_currentBFO;
         int16_t k = (b >= 0) ? b / HZ_PER_KHZ : -((-b + HZ_PER_KHZ - 1) / HZ_PER_KHZ);
@@ -808,8 +811,7 @@ static inline void prepareModeSwitch(int8_t& bw) {
         if (f < band.minimumFreq) {
             f = band.minimumFreq;
             b = 0;
-        }
-        else if (f > band.maximumFreq) {
+        } else if (f > band.maximumFreq) {
             f = band.maximumFreq;
             b = 0;
         }
@@ -817,6 +819,10 @@ static inline void prepareModeSwitch(int8_t& bw) {
         g_currentFrequency = f;
         g_currentBFO = b;
     }
+
+    // Refresh the cache only when exiting LSB/USB
+    if (mode_before == LSB || mode_before == USB)
+        g_savedSsbBfo[g_bandIndex] = g_currentBFO;
 
     syncActiveStateToBand();
     markStateAsDirty();
@@ -826,6 +832,7 @@ static inline void prepareModeSwitch(int8_t& bw) {
 }
 
 // Manages modulation state transitions AM -> SSB -> CW -> AM
+// When returning from AM to SSB, restore the saved BFO from the cache
 static inline void performModeCycle(int8_t bw) {
     Band& current_band = g_bandList[g_bandIndex];
 
@@ -847,6 +854,7 @@ static inline void performModeCycle(int8_t bw) {
         g_currentMode = g_lastSsbMode;
         loadSSBPatch();
         current_band.bwIdxSSB = bw;
+        g_currentBFO = g_savedSsbBfo[g_bandIndex];
         break;
     }
 }

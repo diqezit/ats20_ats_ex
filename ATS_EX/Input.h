@@ -7,6 +7,11 @@
 // Handles rotary encoder, button presses, and command mode logic.
 // ======================================================================
 
+// throttle for BAND long-press repeat to avoid too fast cycling
+// increase to slow down more (e.g. 240..320 ms gives ~2–4x slower)
+// safe since interval << 65535 ms
+static constexpr uint16_t BAND_LP_REPEAT_MS = 240;
+
 // ==========================================
 // =============== INPUT: HELPERS ===========
 // ==========================================
@@ -96,13 +101,23 @@ static uint8_t simpleEvent(uint8_t event, uint8_t pin) {
 }
 
 // Allow continuous band cycling on long press only if a delay is configured
-// prevents accidental changes
+// throttle long-press repeat rate to avoid overshoot when holding BAND+/BAND−
 static uint8_t bandEvent(uint8_t event, uint8_t pin) {
 #if (0 != BAND_DELAY)
-    if (BUTTONEVENT_ISLONGPRESS(event)
-        && !g_settingsActive) {
+
+    static uint16_t lastRepeatUp = 0;
+    static uint16_t lastRepeatDn = 0;
+
+    if (BUTTONEVENT_ISLONGPRESS(event) && !g_settingsActive) {
         if (BUTTONEVENT_LONGPRESSDONE != event) {
-            bandSwitch(pin == BAND_BUTTON);
+            uint16_t now16 = (uint16_t)millis();
+            uint16_t& last = (pin == BAND_BUTTON) ? lastRepeatUp : lastRepeatDn;
+
+            // fire bandSwitch only if repeat interval elapsed
+            if ((uint16_t)(now16 - last) >= BAND_LP_REPEAT_MS) {
+                bandSwitch(pin == BAND_BUTTON);
+                last = now16;
+            }
         }
     }
 #else

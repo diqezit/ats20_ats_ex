@@ -314,6 +314,7 @@ uint8_t g_muteVolume;
 uint8_t g_volume = DEFAULT_VOLUME;
 volatile uint8_t g_currentMode = FM;
 int g_currentBFO;
+int16_t g_savedSsbBfo[28] = { 0 };      // cache of the last SSB BFO for each band (RAM, without EEPROM)
 extern uint8_t g_stableBatteryPercent;  // store table percentage for display
 uint8_t g_lastSsbMode = LSB;            // last used sideband (LSB or USB)
 uint8_t g_lastCWMode = LSB;             // last used CW sideband (LSB/USB)

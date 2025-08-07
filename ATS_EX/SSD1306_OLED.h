@@ -10,7 +10,7 @@
     (!) Minimal features for only main functionality with ATS_EX receiver
 
     Manual generation of segments 14x32 resolution (7-segment display) use SSD1306 minimal library
-    By diqezit v1.6
+    By diqezit v1.7
     Charset: '.', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
 
     My repos: https://github.com/diqezit/TestDisplay
@@ -34,7 +34,7 @@
 #ifndef GyverOLED_h
 #define GyverOLED_h
 
-#include <microWire.h> 
+#include <microWire.h>
 #include "CustomFonts.h"
 
 // ===== Constants =====
@@ -44,9 +44,9 @@
 // ===== Seven Segment Digit Dimensions =====
 // These constants define the canvas size for the large frequency digits
 // Changing these requires redesigning the segment blueprints in the 'segs' array
-const auto SEVEN_SEG_DIGIT_WIDTH = 14;
-const auto SEVEN_SEG_DIGIT_HEIGHT = 32;
-const auto SEVEN_SEG_DOT_WIDTH = 4;
+constexpr uint8_t SEVEN_SEG_DIGIT_WIDTH = 14;
+constexpr uint8_t SEVEN_SEG_DIGIT_HEIGHT = 32;
+constexpr uint8_t SEVEN_SEG_DOT_WIDTH = 4;
 
 // ===== Backend Constants =====
 #define OLED_WIDTH 128
@@ -112,7 +112,9 @@ public:
         Wire.begin();
 
         beginCommand();
-        for (uint8_t i = 0; i < 15; i++) sendByte(pgm_read_byte(&_oled_init[i]));
+        for (uint8_t i = 0; i < sizeof(_oled_init); i++) {
+            sendByte(pgm_read_byte(&_oled_init[i]));
+        }
         endTransm();
         beginCommand();
         sendByte(OLED_SETCOMPINS);
@@ -251,39 +253,47 @@ public:
         endTransm();
     }
 
-    // Generates seven-segment digit by rendering into a local buffer and sending it to the display.
-    // Dimensions are controlled by the SEVEN_SEG_... constants at the top of this file.
+    // render one seven‑segment glyph into a small local buffer and push to the panel
+    // buffer geometry comes from SEVEN_SEG_* and SEG_* constants
+    // clear only the used slice and reuse static storage to keep stack small
     void drawDigit(char c, int px, int py) {
         if ((c < '0' || c > '9') && (c != '.')) return;
 
-        // Use predefined constants for dimensions
-        uint8_t digitW = (c == '.') ? SEVEN_SEG_DOT_WIDTH : SEVEN_SEG_DIGIT_WIDTH;
-        uint8_t digitH = SEVEN_SEG_DIGIT_HEIGHT;
+        // pick width for dot or full digit, height is fixed by design
+        const uint8_t digitW = (c == '.') ? SEVEN_SEG_DOT_WIDTH : SEVEN_SEG_DIGIT_WIDTH;
+        const uint8_t digitH = SEVEN_SEG_DIGIT_HEIGHT;
 
-        uint8_t pages = (digitH + 7) / 8;
-        unsigned char localBuf[digitW * pages] = { 0 };
+        // avoid VLA and heap - reuse
+        static uint8_t localBuf[SEG_BUF_SZ];
 
+        // clear only the bytes we will send
+        const uint16_t used = (uint16_t)digitW * SEG_PAGES;
+        for (uint16_t i = 0; i < used; i++) localBuf[i] = 0;
+
+        // pick segment mask for this glyph from PROGMEM
         uint8_t index = (c == '.') ? 10 : (c - '0');
         uint8_t mask = pgm_read_byte(&symbolMasks[index]);
 
+        // draw enabled segments into the local buffer
         for (uint8_t b = 0; b < 8; b++) {
             if (mask & (1 << b)) {
-                // more compact read from PROGMEM
+                // read segment blueprint from PROGMEM
                 const SegDef* seg_ptr = &segs[b];
                 uint8_t s_x = pgm_read_byte((const uint8_t*)seg_ptr + offsetof(SegDef, x));
                 uint8_t s_y = pgm_read_byte((const uint8_t*)seg_ptr + offsetof(SegDef, y));
                 uint8_t s_len = pgm_read_byte((const uint8_t*)seg_ptr + offsetof(SegDef, len));
-                uint8_t s_isHoriz = pgm_read_byte((const uint8_t*)seg_ptr + offsetof(SegDef, isHoriz));
+                uint8_t isHoriz = pgm_read_byte((const uint8_t*)seg_ptr + offsetof(SegDef, isHoriz));
 
-                if (s_isHoriz) {
-                    draw_horizontal_line(localBuf, s_x, s_y, s_len, pages);
+                // 2 px thick strokes
+                if (isHoriz) {
+                    draw_horizontal_line(localBuf, s_x, s_y, s_len, SEG_PAGES);
                 } else {
-                    draw_vertical_line(localBuf, s_x, s_y, s_len, pages);
+                    draw_vertical_line(localBuf, s_x, s_y, s_len, SEG_PAGES);
                 }
             }
         }
 
-        partialUpdate(px, py, digitW, digitH, localBuf);  // Send buffer
+        partialUpdate(px, py, digitW, digitH, localBuf); // push prepared window to display
     }
 
     // ===== System Functions =====
@@ -292,7 +302,7 @@ public:
     void fill(uint8_t data) {
         setWindow(0, 0, _maxX, _maxRow);
         beginData();
-        for (int i = 0; i < 1024; i++) sendByte(data);
+        for (uint16_t i = 0; i < SCREEN_BYTES; i++) sendByte(data);
         endTransm();
         setCursorXY(_x, _y);
     }
@@ -301,7 +311,7 @@ public:
     void sendByte(uint8_t data) {
         Wire.write(data);
         _writes++;
-        if (_writes >= 16) {
+        if (_writes >= I2C_BATCH) {
             endTransm();
             beginData();
         }
@@ -332,12 +342,6 @@ public:
         sendByte(constrain(y0, 0, _maxRow));
         sendByte(constrain(y1, 0, _maxRow));
         endTransm();
-    }
-
-    // Configures window with vertical shift for pixel-aligned drawing
-    void setWindowShift(int x0, int y0, int sizeX, int sizeY) {
-        _shift = y0 & 0b111;
-        setWindow(x0, (y0 >> 3), x0 + sizeX, (y0 + sizeY - 1) >> 3);
     }
 
     // Starts I2C transmission in data mode
@@ -388,9 +392,16 @@ public:
     bool _invState = 0;
     uint8_t _scaleX = 1, _scaleY = 8;
     int _x = 0, _y = 0;
-    uint8_t _shift = 0;
     uint8_t _writes = 0;
 
+private:
+    // derived constants for seven-seg drawing and transfers
+    static constexpr uint8_t SEG_PAGES = (SEVEN_SEG_DIGIT_HEIGHT + 7) / 8;
+    static constexpr uint8_t SEG_MAX_W = SEVEN_SEG_DIGIT_WIDTH;
+    static constexpr uint16_t SEG_BUF_SZ = SEG_MAX_W * SEG_PAGES;
+
+    static constexpr uint8_t I2C_BATCH = 16;
+    static constexpr uint16_t SCREEN_BYTES = BUFSIZE_128x64; // full screen size
 };
 
 // ===== Static Member Definitions (outside class for linkage) =====
@@ -427,14 +438,14 @@ const uint8_t GyverOLED<_TYPE, _BUFF>::symbolMasks[11] PROGMEM = {
 
 template <int _TYPE, int _BUFF>
 const typename GyverOLED<_TYPE, _BUFF>::SegDef GyverOLED<_TYPE, _BUFF>::segs[8] PROGMEM = {
-    {2, 0, 10, 1},    // A
-    {11, 2, 12, 0},   // B
-    {11, 17, 12, 0},  // C
-    {2, 30, 10, 1},   // D
-    {0, 17, 12, 0},   // E
-    {0, 2, 12, 0},    // F
-    {2, 15, 10, 1},   // G
-    {1, 30, 2, 1}     // Dot
+    {  1,  0, 12, 1 },  // A  top
+    { 12,  1, 15, 0 },  // B  upper right
+    { 12, 16, 15, 0 },  // C  lower right
+    {  1, 30, 12, 1 },  // D  bottom
+    {  0, 16, 15, 0 },  // E  lower left
+    {  0,  1, 15, 0 },  // F  upper left
+    {  1, 15, 12, 1 },  // G  middle
+    {  1, 30,  2, 1 }   // Dot
 };
 
 #endif
