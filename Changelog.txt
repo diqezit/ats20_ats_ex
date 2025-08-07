@@ -909,3 +909,29 @@ This version introduces the ability to save your favorite FM stations.
 	removed 1 kHz rounding and rollback, clamped at band edges in `prepareModeSwitch`
 
 ------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v6.3.1**
+
+`SSD1306_OLED.h`, `Ui.h` , `Input.h`
+
+*   **[Fix] Display Driver Stability:**
+    *   Rewrote the `drawDigit` function to fix a critical bug causing random crashes. 
+		The previous use of a Variable Length Array (VLA) on the stack led to stack overflows during rapid tuning.
+    *   The new implementation uses a static buffer, eliminating stack corruption and making the display driver stable.
+	
+*   **[Improved] Enhanced UI Readability:** Reworked the seven-segment digit geometry and increased inter-digit spacing for
+	much cleaner and more legible frequency display. 
+	Corrected multiple visual glitches, including decimal point placement & label overlap.
+
+*   **[Fix] Slower BAND+ / BAND− long‑press repeat**
+    *   Added BAND_LP_REPEAT_MS throttle (default ~240 ms) to reduce overshoot when holding the button when 
+		long‑press cycling was too fast on real hardware and often jumped past the target band
+
+*   **[Fix] Preserved SSB Fine-Tune (BFO) Across Mode Switches:**
+
+    *   Fixed a bug where the fine-tune offset (the ".xx" portion of the frequency) was reset to zero after switching from SSB to AM/CW and back.
+	A per-band RAM cache now saves the last used BFO value when leaving an SSB mode.
+	This restores precise fractional frequency when you return to LSB/USB, ensuring tuning adjustments are not lost during a session.
+
+------------------------------------------------------------------------------------------------------------
