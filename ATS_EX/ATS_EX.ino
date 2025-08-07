@@ -161,15 +161,23 @@ static inline void setAgcHardware(int8_t att_val) {
 // Si4735 requires an inverted BFO value for sideband selection
 static void updateBFO() {
 
+    // get selected pitch from settings
+    uint16_t selected_pitch = pgm_read_word(&cw_pitch_options_hz[g_Settings[CWPitch].param]);
+
     // Determine automatic CW offset - USB uses a negative offset / LSB a positive one
     int16_t cwOffset = (g_currentMode == CW)
-        ? ((g_lastCWMode == USB) ? -CW_PITCH_OFFSET_HZ : CW_PITCH_OFFSET_HZ)
+        ? ((g_lastCWMode == USB) ? -selected_pitch : selected_pitch)
         : 0;
 
-    // Combine user manual tuning + calibration and any automatic CW offset
-    int16_t finalBfo = g_currentBFO
-        + (g_Settings[BFO].param * BFO_CALIBRATION_MULTIPLIER)
-        + cwOffset;
+    // Determine sideband context for calibration (LSB or USB)
+    uint8_t current_sideband = (g_currentMode == CW) ? g_lastCWMode : g_currentMode;
+
+    // Invert calibration sign for USB modes to match observed hardware response
+    int8_t sign_multiplier = (current_sideband == USB) ? -1 : 1;
+    int16_t bfo_calibration_offset = g_Settings[BFO].param * BFO_CALIBRATION_MULTIPLIER * sign_multiplier;
+
+    // Combine manual tuning, calibration, and pitch offset for the final BFO value
+    int16_t finalBfo = g_currentBFO + bfo_calibration_offset + cwOffset;
 
     g_si4735.setSSBBfo(finalBfo * -1);
 }
@@ -213,22 +221,10 @@ static void loadSSBPatch() {
     setAmpState(true);
 }
 
-// Applies curated audio profile for FM band
-// Profile is permanently active in FM mode and combines key enhancements
-// - Enables aggressive soft mute for quiet tuning between stations
-// - Repurposes Hi-Cut filter as a static EQ creating warmer sound on small speaker
-// - Activates an experimental noise blanker to reduce impulse noise
-// - Delegates mono/stereo control to dedicated handler
+// Applies all FM-specific audio enhancements
+// This function acts as a master controller, dispatching to specialized handlers
+// for soft mute, noise blanking, and speaker equalization
 static void FMAudioConfigure() {
-    static const uint16_t soft_mute_props[][2] PROGMEM = {
-        {0x1300, FM_PROP_SOFTMUTE_RATE},
-        {0x1301, FM_PROP_SOFTMUTE_SLOPE},
-        {0x1302, FM_PROP_SOFTMUTE_MAX_ATTN},
-        {0x1303, FM_PROP_SOFTMUTE_SNR_THRESH},
-        {0x1304, FM_PROP_SOFTMUTE_REL_RATE},
-        {0x1305, FM_PROP_SOFTMUTE_ATT_RATE},
-        {0, 0} // terminator
-    };
     static const uint16_t noise_blanker_props[][2] PROGMEM = {
         {0x1900, FM_PROP_NB_REJ_THRESH},
         {0x1901, FM_PROP_NB_ATT_RATE},
@@ -253,16 +249,32 @@ static void FMAudioConfigure() {
         {0, 0} // terminator
     };
 
-    // apply universal enhancements that are always on
-    applyProperties(soft_mute_props);
+    applyFmSoftMuteSettings();
     applyProperties(noise_blanker_props);
 
-    // apply user-selectable speaker EQ or restore defaults
     if (g_Settings[FMAudioProfile].param == 1) {
         applyProperties(hicut_speaker_eq_props);
     } else {
         applyProperties(hicut_default_props);
     }
+}
+
+// Applies user-defined FM soft mute parameters
+// Separates fixed timing values from adjustable thresholds
+static void applyFmSoftMuteSettings() {
+
+    static const uint16_t fixed_soft_mute_props[][2] PROGMEM = {
+        {0x1300, FM_PROP_SOFTMUTE_RATE},
+        {0x1301, FM_PROP_SOFTMUTE_SLOPE},
+        {0x1304, FM_PROP_SOFTMUTE_REL_RATE},
+        {0x1305, FM_PROP_SOFTMUTE_ATT_RATE},
+        {0, 0} // terminator
+    };
+
+    applyProperties(fixed_soft_mute_props);
+
+    g_si4735.setProperty(0x1302, g_Settings[FmSmAtt].param);
+    g_si4735.setProperty(0x1303, g_Settings[FmSmThr].param);
 }
 
 // Applies or disables AM Noise Blanker based on user settings
@@ -341,11 +353,11 @@ static void configureFMMode() {
 static void configureSSBMode(
     uint16_t minFreq,
     uint16_t maxFreq,
-    bool extraSSBReset
-) {
+    bool extraSSBReset) {
+
     Band& current_band = g_bandList[g_bandIndex];
 
-    if (current_band.bwIdxSSB >= g_bwSSBMaxIdx)
+    if (current_band.bwIdxSSB > g_bwSSBMaxIdx)
         current_band.bwIdxSSB = 4;
 
     // g_currentBFO = 0;
@@ -778,17 +790,32 @@ static void doFrequencyTuneSSB() {
     }
 }
 
+// Prepare AM <-> SSB/CW switch
 // Before saving state - normalize SSB frequency
 // This ensures seamless frequency transition when switching from SSB to other modes like AM
 // Makes the main frequency value accurate for other modes to use
 static inline void prepareModeSwitch(int8_t& bw) {
-    Band& current_band = g_bandList[g_bandIndex];
-    bw = (g_currentMode == AM) ? current_band.bwIdxAM : current_band.bwIdxSSB;
+    Band& band = g_bandList[g_bandIndex];
+
+    bw = (g_currentMode == AM) ? band.bwIdxAM : band.bwIdxSSB;
 
     if (isSSB()) {
-        int16_t khz_from_bfo = g_currentBFO / HZ_PER_KHZ;
-        g_currentFrequency += khz_from_bfo;
-        g_currentBFO %= HZ_PER_KHZ;
+        int16_t b = g_currentBFO;
+        int16_t k = (b >= 0) ? b / HZ_PER_KHZ : -((-b + HZ_PER_KHZ - 1) / HZ_PER_KHZ);
+        uint16_t f = g_currentFrequency + k;
+        b -= k * HZ_PER_KHZ;
+
+        if (f < band.minimumFreq) {
+            f = band.minimumFreq;
+            b = 0;
+        }
+        else if (f > band.maximumFreq) {
+            f = band.maximumFreq;
+            b = 0;
+        }
+
+        g_currentFrequency = f;
+        g_currentBFO = b;
     }
 
     syncActiveStateToBand();
@@ -1223,6 +1250,13 @@ static void doCWSwitch() {
     updateStereoIndicator();
 }
 
+// Settings: CW Pitch
+// Selects the audible tone frequency for CW reception
+void doCWPitch(int8_t v) {
+    doSwitchLogic(g_Settings[CWPitch].param, 0, MAX_INDEX(cw_pitch_options_hz), v);
+    if (g_currentMode == CW) updateBFO();
+}
+
 // Settings: Toggles the battery voltage pin between A1 and A2.
 void doBatteryPinSelect(int8_t v) {
     toggleSetting(BATT_PIN);
@@ -1276,6 +1310,26 @@ void doSquelch(int8_t v) {
         g_si4735.setAudioMute(false);
         g_squelchCutoff = false;
     }
+}
+
+// Settings: FM Soft Mute Attenuation (FSA)
+// Controls how much the volume is reduced (in dB) when soft mute activates
+// Higher values result in a deeper, more noticeable mute
+// Range: 0 (disabled) to 31 (max)
+void doFmSoftMuteAtt(int8_t v) {
+    doSwitchLogic(g_Settings[FmSmAtt].param, 0, FM_SOFT_MUTE_MAX_ATTN_LEVEL, v);
+    if (g_currentMode == FM) 
+        g_si4735.setProperty(FM_PROP_SOFTMUTE_MAX_ATTN_ADDR, g_Settings[FmSmAtt].param);
+}
+
+// Settings: FM Soft Mute Threshold (FST)
+// Sets the minimum signal quality (SNR) required to keep audio at full volume
+// If SNR drops below this, soft mute engages. Higher values are more aggressive
+// Range: 0 to 15
+void doFmSoftMuteThr(int8_t v) {
+    doSwitchLogic(g_Settings[FmSmThr].param, 0, FM_SOFT_MUTE_MAX_SNR_LEVEL, v);
+    if (g_currentMode == FM)
+        g_si4735.setProperty(FM_PROP_SOFTMUTE_SNR_THRESH_ADDR, g_Settings[FmSmThr].param);
 }
 
 // ==========================================

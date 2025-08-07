@@ -14,7 +14,7 @@
 //
 // 26 - 165      | 140 B    | 140 B    | 0 B     | EEPROM_BANDS_START             | State for all 28 bands (28 * 5 bytes)
 //
-// 176 - 197     | 22 B     | 22 B     | 0 B     | EEPROM_SETTINGS_START          | Global settings array `g_Settings` (22 items)
+// 176 - 200     | 25 B     | 25 B     | 0 B     | EEPROM_SETTINGS_START          | Global settings array `g_Settings` (25 items)
 //
 // 208 - 213     | 6 B      | 6 B      | 0 B     | EEPROM_MODE_SETTINGS_START     | Mode-dependent settings
 //
@@ -34,24 +34,24 @@ constexpr auto EEPROM_VERSION_ADDRESS = 1;
 // BLOCK SIZES FOR CALCULATION:
 // ReceiverHeader:      6 bytes
 // BandStatePacked:     5 bytes (x28 bands = 140 bytes)
-// Settings:            22 bytes (SETTINGS_MAX = 22 items * 1 byte each)
+// Settings:            25 bytes (SETTINGS_MAX = 25 items * 1 byte each)
 // ModeSettings:        6 bytes (MODE_SETTINGS_COUNT * MODE_CONTEXT_COUNT = 3 * 2)
 // FavoriteStation:     5 bytes (x20 stations = 100 bytes)
 // FavoritesCount:      1 byte
 
-constexpr auto EEPROM_HEADER_START = 10;                // Size: 6.  End: 16.
+constexpr auto EEPROM_HEADER_START = 10;                // Size: 6.   End: 16.
 constexpr auto EEPROM_BANDS_START = 26;                 // Size: 140. End: 166.
-constexpr auto EEPROM_SETTINGS_START = 176;             // Size: 22.  End: 198.
+constexpr auto EEPROM_SETTINGS_START = 176;             // Size: 25.  End: 201.
 constexpr auto EEPROM_MODE_SETTINGS_START = 208;        // Size: 6.   End: 214.
 constexpr auto EEPROM_FAVORITES_START = 224;            // Size: 100. End: 324.
 constexpr auto EEPROM_FAVORITES_COUNT = 334;            // Size: 1.   End: 335.
 
 
 // Increment APP_VERSION to force EEPROM reset due to layout changes
-constexpr auto APP_VERSION = 62;
+constexpr auto APP_VERSION = 63;
 
 // Centralizes user-facing strings on main screen
-#define APP_NAME_LINE1 F("ATS-20* V6.2.1")
+#define APP_NAME_LINE1 F("ATS-20* V6.3")
 
 // Behavior
 constexpr auto SAVE_ON_IDLE_TIMEOUT = 15000UL;          // 15 seconds
@@ -147,15 +147,9 @@ const auto FM_PROP_SOFTMUTE_RATE = 255;                 // Default: 64. Range: 1
 // A higher value causes faster audio fade-out as signal weakens
 const auto FM_PROP_SOFTMUTE_SLOPE = 4;                  // Default: 2. Range: 0-63
 
-// Property 0x1302: FM_SOFT_MUTE_MAX_ATTENUATION
-// Sets maximum attenuation amount when soft mute is fully engaged
-// A higher value results in a deeper mute. 22dB is used for near-silence
-const auto FM_PROP_SOFTMUTE_MAX_ATTN = 22;              // Default: 16 dB. Range: 0-31
-
-// Property 0x1303: FM_SOFT_MUTE_SNR_THRESHOLD
-// Sets SNR threshold to engage soft mute. A higher value makes the mute more
-// aggressive, activating even on moderately weak stations to eliminate hiss
-const auto FM_PROP_SOFTMUTE_SNR_THRESH = 10;            // Default: 4 dB. Range: 0-15
+// Property addresses for user-configurable soft mute values
+#define FM_PROP_SOFTMUTE_MAX_ATTN_ADDR   0x1302
+#define FM_PROP_SOFTMUTE_SNR_THRESH_ADDR 0x1303
 
 // Property 0x1304 & 0x1305: FM_SOFTMUTE_RELEASE/ATTACK_RATE
 // These undocumented properties likely control release/attack rates
@@ -320,11 +314,16 @@ constexpr uint8_t AGC_ATT_INDEX_OFFSET = 1;
 
 // --- Soft Mute Settings ---
 
-// Max attenuation level for soft mute feature
+// Max attenuation level for AM soft mute feature
 constexpr uint8_t SOFT_MUTE_MAX_ATTENUATION = 32;
 
-// Max SNR threshold for soft mute activation
+// Max SNR threshold for AM soft mute activation
 constexpr uint8_t SOFT_MUTE_MAX_SNR_THRESHOLD = 63;
+
+// Max adjustment levels for FM soft mute settings
+constexpr uint8_t FM_SOFT_MUTE_MAX_ATTN_LEVEL = 31;
+constexpr uint8_t FM_SOFT_MUTE_MAX_SNR_LEVEL = 15;
+
 
 // --- Squelch Settings ---
 
@@ -374,9 +373,5 @@ constexpr uint16_t ADC_CONNECTED_THRESHOLD = 300;
 // Delay for system initialization to allow components to stabilize
 constexpr uint16_t SYSTEM_INIT_DELAY_MS = 500;
 
-// Common tone frequency for CW reception
-const int16_t CW_PITCH_OFFSET_HZ = 500;
-
 // Simple math to toggle between LSB (1) and USB (2)
 constexpr int8_t   SIDEBAND_TOGGLE_LSB_USB = 3;
-

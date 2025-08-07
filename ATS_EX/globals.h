@@ -21,7 +21,7 @@
 // A macro to convert a 4-character string literal into a char array without a null terminator
 #define PACK_STR4(s) {s[0], s[1], s[2], s[3]}
 
-const uint8_t g_SettingsMaxPages = 4;       // pages number in settings menu
+const uint8_t g_SettingsMaxPages = 5;       // pages number in settings menu
 
 #if ENABLE_FAVORITES
 const uint8_t MAX_FAVORITES = 20;
@@ -91,11 +91,16 @@ enum SettingsIndex {
     RSSI_AM_Off,    // RSI
     DisplayOff,     // DIS (Display Off Timeout)
 
-    // --- Page 4: Audio Test ---
+    // --- Page 4: Audio Profiles ---
     FMAudioProfile, // FMP (FM Audio Profile for Speaker EQ)
     AMNoiseBlanker, // ANB (AM Noise Blanker)
     ForceMono,      // FMO (Force Mono Reception)
     SQL,            // SQL (Squelch)
+    CWPitch,        // CWP - CW Pitch
+
+    // --- Page 5: Advanced FM Audio ---
+    FmSmAtt,        // FSA - FM Soft Mute Attenuation
+    FmSmThr,        // FST - FM Soft Mute Threshold
 
     SETTINGS_MAX
 };
@@ -193,6 +198,7 @@ void doSSBSoftMuteMode(int8_t v = 0);
 void doCutoffFilter(int8_t v);
 void doCPUSpeed(int8_t v = 0);
 void doBFOCalibration(int8_t v);
+void doCWPitch(int8_t v);
 void doScanSwitch(int8_t v = 0);
 void doRSSIAMOff(int8_t v = 0);
 void doAntennaCapacitor(int8_t v = 0);
@@ -202,6 +208,9 @@ void doAMNoiseBlanker(int8_t v = 0);
 void doForceMono(int8_t v = 0);
 void doBatteryPinSelect(int8_t v = 0);
 void doSquelch(int8_t v);
+void doFmSoftMuteAtt(int8_t v);
+void doFmSoftMuteThr(int8_t v);
+
 void showSplashScreen();
 void showStatus(bool cleanFreq = false);
 void updateAndShowBattery(bool forceShow);
@@ -392,7 +401,11 @@ SettingsItem g_Settings[] =
     { "ANB", 0,  SettingType::Switch,     doAMNoiseBlanker    },
     { "FMO", 0,  SettingType::Switch,     doForceMono         },
     { "SQL", 0,  SettingType::Num,        doSquelch           },
+    { "CWP", 2,  SettingType::Num,        doCWPitch           },
 
+    // Page 5
+    { "FSA", 22, SettingType::Num,        doFmSoftMuteAtt     },
+    { "FST", 10, SettingType::Num,        doFmSoftMuteThr     },
 };
 
 // defines the text conversion rules ONLY for settings of type 'Switch'
@@ -419,12 +432,15 @@ const PROGMEM SwitchMapEntry switch_setting_map[] = {
     [SWUnits] = {5, false},
     [RSSI_AM_Off] = {1, true},
     [DisplayOff] = {0, false},
-
     // Page 4
     [FMAudioProfile] = {1, false},
     [AMNoiseBlanker] = {1, false},
     [ForceMono] = {2, true},
     [SQL] = {0, false},
+    [CWPitch] = {0, false},
+    // Page 5
+    [FmSmAtt] = {0, false},
+    [FmSmThr] = {0, false},
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -528,6 +544,9 @@ const uint8_t SSB_STEP_OFFSET = 7;
 
 int8_t g_tabStepFM[] = { 5, 10, 100 };
 const int8_t g_lastStepFM = (sizeof(g_tabStepFM) / sizeof(int8_t)) - 1;
+
+// Pitch options for CW reception in Hz
+const uint16_t cw_pitch_options_hz[] PROGMEM = { 500, 600, 700, 800 };
 
 // -------------------------------------------------------------------------------------------------
 // UI Text & Other Data
