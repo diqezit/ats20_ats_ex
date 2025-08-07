@@ -586,20 +586,20 @@ static inline void handleSwitchParam(
     strcpy_P(buf, paramTexts[textIdx]);
 }
 
-// Converts a setting parameter to its UI display string
+// Maps raw setting parameters to user-facing display text
+// Handles special cases where a numeric value has a text alias, like 0 becoming "AUT"
+// Also manages non-standard conversions, like an index or a 0-based value
 static void SettingParamToUI(char* buf, uint8_t idx) {
     const auto& s = g_Settings[idx];
     int8_t param = s.param;
 
-    if (idx == SQL) {
-        if (param == 0) {
-            strcpy_P(buf, paramTexts[2]); // "OFF"
-            return;
-        }
+    if (idx == CWPitch) {
+        uint16_t pitch = pgm_read_word(&cw_pitch_options_hz[param]);
+        convertToChar(buf, pitch, 3);
+        return;
     }
 
     if (idx == SettingsIndex::BATT_PIN) {
-        // LF - named constants in Battery.h for the UI strings
         strcpy_P(buf, (param == 1) ? BATT_PIN_NAME_ALT : BATT_PIN_NAME_DEFAULT);
         return;
     }
@@ -609,24 +609,28 @@ static void SettingParamToUI(char* buf, uint8_t idx) {
         return;
     }
 
-    // settings like Attenuation (ATT) value of 0 represents automatiс mode
-    if (s.type == SettingType::ZeroAuto && param == 0) {
-        strcpy_P(buf, paramTexts[0]); // "AUT"
-        return;
+    if (param == 0) {
+        if (s.type == SettingType::ZeroAuto) {
+            strcpy_P(buf, paramTexts[0]); // AUT
+            return;
+        }
+        if (idx == SQL) {
+            strcpy_P(buf, paramTexts[2]); // OFF
+            return;
+        }
     }
 
-    int8_t val = param;
+    int8_t valueToDisplay = param;
+    if (idx == SettingsIndex::Brightness) {
+        valueToDisplay++; // display 1-10 instead of 0-9
+    }
 
-    // brightness is stored 0-indexed internally but displayed to the user as 1-based
-    if (idx == SettingsIndex::Brightness) val++;
-
-    uint8_t val_to_convert = (val < 0) ? -val : val;
-
+    uint8_t val_to_convert = (valueToDisplay < 0) ? -valueToDisplay : valueToDisplay;
     convertToChar(buf, val_to_convert, 3);
 
-    // restore for neg value
-    if (param < 0) buf[0] = '-';
-
+    if (valueToDisplay < 0) {
+        buf[0] = '-';
+    }
     buf[3] = '\0';
 }
 

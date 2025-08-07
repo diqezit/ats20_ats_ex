@@ -884,3 +884,28 @@ This version introduces the ability to save your favorite FM stations.
 	
 ------------------------------------------------------------------------------------------------------------
 
+
+### **MOD_NO_RDS v6.3**
+
+`ATS_EX.ino`, `Globals.h`, `Defines.h`, `UI.h`
+
+*   **[New] Selectable CW Pitch:** Added a `CWP` menu setting to select a comfortable CW sidetone (500-800 Hz), 
+	replacing the fixed 500 Hz tone. The chosen pitch is automatically used for BFO compensation to ensure tuning accuracy.
+
+*   **[New] Adjustable FM Soft Mute:** Introduced two advanced settings, "FSA" (Attenuation) and "FST" (Threshold), 
+	for fine-grained control over FM soft mute behavior. This decouples soft mute from the `FMP` audio profile, 
+	allowing users to balance quiet tuning with the ability to hear weak DX stations.
+
+*   **[Fix] Preserved SSB Bandwidth on Mode Switch:** Fixed a bug that incorrectly reset the SSB bandwidth to 3.0 kHz when 
+	switching from AM or toggling the Sync setting. 
+	An incorrect bounds check was corrected, ensuring user-selected bandwidth is now reliably preserved.
+
+*   **[Fix] Symmetrical BFO Calibration:** 
+	Fixed asymmetrical BFO calibration for USB/CW-U modes. The offset is now correctly inverted based on the active sideband, 
+	enabling accurate compensation for all SSB and CW modes.
+
+*   **[Fix] Seamless AM↔SSB/CW frequency transition:**
+	Folded SSB fine tune (BFO) into kHz before mode switch to preserve exact tuned carrier, 
+	removed 1 kHz rounding and rollback, clamped at band edges in `prepareModeSwitch`
+
+------------------------------------------------------------------------------------------------------------
