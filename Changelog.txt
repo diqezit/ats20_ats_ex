@@ -935,3 +935,12 @@ This version introduces the ability to save your favorite FM stations.
 	This restores precise fractional frequency when you return to LSB/USB, ensuring tuning adjustments are not lost during a session.
 
 ------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v6.3.2**
+
+*   **[Fix] Fixed saving of manual attenuator (ATT) settings in AM/SSB modes. **
+    *  	Now the ATT value is correctly saved when changing subbands and modes (including BFO rollover), 
+	which eliminates background noise return and rollback to AUTO.
+
+------------------------------------------------------------------------------------------------------------

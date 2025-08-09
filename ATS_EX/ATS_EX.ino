@@ -665,6 +665,7 @@ static void bandSwitch(bool up, bool loadStoredFreq) {
     if (oldType != FM_BAND_TYPE && newType != FM_BAND_TYPE) {
         // fast for seamless transitions within AM/SW bands
         g_si4735.setFrequency(g_currentFrequency);
+        applyAgcSettings();
         doBandwidth(0);
 
         // clear at SW<->MW/LW transition if MHz mode is enabled
@@ -1114,6 +1115,9 @@ void doAttenuation(int8_t v) {
     doSwitchLogic(g_Settings[ATT].param, 0, max_att_value, v);
 
     setAgcHardware(g_Settings[ATT].param);
+
+    ModeContext m = getModeContext();
+    g_modeSettings[MODE_SETTING_AGC][m] = g_Settings[ATT].param;
 }
 
 // Settings: Soft Mute Attenuation
