@@ -1,21 +1,94 @@
 ### **ATS-20+ Firmware Modifications (diqezit's Fork)**
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Firmware-ATS--20+-blueviolet?style=for-the-badge&logo=github">
-  <img src="https://img.shields.io/badge/status-active-success?style=for-the-badge">
-  <img src="https://img.shields.io/github/languages/top/diqezit/ats20_ats_ex?style=for-the-badge">
-  <img src="https://img.shields.io/github/last-commit/diqezit/ats20_ats_ex?style=for-the-badge">
+  <img src="https://img.shields.io/badge/Firmware-ATS--20%2B-blueviolet?style=for-the-badge&logo=github" alt="Firmware ATS-20+">
+  <img src="https://img.shields.io/badge/status-active-success?style=for-the-badge" alt="Status: active">
+  <img src="https://img.shields.io/github/languages/top/diqezit/ats20_ats_ex?style=for-the-badge" alt="Top language">
+  <a href="https://github.com/diqezit/ats20_ats_ex/commits">
+    <img src="https://img.shields.io/github/last-commit/diqezit/ats20_ats_ex?style=for-the-badge&label=Last%20commit" alt="Last commit">
+  </a>
 </p>
-<p align="center">
-  <a href="https://translate.google.com/translate?sl=en&tl=ru&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex"><img src="https://img.shields.io/badge/Translate_to-Russian-blue?style=for-the-badge"></a>
-  <a href="https://translate.google.com/translate?sl=en&tl=es&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex"><img src="https://img.shields.io/badge/Translate_to-Spanish-blue?style=for-the-badge"></a>
-  <a href="https://translate.google.com/translate?sl=en&tl=de&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex"><img src="https://img.shields.io/badge/Translate_to-German-lightgrey?style=for-the-badge"></a>
-  <a href="https://translate.google.com/translate?sl=en&tl=fr&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex"><img src="https://img.shields.io/badge/Translate_to-French-blue?style=for-the-badge"></a>
-  <a href="https://translate.google.com/translate?sl=en&tl=it&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex"><img src="https://img.shields.io/badge/Translate_to-Italian-green?style=for-the-badge"></a>
-  <a href="https://translate.google.com/translate?sl=en&tl=pl&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex"><img src="https://img.shields.io/badge/Translate_to-Polish-red?style=for-the-badge"></a>
-  <a href="https://translate.google.com/translate?sl=en&tl=ja&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex"><img src="https://img.shields.io/badge/Translate_to-Japanese-purple?style=for-the-badge"></a>
-  <a href="https://translate.google.com/translate?sl=en&tl=zh-CN&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex"><img src="https://img.shields.io/badge/Translate_to-Chinese-red?style=for-the-badge"></a>
-</p>
+
+<div align="center">
+<table cellspacing="6" cellpadding="0">
+  <tr>
+    <td>
+      <a href="https://translate.google.com/translate?sl=en&tl=ru&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
+        <img src="https://img.shields.io/badge/Translate_to-Russian-3B82F6?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to Russian">
+      </a>
+    </td>
+    <td>
+      <a href="https://translate.google.com/translate?sl=en&tl=es&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
+        <img src="https://img.shields.io/badge/Translate_to-Spanish-EAB308?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to Spanish">
+      </a>
+    </td>
+    <td>
+      <a href="https://translate.google.com/translate?sl=en&tl=de&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
+        <img src="https://img.shields.io/badge/Translate_to-German-64748B?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to German">
+      </a>
+    </td>
+    <td>
+      <a href="https://translate.google.com/translate?sl=en&tl=fr&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
+        <img src="https://img.shields.io/badge/Translate_to-French-6366F1?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to French">
+      </a>
+    </td>
+    <td>
+      <a href="https://translate.google.com/translate?sl=en&tl=it&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
+        <img src="https://img.shields.io/badge/Translate_to-Italian-22C55E?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to Italian">
+      </a>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <a href="https://translate.google.com/translate?sl=en&tl=pl&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
+        <img src="https://img.shields.io/badge/Translate_to-Polish-F43F5E?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to Polish">
+      </a>
+    </td>
+    <td>
+      <a href="https://translate.google.com/translate?sl=en&tl=ja&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
+        <img src="https://img.shields.io/badge/Translate_to-Japanese-8B5CF6?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to Japanese">
+      </a>
+    </td>
+    <td>
+      <a href="https://translate.google.com/translate?sl=en&tl=zh-CN&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
+        <img src="https://img.shields.io/badge/Translate_to-Chinese-EF4444?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to Chinese (Simplified)">
+      </a>
+    </td>
+    <td>
+      <a href="https://translate.google.com/translate?sl=en&tl=pt&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
+        <img src="https://img.shields.io/badge/Translate_to-Portuguese-10B981?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to Portuguese">
+      </a>
+    </td>
+    <td>
+      <a href="https://translate.google.com/translate?sl=en&tl=ro&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
+        <img src="https://img.shields.io/badge/Translate_to-Romanian-06B6D4?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to Romanian">
+      </a>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <a href="https://translate.google.com/translate?sl=en&tl=uk&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
+        <img src="https://img.shields.io/badge/Translate_to-Ukrainian-84CC16?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to Ukrainian">
+      </a>
+    </td>
+    <td>
+      <a href="https://translate.google.com/translate?sl=en&tl=ar&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
+        <img src="https://img.shields.io/badge/Translate_to-Arabic-F97316?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to Arabic">
+      </a>
+    </td>
+    <td>
+      <a href="https://translate.google.com/translate?sl=en&tl=hi&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
+        <img src="https://img.shields.io/badge/Translate_to-Hindi-D946EF?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to Hindi">
+      </a>
+    </td>
+    <td>
+      <a href="https://translate.google.com/translate?sl=en&tl=tr&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
+        <img src="https://img.shields.io/badge/Translate_to-Turkish-0EA5E9?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to Turkish">
+      </a>
+    </td>
+  </tr>
+</table>
+</div>
 
 This repository is a fork of the original `goshante/ats20_ats_ex` firmware, dedicated to custom modifications, bug fixes, and new features. All discussion regarding these new versions should take place here.
 
@@ -45,15 +118,57 @@ In order to eliminate possible interference with ADC readout distortion`
 [GET 4.11](https://github.com/diqezit/ats20_ats_ex/releases/tag/v4.11)
 
 ### `V4.11`
-
-<img width="1280" height="741" alt="image" src="https://github.com/user-attachments/assets/fcd30ee4-013e-4de6-a1a5-330c730b1e02" />
+_General interface view in version 4.11_
+<p align="center">
+  <img alt="Interface v4.11" src="https://github.com/user-attachments/assets/fcd30ee4-013e-4de6-a1a5-330c730b1e02" />
+</p>
 
 
 ### `v5.x`
+_Key interface changes in the 5.x versions_
+<table align="center">
+  <tr>
+    <td align="center" width="49%">
+      Main Screen
+      <br>
+      <img alt="Main Screen v5.x" src="https://github.com/user-attachments/assets/1bf3ad8d-35a8-442b-b2ad-37518ec571f8" />
+    </td>
+    <td align="center" width="49%">
+      Settings Screen
+      <br>
+      <img alt="Info Screen v5.x" src="https://github.com/user-attachments/assets/551c7c44-bc77-4109-ab67-aa5f2a6ed839" />
+    </td>
+  </tr>
+</table>
 
-<img width="1280" height="766" alt="image" src="https://github.com/user-attachments/assets/1bf3ad8d-35a8-442b-b2ad-37518ec571f8" />
-
-<img width="1280" height="737" alt="image" src="https://github.com/user-attachments/assets/551c7c44-bc77-4109-ab67-aa5f2a6ed839" />
+### `v6.x`
+_Screen examples in the 6.x versions_
+<table align="center">
+  <tr>
+    <td align="center" width="49%">
+      SSB Mode
+      <br>
+      <img alt="SSB Mode" src="https://github.com/user-attachments/assets/de5d2098-3a76-4f87-af9b-e5157c0be423" />
+    </td>
+    <td align="center" width="49%">
+      Favorites List
+      <br>
+      <img alt="Favorites List" src="https://github.com/user-attachments/assets/c2a5d7f5-47ec-4043-b5f8-89131e22f18f" />
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="49%">
+      Full Screen Layout
+      <br>
+      <img alt="Full Screen Layout" src="https://github.com/user-attachments/assets/e1282227-e65f-4015-aee0-134ea80bbc51" />
+    </td>
+    <td align="center" width="49%">
+      Settings Menu
+      <br>
+      <img alt="Settings Menu" src="https://github.com/user-attachments/assets/1256b31e-2c32-475e-ba54-332c2ea47e93" />
+    </td>
+  </tr>
+</table>
 
 ------------------------------------------------------------------------------------------------------------
 
@@ -234,46 +349,55 @@ To enter and exit the settings menu perform a **short press** on the **`BAND-`**
 *   **Editing:** Select an item then short-press the encoder to enter "Edit Mode" (a `>` appears next to the value). Rotate the encoder to change the value. Press the encoder again to confirm.
 *   **Save & Exit:** The menu closes automatically after 10 seconds of inactivity or you can exit manually by pressing `BAND-`. All changes are saved to EEPROM upon exit.
 
-##### **Page 1: General & Audio**
+#### **Page 1: General & Audio**
 
-| Name | Detailed Description | Type | Range |
+| Name | Detailed Description | Type | Range / Options |
 | :--- | :--- | :--- | :--- |
-| `ATT` | **Attenuator.** Manages gain. **`AUT`:** Standard **Automatic Gain Control (AGC)**. **Manual values:** Disables AGC and sets a **fixed attenuation level**. Use this to prevent overload from strong local stations. | Selection | `AUT`, `1`..`37` |
-| `SCN` | **Scan Switch.** Determines the encoder button's function. **`On`:** Quick **Seek**. **`Off`:** Quick **Step** adjustment. **Note:** In SSB/CW the encoder press **always** activates `STEP` mode. | Switch | `On` / `Off` |
-| `AVC` | **AVC Max Gain.** Sets the maximum gain for the Automatic Volume Control system in AM/SSB. Higher values increase volume for weak stations. **Important:** Only active when `ATT` is `AUT`. | Number | `12`..`90` |
-| `SMA` | **Soft Mute Attenuation.** Defines the amount of audio attenuation on weak signals. `0` disables it. **Note:** Not used in FM mode. | Number | `0`..`32` |
-| `SMT` | **Soft Mute Threshold.** Sets the **minimum SNR** below which soft mute activates. Helps eliminate static hiss. **Note:** Not used in FM mode. | Number | `0`..`63` |
-| `DE` | **FM De-Emphasis.** Matches the regional broadcast standard. **`50`:** Europe/Asia. **`75`:** North America. **Note:** Only active in FM mode. | Selection | `50` / `75` |
+| `ATT` | **Attenuator/AGC.** `AUT`: Automatic Gain Control. **Manual values**: Disables AGC and sets a fixed attenuation level to prevent overload. | Selection | `AUT`, `1`..`37` |
+| `SCN` | **Scan Switch.** `On`: Encoder press starts station scanning. `Off`: Encoder press activates Step selection. | Switch | `On` / `Off` |
+| `AVC` | **Auto Volume Control.** Sets max gain for the AVC system in AM/SSB. Higher values boost volume on weak stations. Active when `ATT` is `AUT`. | Number | `12`..`90` |
+| `SMA` | **Soft Mute Attenuation.** Defines the audio reduction level when soft mute is active. `0` disables it. | Number | `0`..`32` |
+| `SMT` | **Soft Mute Threshold.** Sets the minimum **SNR** below which soft mute activates to reduce static hiss. | Number | `0`..`63` |
+| `DE` | **FM De-Emphasis.** Matches regional broadcast standards. `50`: Europe/Asia. `75`: North America. | Selection | `50` / `75` |
 
-##### **Page 2: SSB & Display**
+#### **Page 2: SSB & Display**
 
-| Name | Detailed Description | Type | Range |
+| Name | Detailed Description | Type | Range / Options |
 | :--- | :--- | :--- | :--- |
-| `BFO` | **BFO Calibration.** Calibrates the oscillator for SSB/CW. If all SSB stations sound off-pitch use this to correct the global offset. Each step is 100 Hz. | Number | `-25`..`+25` |
-| `SSM` | **SSB Soft Mute.** Enables an alternative soft muting algorithm specifically adapted for SSB mode. | Switch | `On` / `Off` |
-| `SVC` | **SSB Volume Control.** Activates a separate automatic volume control system that works only in LSB USB and CW modes. | Switch | `On` / `Off` |
-| `COF` | **SSB Cutoff Filter.** Manages a high-pass filter. **`AUT`:** Filter chosen based on current BW. **`1`, `2`:** Manual selection for interference rejection. | Selection | `AUT`, `1`, `2` |
-| `SYN` | **SSB Sync.** Activates **DSP AFC (Automatic Frequency Control)** to compensate for frequency drift. **Note:** Not active in CW mode. | Switch | `On` / `Off` |
-| `SCR` | **Screen Brightness.** Adjusts the OLED display brightness from `1` (min) to `10` (max). | Number | `1`..`10` |
+| `BFO` | **BFO Calibration.** Corrects the master oscillator's global offset for SSB/CW. Use if all stations sound off-pitch. | Number | `-25`..`+25` |
+| `SSM` | **SSB Soft Mute.** Enables/disables an alternative soft muting algorithm specifically adapted for SSB mode. | Switch | `On` / `Off` |
+| `SVC` | **SSB Volume Control.** Activates/deactivates a separate automatic volume control system that works only in LSB, USB, and CW modes. | Switch | `On` / `Off` |
+| `COF` | **SSB Cutoff Filter.** Manages a high-pass audio filter. `AUT`: Filter is chosen based on the current BW. `1`, `2`: Manual selection. | Selection | `AUT`, `1`, `2` |
+| `SYN` | **SSB Sync (AFC).** Enables DSP's Automatic Frequency Control to compensate for signal drift in SSB mode. | Switch | `On` / `Off` |
+| `SCR` | **Screen Brightness.** Adjusts the OLED display brightness. | Number | `1`..`10` |
 
-##### **Page 3: Hardware & Miscellaneous**
+#### **Page 3: Hardware & System**
 
-| Name | Detailed Description | Type | Range |
+| Name | Detailed Description | Type | Range / Options |
 | :--- | :--- | :--- | :--- |
-| `CAP` | **Antenna Capacitor.** Controls a capacitor at the antenna input. **`AUT`:** Engaged for FM only. **`On`:** Forced on for all bands. May improve reception on some antennas. | Switch | `AUT` / `On` |
-| `CPU` | **CPU Speed.** **`16MHz`:** Max performance. **`8MHz`:** Low-power mode increases battery life with slightly slower UI response. | Switch | `16MHz` / `8MHz` |
-| `BAP` | **Battery Pin.** Selects the analog port (`A1` or `A2`) for measuring battery voltage. Must match your board's hardware layout. | Selection | `A1` / `A2` |
-| `SWU` | **SW Units.** Changes the frequency format for Shortwave (SW) bands. **`kHz`:** e.g. `7100 kHz`. **`MHz`:** e.g. `7.10 MHz`. | Selection | `kHz` / `MHz` |
-| `RSI` | **Disable AM RSSI.** On some hardware RSSI polling in AM can cause audible clicks. This is a troubleshooting option. **`On`:** Disables RSSI updates but the signal meter will not work in AM. **`Off`:** Standard mode. | Switch | `On` / `Off` |
-| `DIS` | **Display Off Timer.** Automatically turns off the screen after a period of inactivity. **`Off`:** Always on. **`10m`..`60m`:** Time in minutes. | Selection | `Off`, `10m`..`60m` |
+| `CAP` | **Antenna Capacitor.** `AUT`: Engaged for FM only. `On`: Forced on for all bands. May improve reception on some antennas. | Selection | `AUT` / `On` |
+| `CPU` | **CPU Speed.** `16MHz`: Max performance. `8MHz`: Low-power mode, increases battery life with a slightly slower UI. | Selection | `16MHz` / `8MHz` |
+| `BAP` | **Battery Pin.** Selects the analog pin (`A1`/`A2`) for voltage measurement to match your board's hardware. | Selection | `A1` / `A2` |
+| `SWU` | **SW Units.** Changes the Shortwave frequency format. `kHz`: e.g., `7100 kHz`. `MHz`: e.g., `7.100 MHz`. | Selection | `kHz` / `MHz` |
+| `RSI` | **Disable AM RSSI.** A troubleshooting option. `On`: Disables RSSI polling in AM to prevent audible clicks on some boards. | Switch | `On` / `Off` |
+| `DIS` | **Display Off Timer.** Automatically turns off the screen after inactivity. `Off`: Always on. | Selection | `Off`, `10m`..`60m`|
 
-##### **Page 4: Audio Test**
+#### **Page 4: Audio Profiles & Filters**
 
-| Name | Detailed Description | Type | Range |
+| Name | Detailed Description | Type | Range / Options |
 | :--- | :--- | :--- | :--- |
-| `FMP` | **FM Audio Profile.** Toggles a built-in equalizer. **`On`:** (Default) Applies an EQ profile optimized for the internal speaker. **`Off`:** Bypasses EQ for a flat audio output ideal for headphones. | Switch | `On` / `Off` |
-| `ANB` | **AM Noise Blanker.** Activates an experimental digital filter to reduce impulse noise (e.g. from car ignitions) in AM modes. Disabled by default. | Switch | `On` / `Off` |
-| `FMO`| **Force FM Mono.** Overrides automatic stereo reception and forces the output to mono. Useful for improving clarity on weak noisy FM stations. | Switch | `On` / `Off` |
+| `FMP` | **FM Audio Profile.** `On`: Applies an EQ profile optimized for the internal speaker. `Off`: Flat audio output for headphones. | Switch | `On` / `Off` |
+| `ANB` | **AM Noise Blanker.** An experimental digital filter to reduce impulse noise (e.g., from car ignitions) in AM modes. | Switch | `On` / `Off` |
+| `FMO` | **Force FM Mono.** Overrides stereo reception to improve clarity on weak, noisy FM stations. | Switch | `On` / `Off` |
+| `SQL` | **Squelch Level.** Sets the signal strength threshold to open the audio path. Higher values require a stronger signal. `0` = Off. | Number | `0`..`63` |
+| `CWP` | **CW Pitch.** Adjusts the audible tone for CW (Morse code) reception. | Selection | `500`..`800` Hz |
+
+#### **Page 5: Advanced FM Audio**
+
+| Name | Detailed Description | Type | Range / Options |
+| :--- | :--- | :--- | :--- |
+| `FSA` | **FM Soft Mute Attenuation.** Defines the amount of audio reduction when soft mute is active on the FM band. | Number | `0`..`32` |
+| `FST` | **FM Soft Mute Threshold.** Sets the minimum **SNR** below which soft mute activates specifically for the FM band. | Number | `0`..`63` |
 
 ---
 
