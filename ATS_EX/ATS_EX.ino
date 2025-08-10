@@ -226,27 +226,37 @@ static void loadSSBPatch() {
 // for soft mute, noise blanking, and speaker equalization
 static void FMAudioConfigure() {
     static const uint16_t noise_blanker_props[][2] PROGMEM = {
+        // Noise blanker
         {0x1900, FM_PROP_NB_REJ_THRESH},
         {0x1901, FM_PROP_NB_ATT_RATE},
         {0x1902, FM_PROP_NB_REL_RATE},
         {0x1903, FM_PROP_NB_ADC_OVER_THRESH},
         {0x1904, FM_PROP_NB_ADC_OVER_DELAY},
+
+        // Multipath blend
+        {0x1808, FM_MP_STEREO_THR_DEFAULT},
+        {0x1809, FM_MP_MONO_THR_DEFAULT},
+        {0x180A, FM_MP_ATTACK_DEFAULT},
+        {0x180B, FM_MP_RELEASE_DEFAULT},
+
         {0, 0} // terminator
     };
+
     static const uint16_t hicut_speaker_eq_props[][2] PROGMEM = {
-        {FM_PROP_HICUT_ENABLE, 1},
+        {0x1A00, FM_PROP_HICUT_ENABLE},
         {0x1A01, FM_PROP_HICUT_WINDOW},
         {0x1A02, FM_PROP_HICUT_SNR_THRESH},
-        {0x1A03, FM_PROP_HICUT_ATT_RATE},
-        {0x1A04, FM_PROP_HICUT_REL_RATE},
-        {0x1A05, FM_PROP_HICUT_MPX_THRESH},
+        {0x1A03, FM_HICUT_RELEASE_DEFAULT},
+        {0x1A04, FM_HICUT_MP_TRIGGER_DEFAULT},
+        {0x1A05, FM_HICUT_MP_END_DEFAULT},
         {0x1A06, FM_PROP_HICUT_CUTOFF},
         {0, 0} // terminator
     };
+
     static const uint16_t hicut_default_props[][2] PROGMEM = {
-        {FM_PROP_HICUT_ENABLE, 0},
+        {0x1A00, 0},
         {0x1A06, 0x0000},
-        {0, 0} // terminator
+        {0, 0}
     };
 
     applyFmSoftMuteSettings();

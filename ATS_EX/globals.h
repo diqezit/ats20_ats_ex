@@ -216,6 +216,7 @@ void showStatus(bool cleanFreq = false);
 void updateAndShowBattery(bool forceShow);
 void updateStereoIndicator();
 void tuneToSelectedFavorite();
+static void showRfHints();
 
 // =================================================================================================
 // Data Structures
