@@ -944,3 +944,20 @@ This version introduces the ability to save your favorite FM stations.
 	which eliminates background noise return and rollback to AUTO.
 
 ------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v6.3.3**
+
+`ATS_EX.ino`, `Defines.h`, `UI.h`
+
+*   **[New] Soft Mute Indicator:** A new 'SM' indicator now appears under the volume level to show when DSP soft mute is active. 
+	The RSSI display is also now fixed-width to prevent jitter.
+
+*   **[Fix/Optimized] Improved Unit Display:** Frequency units (kHz/MHz) are now visually aligned with the large digits 
+	and are hidden on long SSB frequencies to avoid overlapping the BFO value.
+	
+*   **[Enhancement/Refactor] FM audio (AN332):** Applied multipath blend defaults and corrected Hi‑Cut mapping
+	Added brief datasheet notes near the defaults. 
+	Must be cleaner audio under multipath and predictable Hi‑Cut behavior tied to MULT.
+
+------------------------------------------------------------------------------------------------------------

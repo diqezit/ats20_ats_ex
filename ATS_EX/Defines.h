@@ -51,7 +51,7 @@ constexpr auto EEPROM_FAVORITES_COUNT = 334;            // Size: 1.   End: 335.
 constexpr auto APP_VERSION = 63;
 
 // Centralizes user-facing strings on main screen
-#define APP_NAME_LINE1 F("ATS-20* V6.3.2")
+#define APP_NAME_LINE1 F("ATS-20* V6.3.3")
 
 // Behavior
 constexpr auto SAVE_ON_IDLE_TIMEOUT = 15000UL;          // 15 seconds
@@ -235,6 +235,62 @@ constexpr auto AM_NB_DELAY_DEFAULT = 172;
 // Recommended by SiLabs for classic C40-like performance on D60 chips
 constexpr uint16_t AM_SOFT_MUTE_SLOPE_PROP = 0x3301;
 constexpr uint16_t AM_SOFT_MUTE_SLOPE_RECOMMENDED = 2;
+
+// FM multipath blending: automatic cleanup when reflections (multipath) break the stereo image
+// No manual mono/stereo switching needed; in good conditions it is transparent
+// Works by measuring reflections as MULT (0..100) and blending stereo to mono when MULT is high
+//
+// Logic (simple):
+// If MULT <= x  -> keep 100% stereo
+// If x < MULT < y -> smoothly blend stereo to mono
+// If MULT >= y -> force 100% mono
+//
+// Timing:
+// Attack: speed of stereo->mono (fast to hide artifacts)
+// Release: speed of mono->stereo (slower to avoid pumping)
+//
+// MULT readout and multipath interrupts are guaranteed on D60 only
+
+// 0x1808 FM_BLEND_MULTIPATH_STEREO_THRESHOLD
+// below => 100% stereo
+// above => start blend
+// Default=20 (0x0014) Range=0–100
+const auto FM_MP_STEREO_THR_DEFAULT = 20;
+
+// 0x1809 FM_BLEND_MULTIPATH_MONO_THRESHOLD
+// above => 100% mono
+// Default=60 (0x003C)
+// Range=0–100
+const auto FM_MP_MONO_THR_DEFAULT = 60;
+
+// 0x180A FM_BLEND_MULTIPATH_ATTACK_RATE
+// stereo→mono attack ATTACK=65536/time_ms
+// Default=0x0FA0 (~16 ms)
+// Range=0 (disabled), 1–32767
+const auto FM_MP_ATTACK_DEFAULT = 0x0FA0;
+
+// 0x1A03 FM_HICUT_RELEASE_RATE
+// rate to increase hi‑cut transition freq
+// RELEASE=65536/time_ms
+// Default=0x0014 (~3.3 s)
+// Range=0 (disabled), 1–32767
+const auto FM_HICUT_RELEASE_DEFAULT = 0x0014;
+
+// 0x180B FM_BLEND_MULTIPATH_RELEASE_RATE mono→stereo release
+// RELEASE=65536/time_ms
+// Default=0x0028 (~1.64 s)
+// Range=0 (disabled), 1–32767
+const auto FM_MP_RELEASE_DEFAULT = 0x0028;
+
+// 0x1A04 FM_HICUT_MULTIPATH_TRIGGER_THRESHOLD
+// MULT at which hi‑cut starts band‑limiting
+// Default=20 Range=0–100
+const auto FM_HICUT_MP_TRIGGER_DEFAULT = 20;
+
+// 0x1A05 FM_HICUT_MULTIPATH_END_THRESHOLD
+// MULT at which hi‑cut reaches maximum band‑limiting
+// Default=60 Range=0–100
+const auto FM_HICUT_MP_END_DEFAULT = 60;
 
 // =================================================================================================
 // --------------- LOGIC AND ALGORITHM CONSTANTS ---------------------------------------------------
