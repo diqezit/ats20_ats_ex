@@ -91,14 +91,6 @@ void syncModeDependentSettings(bool load) {
     }
 }
 
-static inline bool checkStopSeeking() {
-    bool result;
-    noInterrupts();  // race protection
-    result = g_seekStop || !(PINC & (1 << (ENCODER_BUTTON - 14)));
-    interrupts();
-    return result;
-}
-
 // Settings: CPU Frequency divider helper
 static void setCpuPrescaler(uint8_t prescaler) {
     noInterrupts();
@@ -120,6 +112,14 @@ static void applyProperties(const uint16_t props[][2]) {
     }
 }
 
+static inline bool checkStopSeeking() {
+    bool result;
+    noInterrupts();  // race protection
+    result = g_seekStop || !(PINC & (1 << (ENCODER_BUTTON - 14)));
+    interrupts();
+    return result;
+}
+
 // ==========================================
 // ===== LOW-LEVEL HARDWARE CONTROL =========
 // ==========================================
@@ -133,18 +133,6 @@ static inline void __attribute__((always_inline)) setAmpState(bool on) {
         AMP_PORT &= ~(1 << AMP_BIT);  // LOW (on)
     } else {
         AMP_PORT |= (1 << AMP_BIT);   // HIGH (off)
-    }
-}
-
-// Manages the audio mute state based on the user-defined Squelch level and current RSSI
-// The function compares the signal strength against the SQL threshold (for non-FM modes)
-static void handleSquelch(void) {
-    uint8_t lvl = g_Settings[SQL].param;
-    bool cut = (lvl && g_currentMode == AM && g_signalQualityValue < lvl);
-
-    if (cut != g_squelchCutoff) {
-        g_si4735.setAudioMute(cut);
-        g_squelchCutoff = cut;
     }
 }
 
@@ -191,6 +179,18 @@ static void updateSSBCutoffFilter() {
         g_si4735.setSSBSidebandCutoffFilter(g_Settings[SettingsIndex::CutoffFilter].param - 1);
 }
 
+// Manages the audio mute state based on the user-defined Squelch level and current RSSI
+// The function compares the signal strength against the SQL threshold (for non-FM modes)
+static void handleSquelch(void) {
+    uint8_t lvl = g_Settings[SQL].param;
+    bool cut = (lvl && g_currentMode == AM && g_signalQualityValue < lvl);
+
+    if (cut != g_squelchCutoff) {
+        g_si4735.setAudioMute(cut);
+        g_squelchCutoff = cut;
+    }
+}
+
 // ==========================================
 // ===== HARDWARE CONFIGURATION =============
 // ==========================================
@@ -219,6 +219,53 @@ static void loadSSBPatch() {
     // allows the step setting for SSB to persist for each band individually for now
 
     setAmpState(true);
+}
+
+// Applies user-defined FM soft mute parameters
+// Separates fixed timing values from adjustable thresholds
+static void applyFmSoftMuteSettings() {
+
+    static const uint16_t fixed_soft_mute_props[][2] PROGMEM = {
+        {0x1300, FM_PROP_SOFTMUTE_RATE},
+        {0x1301, FM_PROP_SOFTMUTE_SLOPE},
+        {0x1304, FM_PROP_SOFTMUTE_REL_RATE},
+        {0x1305, FM_PROP_SOFTMUTE_ATT_RATE},
+        {0, 0} // terminator
+    };
+
+    applyProperties(fixed_soft_mute_props);
+
+    g_si4735.setProperty(0x1302, g_Settings[FmSmAtt].param);
+    g_si4735.setProperty(0x1303, g_Settings[FmSmThr].param);
+}
+
+// Applies or disables AM Noise Blanker based on user settings
+static void applyAMNoiseBlankerSettings() {
+    static const uint16_t am_nb_on_props[][2] PROGMEM = {
+        {AM_NB_DETECT_THRESHOLD_PROP, AM_NB_THRESHOLD_DEFAULT},
+        {AM_NB_INTERVAL_PROP,         AM_NB_INTERVAL_DEFAULT},
+        {AM_NB_RATE_PROP,             AM_NB_RATE_DEFAULT},
+        {AM_NB_IIR_FILTER_PROP,       AM_NB_IIR_FILTER_DEFAULT},
+        {AM_NB_DELAY_PROP,            AM_NB_DELAY_DEFAULT},
+        {0, 0} // terminator
+    };
+    static const uint16_t am_nb_off_props[][2] PROGMEM = {
+        // setting threshold to 0 disables feature per datasheet
+        {AM_NB_DETECT_THRESHOLD_PROP, 0},
+        {0, 0} // terminator
+    };
+
+    // apply appropriate set of properties based on user setting
+    if (g_Settings[AMNoiseBlanker].param == 1) {
+        applyProperties(am_nb_on_props);
+    } else {
+        applyProperties(am_nb_off_props);
+    }
+}
+
+// Applies user setting for forcing mono or allowing auto-stereo in FM mode
+static void applyFMStereoSettings() {
+    g_si4735.setFmStereoMode(g_Settings[ForceMono].param == 1);
 }
 
 // Applies all FM-specific audio enhancements
@@ -269,53 +316,6 @@ static void FMAudioConfigure() {
     }
 }
 
-// Applies user-defined FM soft mute parameters
-// Separates fixed timing values from adjustable thresholds
-static void applyFmSoftMuteSettings() {
-
-    static const uint16_t fixed_soft_mute_props[][2] PROGMEM = {
-        {0x1300, FM_PROP_SOFTMUTE_RATE},
-        {0x1301, FM_PROP_SOFTMUTE_SLOPE},
-        {0x1304, FM_PROP_SOFTMUTE_REL_RATE},
-        {0x1305, FM_PROP_SOFTMUTE_ATT_RATE},
-        {0, 0} // terminator
-    };
-
-    applyProperties(fixed_soft_mute_props);
-
-    g_si4735.setProperty(0x1302, g_Settings[FmSmAtt].param);
-    g_si4735.setProperty(0x1303, g_Settings[FmSmThr].param);
-}
-
-// Applies or disables AM Noise Blanker based on user settings
-static void applyAMNoiseBlankerSettings() {
-    static const uint16_t am_nb_on_props[][2] PROGMEM = {
-        {AM_NB_DETECT_THRESHOLD_PROP, AM_NB_THRESHOLD_DEFAULT},
-        {AM_NB_INTERVAL_PROP,         AM_NB_INTERVAL_DEFAULT},
-        {AM_NB_RATE_PROP,             AM_NB_RATE_DEFAULT},
-        {AM_NB_IIR_FILTER_PROP,       AM_NB_IIR_FILTER_DEFAULT},
-        {AM_NB_DELAY_PROP,            AM_NB_DELAY_DEFAULT},
-        {0, 0} // terminator
-    };
-    static const uint16_t am_nb_off_props[][2] PROGMEM = {
-        // setting threshold to 0 disables feature per datasheet
-        {AM_NB_DETECT_THRESHOLD_PROP, 0},
-        {0, 0} // terminator
-    };
-
-    // apply appropriate set of properties based on user setting
-    if (g_Settings[AMNoiseBlanker].param == 1) {
-        applyProperties(am_nb_on_props);
-    } else {
-        applyProperties(am_nb_off_props);
-    }
-}
-
-// Applies user setting for forcing mono or allowing auto-stereo in FM mode
-static void applyFMStereoSettings() {
-    g_si4735.setFmStereoMode(g_Settings[ForceMono].param == 1);
-}
-
 // Orchestrates complete Si4735 setup for FM mode
 // Main entry point when switching to any FM band
 // - Sets essential parameters like frequency limits and step from band data
@@ -354,6 +354,55 @@ static void configureFMMode() {
     FMAudioConfigure();
 
     applyFMStereoSettings();
+}
+
+// Configures chip for standard AM reception
+// consolidating all critical audio and gain settings into single block immediately
+// following setAM command it resolves
+static void configureAMMode(uint16_t minFreq, uint16_t maxFreq) {
+    g_currentMode = AM;
+    const Band& current_band = g_bandList[g_bandIndex];
+    ModeContext modeCtx = getModeContext();
+
+    // Set primary mode and frequency
+    g_si4735.setAM(
+        minFreq,
+        maxFreq,
+        current_band.currentFreq,
+        g_tabStep[current_band.stepIdxAM]);
+
+    // Bandwidth
+    g_si4735.setBandwidth(g_bwAMIdx[current_band.bwIdxAM], 1);
+
+    // Soft Mute settings
+    g_si4735.setProperty(AM_SOFT_MUTE_SLOPE_PROP, AM_SOFT_MUTE_SLOPE_RECOMMENDED); // new
+    g_si4735.setAmSoftMuteMaxAttenuation(g_modeSettings[MODE_SETTING_SOFT_MUTE][modeCtx]);
+    g_si4735.setAMSoftMuteSnrThreshold(g_Settings[SoftMuteThr].param);
+
+    // AGC settings - deliberate duplication
+    // block is critical for timing on cold start
+    int8_t att_val = g_modeSettings[MODE_SETTING_AGC][modeCtx];
+    setAgcHardware(att_val);
+
+    // AVC Gain - must be set unconditionally
+    g_si4735.setAvcAmMaxGain(g_modeSettings[MODE_SETTING_AVC][modeCtx]);
+}
+
+// Centralizes setup for properties shared between AM and SSB to avoid code duplication
+// - Unconditionally applies AVC max gain to ensure correct audio levels
+// - Sets custom seek thresholds for improved weak station performance
+static void configureAMCommon(uint16_t minFreq, uint16_t maxFreq) {
+    ModeContext modeCtx = getModeContext();
+
+    g_si4735.setAvcAmMaxGain(g_modeSettings[MODE_SETTING_AVC][modeCtx]);
+
+    g_si4735.setSeekAmLimits(minFreq, maxFreq);
+
+    // Custom seek thresholds to improve seek on weak stations
+    g_si4735.setProperty(AM_SEEK_SNR_THRESHOLD_PROP, AM_SEEK_SNR_THRESHOLD_VAL);
+    g_si4735.setProperty(AM_SEEK_RSSI_THRESHOLD_PROP, AM_SEEK_RSSI_THRESHOLD_VAL);
+
+    applyAMNoiseBlankerSettings();
 }
 
 // Orchestrates Si4735 setup for SSB and CW modes
@@ -408,55 +457,6 @@ static void configureSSBMode(
     );
     updateBFO();
     g_si4735.setSSBSoftMute(g_Settings[SSM].param);
-}
-
-// Configures chip for standard AM reception
-// consolidating all critical audio and gain settings into single block immediately
-// following setAM command it resolves
-static void configureAMMode(uint16_t minFreq, uint16_t maxFreq) {
-    g_currentMode = AM;
-    const Band& current_band = g_bandList[g_bandIndex];
-    ModeContext modeCtx = getModeContext();
-
-    // Set primary mode and frequency
-    g_si4735.setAM(
-        minFreq,
-        maxFreq,
-        current_band.currentFreq,
-        g_tabStep[current_band.stepIdxAM]);
-
-    // Bandwidth
-    g_si4735.setBandwidth(g_bwAMIdx[current_band.bwIdxAM], 1);
-
-    // Soft Mute settings
-    g_si4735.setProperty(AM_SOFT_MUTE_SLOPE_PROP, AM_SOFT_MUTE_SLOPE_RECOMMENDED); // new
-    g_si4735.setAmSoftMuteMaxAttenuation(g_modeSettings[MODE_SETTING_SOFT_MUTE][modeCtx]);
-    g_si4735.setAMSoftMuteSnrThreshold(g_Settings[SoftMuteThr].param);
-
-    // AGC settings - deliberate duplication
-    // block is critical for timing on cold start
-    int8_t att_val = g_modeSettings[MODE_SETTING_AGC][modeCtx];
-    setAgcHardware(att_val);
-
-    // AVC Gain - must be set unconditionally
-    g_si4735.setAvcAmMaxGain(g_modeSettings[MODE_SETTING_AVC][modeCtx]);
-}
-
-// Centralizes setup for properties shared between AM and SSB to avoid code duplication
-// - Unconditionally applies AVC max gain to ensure correct audio levels
-// - Sets custom seek thresholds for improved weak station performance
-static void configureAMCommon(uint16_t minFreq, uint16_t maxFreq) {
-    ModeContext modeCtx = getModeContext();
-
-    g_si4735.setAvcAmMaxGain(g_modeSettings[MODE_SETTING_AVC][modeCtx]);
-
-    g_si4735.setSeekAmLimits(minFreq, maxFreq);
-
-    // Custom seek thresholds to improve seek on weak stations
-    g_si4735.setProperty(AM_SEEK_SNR_THRESHOLD_PROP, AM_SEEK_SNR_THRESHOLD_VAL);
-    g_si4735.setProperty(AM_SEEK_RSSI_THRESHOLD_PROP, AM_SEEK_RSSI_THRESHOLD_VAL);
-
-    applyAMNoiseBlankerSettings();
 }
 
 // Applies AGC settings based on current mode and stored values
@@ -540,7 +540,6 @@ static inline void setupSeekParameters(uint16_t minLimit, uint16_t maxLimit) {
         g_si4735.setSeekFmSpacing(10);
     }
 }
-
 
 // ==========================================
 // ===== STATE & ACTION MANAGEMENT ==========
@@ -1068,15 +1067,12 @@ static void doStep(int8_t v) {
 //Volume control
 static void doVolume(int8_t v) {
     int8_t vol;
-    if (g_muteVolume) {
-        vol = g_muteVolume;
-        g_muteVolume = 0;
-    } else {
-        vol = g_si4735.getCurrentVolume() + v;
-        if (vol < 0) vol = 0;
-        else if (vol > 63) vol = 63;
-    }
-    g_si4735.setVolume(vol);
+    g_si4735.setVolume(
+        vol = g_muteVolume
+        ? (vol = g_muteVolume, g_muteVolume = 0, vol)
+        : ((vol = g_si4735.getCurrentVolume() + v),
+            vol < 0 ? 0 : (vol > 63 ? 63 : vol))
+    );
     showVolume();
 }
 
@@ -1340,7 +1336,7 @@ void doSquelch(int8_t v) {
 // Range: 0 (disabled) to 31 (max)
 void doFmSoftMuteAtt(int8_t v) {
     doSwitchLogic(g_Settings[FmSmAtt].param, 0, FM_SOFT_MUTE_MAX_ATTN_LEVEL, v);
-    if (g_currentMode == FM) 
+    if (g_currentMode == FM)
         g_si4735.setProperty(FM_PROP_SOFTMUTE_MAX_ATTN_ADDR, g_Settings[FmSmAtt].param);
 }
 

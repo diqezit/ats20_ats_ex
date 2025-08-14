@@ -13,32 +13,6 @@
 static constexpr uint16_t BAND_LP_REPEAT_MS = 240;
 
 // ==========================================
-// =============== INPUT: HELPERS ===========
-// ==========================================
-
-// Helper function to manage display power and CPU speed
-// Consolidates logic for turning the display on or off
-static inline void setDisplayPower(bool on) {
-    g_displayOn = on;
-    if (on) {
-        setCpuPrescaler(g_Settings[SettingsIndex::CPUSpeed].param);
-        oled.setPower(true);
-    } else {
-        setCpuPrescaler(1);         // 8 MHz for responsive handler
-        oled.setPower(false);
-    }
-    autoDisplayOff = false;         // always manual action or wake-up fo reset autoflag
-}
-
-// Wake display on user activity but only if it was turned off by timeout
-static inline void wakeUpDisplayIfNeeded() {
-    if (!g_displayOn && autoDisplayOff) {
-        setDisplayPower(true);
-        g_lastUserActivityTime = millis() / 1000;
-    }
-}
-
-// ==========================================
 // ===== INPUT: ROTARY ENCODER & BUTTONS ====
 // ==========================================
 
@@ -64,6 +38,32 @@ void updateEncoderState() {
         g_safeEncoderMovement += g_encoderCount;
         g_encoderCount = 0;
         interrupts();
+    }
+}
+
+// ==========================================
+// =============== INPUT: HELPERS ===========
+// ==========================================
+
+// Helper function to manage display power and CPU speed
+// Consolidates logic for turning the display on or off
+static inline void setDisplayPower(bool on) {
+    g_displayOn = on;
+    if (on) {
+        setCpuPrescaler(g_Settings[SettingsIndex::CPUSpeed].param);
+        oled.setPower(true);
+    } else {
+        setCpuPrescaler(1);         // 8 MHz for responsive handler
+        oled.setPower(false);
+    }
+    autoDisplayOff = false;         // always manual action or wake-up fo reset autoflag
+}
+
+// Wake display on user activity but only if it was turned off by timeout
+static inline void wakeUpDisplayIfNeeded() {
+    if (!g_displayOn && autoDisplayOff) {
+        setDisplayPower(true);
+        g_lastUserActivityTime = millis() / 1000;
     }
 }
 
@@ -143,6 +143,45 @@ static inline void exitFavoritesMenu() {
     g_lastAdjustmentTime = 0; // Reset auto-exit timer
     oled.clear();
     showStatus();
+}
+
+// Handle encoder rotation for favorites list
+// enabling circular navigation
+static void handleFavoritesMenu() {
+    if (g_safeEncoderMovement) {
+        g_lastAdjustmentTime = millis(); // Reset timer on encoder rotation
+        if (g_totalFavorites > 0) {
+            // Using doSwitchLogic for clean, wraparound navigation
+            doSwitchLogic((int8_t&)g_favoriteSelected, 0, g_totalFavorites - 1, g_safeEncoderMovement);
+            showFavorites();
+        }
+        g_safeEncoderMovement = 0;
+    }
+}
+
+// Handles all button inputs when the favorites menu is active
+// It acts as a simple dispatcher, calling other functions for complex actions
+static void processFavoritesMenuControls() {
+    // Encoder press - select favorite and tune to it
+    if (BUTTONEVENT_SHORTPRESS == btn_Encoder.checkEvent(simpleEvent)) {
+        tuneToSelectedFavorite();
+        exitFavoritesMenu();
+        return;
+    }
+
+    // Bandwidth press -  delete selected favorite
+    if (BUTTONEVENT_SHORTPRESS == btn_Bandwidth.checkEvent(simpleEvent)) {
+        deleteFavorite();
+        showFavorites(true);
+        g_lastAdjustmentTime = millis();
+        return;
+    }
+
+    // Step press - exit menu without tuning
+    if (BUTTONEVENT_SHORTPRESS == btn_Step.checkEvent(simpleEvent)) {
+        exitFavoritesMenu();
+        return;
+    }
 }
 #endif
 
@@ -272,98 +311,6 @@ static void handleModeLongDone() {
     if (isSSB()) doSync(0);
 }
 
-
-// ==========================================
-// ===== TABLE-DRIVEN BUTTON DISPATCHER =====
-// ==========================================
-
-// This table-driven approach centralizes all button logic in one place
-// It avoids a large, hard-to-follow if/else block in the main processing loop
-// To change a button purpose or add a new one, you only edit or add a line here
-// This keeps the button-to-action mapping clear and separate from the action functions themselves
-using CheckFn = uint8_t(*)(uint8_t, uint8_t);
-using ActionFn = void (*)();
-
-struct ButtonAction {
-    SimpleButton& btn;
-    CheckFn  checkFn;
-    ActionFn onShortPress;
-    ActionFn onLongDone;
-    CommandMode cmdToSwitch; // For simple actions that just switch command mode
-};
-
-// Simple actions (like switching to CMD_VOLUME) now use cmdToSwitch
-// which removes the need for many small, single-purpose handler functions
-static ButtonAction buttonActions[] = {
-    { btn_Encoder,   simpleEvent, handleEncoderShortPress,    nullptr,                  CMD_NONE },
-    { btn_Bandwidth, simpleEvent, nullptr,                    handleBandwidthLongDone,  CMD_BW },
-    { btn_BandUp,    bandEvent,   handleBandUpShortPress,     nullptr,                  CMD_NONE },
-    { btn_BandDn,    bandEvent,   handleBandDownShortPress,   nullptr,                  CMD_NONE },
-    { btn_VolumeUp,  volumeEvent, nullptr,                    nullptr,                  CMD_VOLUME },
-    { btn_VolumeDn,  volumeEvent, handleVolumeDownShortPress, nullptr,                  CMD_NONE },
-    { btn_AGC,       simpleEvent, handleAgcShortPress,        handleAgcLongDone,        CMD_NONE },
-    { btn_Step,      simpleEvent, nullptr,                    handleStepLongDone,       CMD_STEP },
-    { btn_Mode,      simpleEvent, handleModeShortPress,       handleModeLongDone,       CMD_NONE },
-};
-
-#if ENABLE_FAVORITES
-// Handles all button inputs when the favorites menu is active
-// It acts as a simple dispatcher, calling other functions for complex actions
-static void processFavoritesMenuControls() {
-    // Encoder press - select favorite and tune to it
-    if (BUTTONEVENT_SHORTPRESS == btn_Encoder.checkEvent(simpleEvent)) {
-        tuneToSelectedFavorite();
-        exitFavoritesMenu();
-        return;
-    }
-
-    // Bandwidth press -  delete selected favorite
-    if (BUTTONEVENT_SHORTPRESS == btn_Bandwidth.checkEvent(simpleEvent)) {
-        deleteFavorite();
-        showFavorites(true);
-        g_lastAdjustmentTime = millis();
-        return;
-    }
-
-    // Step press - exit menu without tuning
-    if (BUTTONEVENT_SHORTPRESS == btn_Step.checkEvent(simpleEvent)) {
-        exitFavoritesMenu();
-        return;
-    }
-}
-#endif
-
-// Central dispatcher for button presses
-// giving priority to favorites menu with its unique control scheme
-void processButtonEvents() {
-#if ENABLE_FAVORITES
-    if (g_favoritesActive) {
-        processFavoritesMenuControls();
-        return;
-    }
-#endif
-
-    for (auto& action : buttonActions) {
-        uint8_t evt = action.btn.checkEvent(action.checkFn);
-
-        if (evt && !g_displayOn && autoDisplayOff) {
-            wakeUpDisplayIfNeeded();
-            return;
-        }
-
-        if (evt == BUTTONEVENT_SHORTPRESS) {
-            if (action.onShortPress) {
-                action.onShortPress();
-            } else if (action.cmdToSwitch != CMD_NONE) {
-                switchCommand(action.cmdToSwitch);
-            }
-        } else if (evt == BUTTONEVENT_LONGPRESSDONE && action.onLongDone) {
-            action.onLongDone();
-        }
-    }
-}
-
-
 // ==========================================
 // ===== COMMAND MODE & ENCODER LOGIC =======
 // ==========================================
@@ -402,38 +349,31 @@ void resetCommandMode() {
     }
 }
 
-#if ENABLE_FAVORITES
-// Handle encoder rotation for favorites list
-// enabling circular navigation
-static void handleFavoritesMenu() {
-    if (g_safeEncoderMovement) {
-        g_lastAdjustmentTime = millis(); // Reset timer on encoder rotation
-        if (g_totalFavorites > 0) {
-            // Using doSwitchLogic for clean, wraparound navigation
-            doSwitchLogic((int8_t&)g_favoriteSelected, 0, g_totalFavorites - 1, g_safeEncoderMovement);
-            showFavorites();
-        }
-        g_safeEncoderMovement = 0;
-    }
-}
-#endif
-
 // Handle encoder for navigating settings items
 // with wrap-around to cycle through options
-static inline void navigateSettingsPage(int encoder_delta) {
-    int8_t prev = g_SettingSelected;
-    g_SettingSelected += encoder_delta;
-    uint8_t page = g_SettingsPage - 1;
+static void navigateSettingsPage(int encoder_delta) {
+    if (!encoder_delta) return;
 
-    uint8_t a = (page * 6) + 5;
-    uint8_t b = SettingsIndex::SETTINGS_MAX - 1;
-    uint8_t max = (a < b) ? a : b;
+    const uint8_t total = SettingsIndex::SETTINGS_MAX;
+    uint8_t prev = (uint8_t)g_SettingSelected;
 
-    if (g_SettingSelected < page * 6) g_SettingSelected = max;
-    else if (g_SettingSelected > max) g_SettingSelected = page * 6;
+    int16_t t = (int16_t)prev + (int16_t)encoder_delta;
+    while (t < 0)      t += total;
+    while (t >= total) t -= total;
 
-    DrawSetting(prev, true);
-    DrawSetting(g_SettingSelected, true);
+    g_SettingSelected = (int8_t)t;
+
+    uint8_t newPage = (t < 6) ? 1 : (t < 12) ? 2 : (t < 18) ? 3 : (t < 24) ? 4 : 5;
+
+    if (newPage != (uint8_t)g_SettingsPage) {
+        g_SettingsPage = (int8_t)newPage;
+        oled.clear();
+        showSettingsTitle();
+        showSettings();
+    } else if (prev != (uint8_t)g_SettingSelected) {
+        DrawSetting(prev, true);
+        DrawSetting(g_SettingSelected, true);
+    }
 }
 
 // Dispatch encoder actions in settings menu
@@ -476,6 +416,69 @@ static inline bool processEncoderForCommands(int encoder_delta) {
         return true;
     }
     return false;
+}
+
+// ==========================================
+// ===== TABLE-DRIVEN BUTTON DISPATCHER =====
+// ==========================================
+
+// This table-driven approach centralizes all button logic in one place
+// It avoids a large, hard-to-follow if/else block in the main processing loop
+// To change a button purpose or add a new one, you only edit or add a line here
+// This keeps the button-to-action mapping clear and separate from the action functions themselves
+using CheckFn = uint8_t(*)(uint8_t, uint8_t);
+using ActionFn = void (*)();
+
+struct ButtonAction {
+    SimpleButton& btn;
+    CheckFn  checkFn;
+    ActionFn onShortPress;
+    ActionFn onLongDone;
+    CommandMode cmdToSwitch; // For simple actions that just switch command mode
+};
+
+// Simple actions (like switching to CMD_VOLUME) now use cmdToSwitch
+// which removes the need for many small, single-purpose handler functions
+static ButtonAction buttonActions[] = {
+    { btn_Encoder,   simpleEvent, handleEncoderShortPress,    nullptr,                  CMD_NONE },
+    { btn_Bandwidth, simpleEvent, nullptr,                    handleBandwidthLongDone,  CMD_BW },
+    { btn_BandUp,    bandEvent,   handleBandUpShortPress,     nullptr,                  CMD_NONE },
+    { btn_BandDn,    bandEvent,   handleBandDownShortPress,   nullptr,                  CMD_NONE },
+    { btn_VolumeUp,  volumeEvent, nullptr,                    nullptr,                  CMD_VOLUME },
+    { btn_VolumeDn,  volumeEvent, handleVolumeDownShortPress, nullptr,                  CMD_NONE },
+    { btn_AGC,       simpleEvent, handleAgcShortPress,        handleAgcLongDone,        CMD_NONE },
+    { btn_Step,      simpleEvent, nullptr,                    handleStepLongDone,       CMD_STEP },
+    { btn_Mode,      simpleEvent, handleModeShortPress,       handleModeLongDone,       CMD_NONE },
+};
+
+// Central dispatcher for button presses
+// giving priority to favorites menu with its unique control scheme
+void processButtonEvents() {
+#if ENABLE_FAVORITES
+    if (g_favoritesActive) {
+        processFavoritesMenuControls();
+        return;
+    }
+#endif
+
+    for (auto& action : buttonActions) {
+        uint8_t evt = action.btn.checkEvent(action.checkFn);
+
+        if (evt && !g_displayOn && autoDisplayOff) {
+            wakeUpDisplayIfNeeded();
+            return;
+        }
+
+        if (evt == BUTTONEVENT_SHORTPRESS) {
+            if (action.onShortPress) {
+                action.onShortPress();
+            } else if (action.cmdToSwitch != CMD_NONE) {
+                switchCommand(action.cmdToSwitch);
+            }
+        } else if (evt == BUTTONEVENT_LONGPRESSDONE && action.onLongDone) {
+            action.onLongDone();
+        }
+    }
 }
 
 // Main orchestrator for encoder actions

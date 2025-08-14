@@ -130,6 +130,21 @@ static void getBandName(char* buffer, uint8_t band_idx) {
 // ===== UI DRAWING UTILITIES ===============
 // ==========================================
 
+// Utility to clear a rectangular region of the display
+static inline void clearBox(uint8_t x, uint8_t y, uint8_t w, uint8_t h) {
+    // null pointer in partialUpdate clears the area
+    oled.partialUpdate(x, y, w, h, NULL);
+}
+
+// Sets cursor, prints text with optional inversion, and resets inversion state
+template <typename T>
+static void drawInverted(uint8_t x, uint8_t y, T text, bool invert) {
+    oled.setCursor(x, y);
+    oled.invertText(invert);
+    oled.print(text);
+    oled.invertText(false); // Always reset state to non-inverted
+}
+
 // Pre-calculates width of main frequency digits for alignment purposes
 // This avoids building the string just to measure it, which is faster
 static inline uint16_t freqMainWidth(uint8_t displayMode, uint16_t khzBFO, uint8_t dotPos, bool ssbMode) {
@@ -141,22 +156,6 @@ static inline uint16_t freqMainWidth(uint8_t displayMode, uint16_t khzBFO, uint8
     if (hasDot) w += SEVEN_SEG_DOT_WIDTH;
     if (totalChars > 1) w += (uint16_t)(totalChars - 1) * DIGIT_SPACING;
     return w;
-}
-
-// Utility to clear a rectangular region of the display
-static inline void clearBox(uint8_t x, uint8_t y, uint8_t w, uint8_t h) {
-    // null pointer in partialUpdate clears the area
-    oled.partialUpdate(x, y, w, h, NULL);
-}
-
-// Calculates X/Y position for a setting based on its index
-// This arranges settings into two columns for a compact menu
-static void calcSettingPos(uint8_t idx, uint8_t& xOffset, uint8_t& yOffset) {
-    uint8_t place = idx % UI_SETTINGS_PER_PAGE; // Position within the current page
-    bool isRight = place >= UI_SETTINGS_PER_COL;
-    xOffset = isRight ? UI_SETTINGS_RIGHT_COL_X : UI_SETTINGS_LEFT_COL_X;
-    uint8_t withinCol = place - (isRight ? UI_SETTINGS_PER_COL : 0);
-    yOffset = UI_SETTINGS_ROW_START + withinCol * UI_SETTINGS_ROW_STEP;
 }
 
 // Renders just the SSB tail digits (e.g., ".00") with spacing
@@ -179,13 +178,14 @@ static int drawSSBTailIfNeeded(bool ssb, int x, int y, uint16_t tail) {
     return drawSSBTailDigits(x, y, tail);
 }
 
-// Sets cursor, prints text with optional inversion, and resets inversion state
-template <typename T>
-static void drawInverted(uint8_t x, uint8_t y, T text, bool invert) {
-    oled.setCursor(x, y);
-    oled.invertText(invert);
-    oled.print(text);
-    oled.invertText(false); // Always reset state to non-inverted
+// Calculates X/Y position for a setting based on its index
+// This arranges settings into two columns for a compact menu
+static void calcSettingPos(uint8_t idx, uint8_t& xOffset, uint8_t& yOffset) {
+    uint8_t place = idx % UI_SETTINGS_PER_PAGE; // Position within the current page
+    bool isRight = place >= UI_SETTINGS_PER_COL;
+    xOffset = isRight ? UI_SETTINGS_RIGHT_COL_X : UI_SETTINGS_LEFT_COL_X;
+    uint8_t withinCol = place - (isRight ? UI_SETTINGS_PER_COL : 0);
+    yOffset = UI_SETTINGS_ROW_START + withinCol * UI_SETTINGS_ROW_STEP;
 }
 
 // Draws a single item (name and value) in the settings menu
@@ -203,38 +203,8 @@ static void drawSettingItem(
 }
 
 // ==========================================
-// ===== UI DRAWING SUBSYSTEM ===============
+// ===== UI: MAIN SCREEN COMPONENTS =========
 // ==========================================
-
-// Maps user brightness 0-9 to a non-linear contrast curve
-// This provides finer control at lower brightness levels where it matters most
-static void applyBrightness() {
-    uint8_t s = g_Settings[Brightness].param;
-
-    // A quadratic-like curve to make low-end adjustments less drastic
-    uint8_t contrast_value = (((uint32_t)s * ((uint16_t)s * 130 + 6060)) >> 8);
-
-    oled.setContrast(contrast_value + 1);
-}
-
-// Startup screen
-void showSplashScreen() {
-    oled.clear();
-
-    drawInverted(UI_SPLASH_LINE1_X, UI_SPLASH_LINE1_ROW, APP_NAME_LINE1, false);
-    drawInverted(UI_SPLASH_LINE2_X, UI_SPLASH_LINE2_ROW, F("MOD NO RDS"), false);
-
-#if ANIMATE_SPLASH
-    for (int i = 0; i < UI_SPLASH_ANIM_STEPS; i++) {
-        oled.setCursor(i * UI_CHAR_W, UI_SPLASH_ANIM_ROW);
-        oled.print('-');
-        delay(UI_SPLASH_ANIM_DELAY_MS);
-    }
-#endif
-
-    delay(UI_SPLASH_HOLD_MS);
-    oled.clear();
-}
 
 // Determines display properties like units (kHz/MHz) based on current band and mode
 static void prepareDisplayConfig(
@@ -426,14 +396,6 @@ static void showVolume() {
     drawInverted(UI_VOLUME_X, UI_VOLUME_ROW, buf, invert);
 }
 
-// Displays a confirmation message when a station is saved to favorites
-void showSavedConfirmation() {
-    oled.setCursor(UI_SAVED_MSG_X, UI_SAVED_MSG_ROW);
-    oled.print(F("SAVED"));
-    delay(UI_SAVED_MSG_MS);
-    showStatus(true); // Redraw the main screen to clear the message
-}
-
 // Displays the current signal quality value (RSSI) and RF hints
 // draw RSSI at fixed slot and refresh RF hints below volume
 static void showSignalQuality() {
@@ -537,20 +499,9 @@ static void showBandwidth() {
     drawInverted(UI_BW_LABEL_X, UI_BW_LABEL_ROW, (__FlashStringHelper*)bw_str_ptr, invert);
 }
 
-// Orchestrator for drawing the main status screen
-void showStatus(bool cleanFreq) {
-    showSignalQuality();
-    showFrequency(cleanFreq);
-    showModulation();
-    showStep();
-    showBandwidth();
-#if ENABLE_BATTERY_MONITOR
-    updateAndShowBattery(true);
-#endif
-    showVolume();
-}
-
-// --- UI: Favorites Menu Drawing ---
+// ==========================================
+// ===== UI: FAVORITES MENU DRAWING =========
+// ==========================================
 
 #if ENABLE_FAVORITES
 
@@ -755,7 +706,9 @@ static void showFavorites(bool force_redraw) {
 
 #endif  // ENABLE_FAVORITES
 
-// --- UI: Settings Menu Drawing ---
+// ==========================================
+// ===== UI: SETTINGS MENU DRAWING ==========
+// ==========================================
 
 // builds user-facing text for switch-like params
 static inline void handleSwitchParam(
@@ -859,4 +812,59 @@ static void showSettingsTitle() {
 static void showSettings() {
     for (uint8_t i = 0; i < UI_SETTINGS_PER_PAGE && i + ((g_SettingsPage - 1) * UI_SETTINGS_PER_PAGE) < SETTINGS_MAX; i++)
         DrawSetting(i + ((g_SettingsPage - 1) * UI_SETTINGS_PER_PAGE), true);
+}
+
+// ==========================================
+// ===== UI: ORCHESTRATORS & GENERAL ========
+// ==========================================
+
+// Maps user brightness 0-9 to a non-linear contrast curve
+// This provides finer control at lower brightness levels where it matters most
+static void applyBrightness() {
+    uint8_t s = g_Settings[Brightness].param;
+
+    // A quadratic-like curve to make low-end adjustments less drastic
+    uint8_t contrast_value = (((uint32_t)s * ((uint16_t)s * 130 + 6060)) >> 8);
+
+    oled.setContrast(contrast_value + 1);
+}
+
+// Startup screen
+void showSplashScreen() {
+    oled.clear();
+
+    drawInverted(UI_SPLASH_LINE1_X, UI_SPLASH_LINE1_ROW, APP_NAME_LINE1, false);
+    drawInverted(UI_SPLASH_LINE2_X, UI_SPLASH_LINE2_ROW, F("MOD NO RDS"), false);
+
+#if ANIMATE_SPLASH
+    for (int i = 0; i < UI_SPLASH_ANIM_STEPS; i++) {
+        oled.setCursor(i * UI_CHAR_W, UI_SPLASH_ANIM_ROW);
+        oled.print('-');
+        delay(UI_SPLASH_ANIM_DELAY_MS);
+    }
+#endif
+
+    delay(UI_SPLASH_HOLD_MS);
+    oled.clear();
+}
+
+// Displays a confirmation message when a station is saved to favorites
+void showSavedConfirmation() {
+    oled.setCursor(UI_SAVED_MSG_X, UI_SAVED_MSG_ROW);
+    oled.print(F("SAVED"));
+    delay(UI_SAVED_MSG_MS);
+    showStatus(true); // Redraw the main screen to clear the message
+}
+
+// Orchestrator for drawing the main status screen
+void showStatus(bool cleanFreq) {
+    showSignalQuality();
+    showFrequency(cleanFreq);
+    showModulation();
+    showStep();
+    showBandwidth();
+#if ENABLE_BATTERY_MONITOR
+    updateAndShowBattery(true);
+#endif
+    showVolume();
 }

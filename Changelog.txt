@@ -961,3 +961,15 @@ This version introduces the ability to save your favorite FM stations.
 	Must be cleaner audio under multipath and predictable Hi‑Cut behavior tied to MULT.
 
 ------------------------------------------------------------------------------------------------------------
+
+
+### MOD_NO_RDS v6.3.4
+
+`Input.h`
+
+
+*   **[Improved] Settings navigation UX:** The encoder now scrolls seamlessly across pages. 
+	Reaching the end of a page moves to the first item of the next page, and vice versa (no BAND+ needed inside Settings).
+	Full wrap-around across the entire list is preserved. BAND+/BAND− still work as page shortcuts.
+
+------------------------------------------------------------------------------------------------------------
