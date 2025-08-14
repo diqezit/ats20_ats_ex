@@ -172,6 +172,8 @@ static void showVolume();
 static void showStep();
 static void showBandwidth();
 static void showModulation();
+static void showSettingsTitle();
+static void showSettings();
 
 // --- Other Global Prototypes ---
 static void applyBandConfiguration(bool extraSSBReset = false);
