@@ -973,3 +973,28 @@ This version introduces the ability to save your favorite FM stations.
 	Full wrap-around across the entire list is preserved. BAND+/BAND− still work as page shortcuts.
 
 ------------------------------------------------------------------------------------------------------------
+
+
+### MOD_NO_RDS v6.3.5
+
+
+*   **[Critical Fix] Overhauled Encoder Handling for System Stability:** 
+	Resolved multiple critical race conditions related to the rotary encoder. This single overhaul:
+    *   Eliminates system freezes (**live-locks**) that occurred during rapid tuning.
+    *   Prevents random unpredictable frequency jumps ensuring smooth and reliable manual tuning.
+    *   Guarantees proper atomic access to shared variables between the main loop and interrupts preventing data corruption.
+
+*   **[Critical Fix] Improved Scan/Seek Responsiveness:** Fixed a race condition in the scan stop mechanism that 
+	could cause the device to ignore user input. 
+	Now immediately responds to stop commands, ensuring full control during automatic station searching.
+
+*   **[Fix] Dual‑Path Band Switching (Fast vs Full):** Split bandSwitch into Fast (LW/MW/SW) and Full (AM↔FM) paths, 
+	eliminating micro‑freezes and unnecessary redraws during rapid band changes.
+
+*   **[Critical Fix] SSB Frequency Corruption on Mode Switch:** Fixed a critical integer overflow bug that caused frequency corruption 
+	(e.g., jumping to `65535 kHz`) when switching from SSB to AM/CW at a band lower edge with a negative BFO. 
+	The normalization logic now uses safe 32-bit arithmetic for all calculations to guarantee stability.
+
+
+------------------------------------------------------------------------------------------------------------
+
