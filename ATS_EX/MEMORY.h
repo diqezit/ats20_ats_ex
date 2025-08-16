@@ -221,7 +221,7 @@ static void readAllReceiverInformation() {
     g_volume = header.volume;
     g_bandIndex = header.bandIndex;
     // Prevent loading an out-of-bounds band index
-    if (g_bandIndex > g_lastBand) g_bandIndex = 1;
+    if (g_bandIndex < 0 || g_bandIndex > g_lastBand) g_bandIndex = 1;
     g_currentMode = header.currentMode;
     g_currentBFO = header.currentBFO;
     g_lastCWMode = header.lastCWMode;

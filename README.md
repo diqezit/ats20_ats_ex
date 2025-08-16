@@ -432,3 +432,18 @@ This procedure resets all settings band states and clears all saved favorites.
 | **`AGC`** | Toggle Screen Power On/Off | Save Current Station to Favorites |
 | **Encoder** | Activate Step OR Start Scan (depends on `SCN` setting) | (No function) |
 
+---
+
+If you encounter difficulties with the new versions, you can temporarily roll back and download the version you like best using:
+
+```
+https://github.com/diqezit/ats20_ats_ex/archive/<commit_hash>.zip
+```
+
+Where **`<commit_hash>`** is copied from the list of commits at:
+[https://github.com/diqezit/ats20\_ats\_ex/commits/mod\_no\_rds/](https://github.com/diqezit/ats20_ats_ex/commits/mod_no_rds/)
+
+This way you will get the firmware archive of the desired version.
+
+Thank you.
+---

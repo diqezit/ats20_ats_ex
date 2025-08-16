@@ -136,9 +136,9 @@ void loadActiveStateFromBand();
 void syncModeDependentSettings(bool load);
 
 // --- Input Handling Orchestrators (called by loop) ---
-bool processEncoderActions();
+inline int16_t getAndResetEncoderCount(volatile int16_t& counter);
+bool processEncoderActions(int16_t movement);
 void processButtonEvents();
-static void handleFavoritesTimeout();
 static void updateEncoderState();
 static void refreshCommandIndicators();
 static void switchSettings();
@@ -146,27 +146,35 @@ static void switchCommand(CommandMode mode);
 static void resetCommandMode();
 static void wakeUpDisplayIfNeeded();
 
+#if ENABLE_FAVORITES
+static void handleFavoritesTimeout();
+static void handleFavoritesMenu(int16_t movement);
+static void addFavorite();
+static void deleteFavorite();
+static void saveFavorites();
+static void loadFavorites();
+void tuneToSelectedFavorite();
+#endif
+
+
 // --- Core Utilities & State Management (needed by Input.h) ---
 static bool isSSB();
 static void doSeek();
 static void switchSettingsPage();
-static void switchSettings();
 static void cycleAmSsbCwModes();
 static void doFrequencyTuneSSB();
 static void doFrequencyTune();
 static void doVolume(int8_t v);
 static void doStep(int8_t v);
 static void doBandwidth(uint8_t v);
-static void addFavorite();
-static void deleteFavorite();
-static void saveFavorites();
-static void loadFavorites();
 static void setCpuPrescaler(uint8_t prescaler);
 static void resetEepromDelay();
 
 // --- UI Drawing (needed by Input.h) ---
 static void DrawSetting(uint8_t idx, bool full);
+#if ENABLE_FAVORITES
 static void showFavorites(bool force_redraw = false);
+#endif
 void showSavedConfirmation();
 static void showVolume();
 static void showStep();
@@ -184,8 +192,6 @@ static void applyBrightness();
 static void loadSSBPatch();
 static void showChargeOnDisplay();
 static void showFrequencySeek(uint16_t freq);
-static void resetCommandMode();
-static void switchCommand(CommandMode mode);
 
 void doAttenuation(int8_t v);
 void doSoftMute(int8_t v);
@@ -217,7 +223,6 @@ void showSplashScreen();
 void showStatus(bool cleanFreq = false);
 void updateAndShowBattery(bool forceShow);
 void updateStereoIndicator();
-void tuneToSelectedFavorite();
 static void showRfHints();
 
 // =================================================================================================
@@ -336,8 +341,8 @@ uint32_t g_lastSetFreqTime;
 // -------------------------------------------------------------------------------------------------
 // Encoder & Buttons
 // -------------------------------------------------------------------------------------------------
-volatile int g_encoderCount;
-int g_safeEncoderMovement;
+volatile int16_t g_encoderCount;
+volatile int16_t g_safeEncoderMovement;
 
 SimpleButton  btn_Bandwidth(BANDWIDTH_BUTTON);
 SimpleButton  btn_BandUp(BAND_BUTTON);

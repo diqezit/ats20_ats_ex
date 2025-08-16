@@ -116,6 +116,12 @@ static void toggleSetting(uint8_t settingIndex) {
     g_Settings[settingIndex].param = 1 - g_Settings[settingIndex].param;
 }
 
+// Helper to clamp an index to a valid range, resetting to 0 if out of bounds
+// 'strict' uses a > comparison, otherwise >= is used
+static inline void clamp_index(int8_t& var, const int8_t max_val, bool strict = false) {
+    if (strict ? (var > max_val) : (var >= max_val)) var = 0;
+}
+
 
 #if DEBUG_MODE
 

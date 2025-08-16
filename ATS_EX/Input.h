@@ -21,8 +21,12 @@ static constexpr uint16_t BAND_LP_REPEAT_MS = 240;
 static void rotaryEncoder() {
     uint8_t encoderStatus = g_encoder.process();
     if (encoderStatus) {
-        noInterrupts();  // for race protection!
-        g_encoderCount = (encoderStatus == DIR_CW) ? 1 : -1;
+        noInterrupts();
+        if (encoderStatus == DIR_CW) {
+            g_encoderCount++;
+        } else {
+            g_encoderCount--;
+        }
         g_seekStop = true;
         interrupts();
     }
@@ -30,15 +34,11 @@ static void rotaryEncoder() {
 
 // Safely read encoder counts from interrupt and filter rapid turns into a single action
 void updateEncoderState() {
-    static uint32_t lastEncoderTime = 0;
-    if (g_encoderCount) {
-        if (millis() - lastEncoderTime < 10) return;
-        lastEncoderTime = millis();
-        noInterrupts();
-        g_safeEncoderMovement += g_encoderCount;
-        g_encoderCount = 0;
-        interrupts();
-    }
+    // Atomically get all steps accumulated in the interrupt
+    int16_t count_delta = getAndResetEncoderCount(g_encoderCount);
+
+    if (count_delta)
+        g_safeEncoderMovement += count_delta;
 }
 
 // ==========================================
@@ -147,15 +147,14 @@ static inline void exitFavoritesMenu() {
 
 // Handle encoder rotation for favorites list
 // enabling circular navigation
-static void handleFavoritesMenu() {
-    if (g_safeEncoderMovement) {
+static void handleFavoritesMenu(int16_t movement) {
+    if (movement) {
         g_lastAdjustmentTime = millis(); // Reset timer on encoder rotation
         if (g_totalFavorites > 0) {
             // Using doSwitchLogic for clean, wraparound navigation
-            doSwitchLogic((int8_t&)g_favoriteSelected, 0, g_totalFavorites - 1, g_safeEncoderMovement);
+            doSwitchLogic((int8_t&)g_favoriteSelected, 0, g_totalFavorites - 1, movement);
             showFavorites();
         }
-        g_safeEncoderMovement = 0;
     }
 }
 
@@ -407,7 +406,9 @@ static inline bool processEncoderForCommands(int encoder_delta) {
     case CMD_SLEEP:
         break;
     case CMD_NONE:
+        noInterrupts();
         g_encoderCount = encoder_delta;
+        interrupts();
         if (isSSB()) {
             doFrequencyTuneSSB();
         } else {
@@ -483,7 +484,7 @@ void processButtonEvents() {
 
 // Main orchestrator for encoder actions
 // determines context and calls correct handler
-bool processEncoderActions() {
+bool processEncoderActions(int16_t movement) {
     if (g_activeCommand != CMD_NONE || g_settingsActive)
         g_lastAdjustmentTime = millis();
 
@@ -492,19 +493,12 @@ bool processEncoderActions() {
     wakeUpDisplayIfNeeded();
 
     if (g_settingsActive) {
-        processEncoderForSettings(g_safeEncoderMovement);
-    }
-#if ENABLE_FAVORITES
-    else if (g_favoritesActive) {
-        handleFavoritesMenu();
-    }
-#endif
-    else {
-        was_tuning_event = processEncoderForCommands(g_safeEncoderMovement);
+        processEncoderForSettings(movement);
+
+    } else {
+        was_tuning_event = processEncoderForCommands(movement);
     }
 
-    g_safeEncoderMovement = 0;
-    g_encoderCount = 0;
     resetEepromDelay();
     return was_tuning_event;
 }

@@ -52,6 +52,18 @@ GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 // ===== CORE UTILITIES & STATE SYNC ========
 // ==========================================
 
+// Helper to atomically read and reset an encoder counter variable
+// Prevents race conditions between the main loop and ISRs.
+// Returns the value read from the counter.
+inline int16_t getAndResetEncoderCount(volatile int16_t& counter) {
+    int16_t value;
+    cli();
+    value = counter;
+    counter = 0;
+    sei();
+    return value;
+}
+
 // most state is already in the band list
 // only need to sync the single live frequency variable
 void syncActiveStateToBand() {
@@ -113,11 +125,24 @@ static void applyProperties(const uint16_t props[][2]) {
 }
 
 static inline bool checkStopSeeking() {
-    bool result;
-    noInterrupts();  // race protection
-    result = g_seekStop || !(PINC & (1 << (ENCODER_BUTTON - 14)));
+    bool seekStopFlag;
+    bool buttonPressed;
+
+    noInterrupts();
+    seekStopFlag = g_seekStop;
     interrupts();
-    return result;
+
+    if (seekStopFlag) return true;
+
+    buttonPressed = !(PINC & (1 << (ENCODER_BUTTON - 14)));
+
+    if (buttonPressed) {
+        noInterrupts();
+        g_seekStop = true;
+        interrupts();
+    }
+
+    return buttonPressed;
 }
 
 // ==========================================
@@ -652,7 +677,7 @@ static void doSeek() {
 
 // switches band index and immediately applies the new band's default state
 static void bandSwitch(bool up, bool loadStoredFreq) {
-    syncActiveStateToBand(); // Save current frequency to RAM
+    syncActiveStateToBand();
     markStateAsDirty();
 
     uint8_t oldBandIndex = g_bandIndex;
@@ -661,7 +686,6 @@ static void bandSwitch(bool up, bool loadStoredFreq) {
     int8_t delta = up ? 1 : -1;
     g_bandIndex = (g_bandIndex + delta + g_bandCount) % g_bandCount;
 
-    // load stored frequency ONLY if requested (for manual band switching BAND+)
     if (loadStoredFreq) loadActiveStateFromBand();
 
     g_lastSavedFrequency = g_currentFrequency;
@@ -669,38 +693,40 @@ static void bandSwitch(bool up, bool loadStoredFreq) {
     BandType oldType = g_bandList[oldBandIndex].bandType;
     BandType newType = g_bandList[g_bandIndex].bandType;
 
-    g_previousFrequency = g_currentFrequency;
-
-    if (oldType != FM_BAND_TYPE && newType != FM_BAND_TYPE) {
-        // fast for seamless transitions within AM/SW bands
-        g_si4735.setFrequency(g_currentFrequency);
-        applyAgcSettings();
-        doBandwidth(0);
-
-        // clear at SW<->MW/LW transition if MHz mode is enabled
-        bool clean = g_Settings[SettingsIndex::SWUnits].param == 1 &&
-            ((oldType == SW_BAND_TYPE) != (newType == SW_BAND_TYPE));
-
-        showFrequency(clean);
-        showBandTag();
-        showStep();
-    } else {
-        // long for major mode changes (like to/from FM - in AM/LW/MW (SSB too)
+    // AM-family <-> FM
+    if ((oldType == FM_BAND_TYPE) != (newType == FM_BAND_TYPE)) {
         applyBandConfiguration();
+        return;
     }
+
+    g_si4735.setFrequency(g_currentFrequency);
+    applyAgcSettings();
+    doBandwidth(0);
+
+    bool clearUnits =
+        (g_Settings[SettingsIndex::SWUnits].param == 1) &&
+        ((oldType == SW_BAND_TYPE) != (newType == SW_BAND_TYPE));
+
+    showFrequency(clearUnits);
+    showBandTag();
+    showStep();
+
+    g_previousFrequency = g_currentFrequency;
 }
 
 // handles frequency tuning for am/fm
 static void doFrequencyTune() {
-    g_seekDirection = g_encoderCount > 0;
+    int16_t encoder_delta = getAndResetEncoderCount(g_encoderCount);
+    if (encoder_delta == 0) return;
+
+    g_seekDirection = encoder_delta > 0;
     const Band& old_band = g_bandList[g_bandIndex];
     uint16_t step = (old_band.bandType == FM_BAND_TYPE)
         ? g_tabStepFM[old_band.stepIdxFM]
         : g_tabStep[old_band.stepIdxAM];
 
     // 32-bit integer is needed here for calculations to prevent underflow on band edges
-    int32_t temp_freq = g_currentFrequency + (int16_t)step * g_encoderCount;
-    g_encoderCount = 0;
+    int32_t temp_freq = g_currentFrequency + (int16_t)step * encoder_delta;
 
     // > for the upper bound to include the maximum frequency value within the band
     bool needs_switch = (temp_freq > old_band.maximumFreq || temp_freq < old_band.minimumFreq);
@@ -741,7 +767,8 @@ static void doFrequencyTune() {
 
 // prepare SSB tune by checking count and calculating temp values
 static inline bool SSBTune(uint16_t& temp_freq, int32_t& temp_bfo) {
-    if (g_encoderCount == 0) return false;
+    int16_t encoder_delta = getAndResetEncoderCount(g_encoderCount);
+    if (encoder_delta == 0) return false;
 
     // store frequency before changes to detect a rollover event
     temp_freq = g_currentFrequency;
@@ -749,8 +776,7 @@ static inline bool SSBTune(uint16_t& temp_freq, int32_t& temp_bfo) {
     // 32-bit integer to prevent overflow during fast encoder spins
     temp_bfo = g_currentBFO;
 
-    temp_bfo += (int32_t)g_tabStep[SSB_STEP_OFFSET + g_bandList[g_bandIndex].stepIdxSSB] * g_encoderCount;
-    g_encoderCount = 0;
+    temp_bfo += (int32_t)g_tabStep[SSB_STEP_OFFSET + g_bandList[g_bandIndex].stepIdxSSB] * encoder_delta;
 
     return true;
 }
@@ -807,26 +833,35 @@ static void doFrequencyTuneSSB() {
 static inline void prepareModeSwitch(int8_t& bw) {
     Band& band = g_bandList[g_bandIndex];
 
-    bw = (g_currentMode == AM) ? band.bwIdxAM : band.bwIdxSSB;
+    bw = (g_currentMode == AM)
+        ? band.bwIdxAM
+        : band.bwIdxSSB;
 
     const uint8_t mode_before = g_currentMode;
 
     // Normalization (gluing whole kHz and remainder in BFO) for SSB/CW
     if (isSSB()) {
+        int32_t f = g_currentFrequency;
         int16_t b = g_currentBFO;
-        int16_t k = (b >= 0) ? b / HZ_PER_KHZ : -((-b + HZ_PER_KHZ - 1) / HZ_PER_KHZ);
-        uint16_t f = g_currentFrequency + k;
+
+        int16_t k = (b >= 0)
+            ? (b / HZ_PER_KHZ)
+            : -((-b + (HZ_PER_KHZ - 1)) / HZ_PER_KHZ);
+
+        f += k;
         b -= k * HZ_PER_KHZ;
 
-        if (f < band.minimumFreq) {
-            f = band.minimumFreq;
-            b = 0;
-        } else if (f > band.maximumFreq) {
-            f = band.maximumFreq;
+        const bool out_of_bounds = (f < band.minimumFreq ||
+            f > band.maximumFreq);
+
+        if (out_of_bounds) {
+            f = (f < band.minimumFreq)
+                ? band.minimumFreq
+                : band.maximumFreq;
             b = 0;
         }
 
-        g_currentFrequency = f;
+        g_currentFrequency = (uint16_t)f;
         g_currentBFO = b;
     }
 
@@ -1380,9 +1415,13 @@ static void handleDelayedFrequencyUpdate() {
 
     uint32_t now = millis();
 
-    if (g_safeEncoderMovement) {
-        g_encoderCount = g_safeEncoderMovement;
-        g_safeEncoderMovement = 0;
+    int16_t safe_encoder_delta = getAndResetEncoderCount(g_safeEncoderMovement);
+
+    if (safe_encoder_delta) {
+        noInterrupts();
+        g_encoderCount += safe_encoder_delta;
+        interrupts();
+
         doFrequencyTune();
         return;
     }
@@ -1601,7 +1640,7 @@ static inline void applyInitialConfiguration() {
     CLKPR = g_Settings[SettingsIndex::CPUSpeed].param;
     interrupts();
 
-    applyBandConfiguration();
+    applyBandConfiguration(false);
     g_currentFrequency = g_si4735.getFrequency();
     g_si4735.setVolume(g_volume);
 
@@ -1631,20 +1670,27 @@ void loop() {
     updateEncoderState();
     checkDisplayTimeout();
 
+    // Atomically get all accumulated encoder movement for this iteration
+    int16_t safe_encoder_delta = getAndResetEncoderCount(g_safeEncoderMovement);
+
 #if ENABLE_FAVORITES
     if (g_favoritesActive) {
-        handleFavoritesMenu();
+        if (safe_encoder_delta) {
+            handleFavoritesMenu(safe_encoder_delta);
+        }
         processButtonEvents();
         handleFavoritesTimeout();
-        return;
+        return; // End iteration if in favorites menu
     }
 #endif
 
     handleDelayedFrequencyUpdate();
 
     bool frequencyTuned = false;
-    if (g_safeEncoderMovement)
-        frequencyTuned = processEncoderActions();
+
+    // Pass the movement value to the main encoder action handler
+    if (safe_encoder_delta)
+        frequencyTuned = processEncoderActions(safe_encoder_delta);
 
     // process buttons only if the encoder was not used for a major tuning event
     if (!frequencyTuned)
