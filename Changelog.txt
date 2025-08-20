@@ -1009,3 +1009,32 @@ This version introduces the ability to save your favorite FM stations.
 	This prevents endless reset loops and blocks all future writes, allowing the receiver to continue operating with default settings.
 
 ------------------------------------------------------------------------------------------------------------
+
+
+### MOD_NO_RDS v6.3.7
+
+`ATS_EX.ino`
+
+*   **[Optimized] Major Flash Footprint Reduction & Micro-Optimizations:**
+    *   Reduced total Flash size by **66 bytes** (30684 → 30618) with no change to RAM usage, behavior, or UI. 
+	This was achieved through a series of micro-optimizations for compiler
+
+*   **[Optimized] Tuning & System Responsiveness:**
+    *   Reworked the `checkStopSeeking()` callback to use a single critical section, making scan/seek stop commands more reliable and immediate.
+    *   Replaced expensive 32-bit `abs()` calls in `performBfoRolloverWithBandCheck()` 
+		and `performFrequencyUpdateCheck()` with direct comparisons and efficient 16-bit math, 
+		improving performance during rapid tuning across band edges.
+
+*   **[Optimized] SSB/CW & FM Path Refinements:**
+    *   Replaced conditional branches for SSB Sync settings with branchless arithmetic (`1-p`, `3*p`), 
+		simplifying the logic in `configureSSBMode()` and `doSync()` handlers.
+    *   Simplified BFO calculation in `updateBFO()` with clearer signed-type handling, 
+		while preserving identical behavior for CW pitch offset and sideband calibration.
+    *   Streamlined FM de-emphasis and stereo mode settings by removing redundant comparisons 
+		and using direct arithmetic/boolean parameter values.
+
+*   **[Optimized] Code Housekeeping & Redundancy Removal:**
+    *   Eliminated duplicated code by reusing the `setCpuPrescaler()` helper during initial setup.
+    *   Improved `applyProperties()` to use a more efficient pointer-based walk over PROGMEM data tables instead of indexed access.
+
+------------------------------------------------------------------------------------------------------------

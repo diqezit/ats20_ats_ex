@@ -51,7 +51,7 @@ constexpr auto EEPROM_FAVORITES_COUNT = 334;            // Size: 1.   End: 335.
 constexpr auto APP_VERSION = 63;
 
 // Centralizes user-facing strings on main screen
-#define APP_NAME_LINE1 F("ATS-20* V6.3.6")
+#define APP_NAME_LINE1 F("ATS-20* V6.3.7")
 
 // Behavior
 constexpr auto SAVE_ON_IDLE_TIMEOUT = 15000UL;          // 15 seconds
@@ -107,7 +107,7 @@ constexpr auto MIN_SETFREQ_INTERVAL_MS = 25UL;
 // Display options
 #define ENABLE_SPLASH_SCREEN 1              // Set to 1 to show splash screen, 0 to disable
 #define ENABLE_EEPROM_RESET_MSG 1           // Set to 1 to show "EEPROM RESET" message, 0 to disable
-#define ANIMATE_SPLASH 0                    // Set to 1 to animate splash screen, 0 to disable
+#define ANIMATE_SPLASH 1                    // Set to 1 to animate splash screen, 0 to disable
 
 // IC options
 #define ENABLE_FAVORITES 1                  // Set to 1 to use unified favorites, 0 to disable
