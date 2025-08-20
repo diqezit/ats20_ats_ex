@@ -5,6 +5,12 @@
 // Handles saving and loading all persistent receiver state
 // ======================================================================
 
+// Global flag for EEPROM wear detection
+static bool g_eepromBad = false;
+
+// Macro to skip EEPROM writes if wear detected
+#define CHECK_EEPROM_WEAR() if (g_eepromBad) return
+
 // ==========================================
 // ===== UI & MESSAGING HELPERS =============
 // ==========================================
@@ -14,7 +20,9 @@
 static void drawEepromResetMsg() {
     oled.clear();
     oled.setCursor(40, 2);
-    oled.print(F("EEPROM RESET"));
+    oled.print(g_eepromBad
+        ? F("EEPROM WEAR")
+        : F("EEPROM RESET"));
     delay(2000);
 }
 #endif
@@ -47,6 +55,8 @@ struct __attribute__((packed)) BandStatePacked {
 // --- Band State ---
 // Pack runtime band data into a compact struct and save to EEPROM
 static void saveBandState(uint8_t bandIndex) {
+    CHECK_EEPROM_WEAR();
+
     BandStatePacked state;
     const Band& band = g_bandList[bandIndex];
     state.currentFreq = band.currentFreq;
@@ -81,10 +91,20 @@ static void loadBandState(uint8_t bandIndex) {
     band.bwIdxSSB = (state.packed_ssb >> 4) & 0x0F;
     band.stepIdxFM = state.packed_fm & 0x0F;
     band.bwIdxFM = (state.packed_fm >> 4) & 0x0F;
+
+    // Boundary checks using existing clamp_index function
+    clamp_index(band.bwIdxSSB, 5, true);
+    clamp_index(band.bwIdxAM, 6, true);
+    clamp_index(band.bwIdxFM, 4, true);
+    clamp_index(band.stepIdxAM, 6, true);
+    clamp_index(band.stepIdxSSB, 8, true);
+    clamp_index(band.stepIdxFM, 2, true);
 }
 
 // On partial saves only write current band state to reduce EEPROM wear
 static inline void saveBands(bool full_save) {
+    CHECK_EEPROM_WEAR();
+
     if (full_save) {
         for (uint8_t i = 0; i <= g_lastBand; ++i)
             saveBandState(i);
@@ -103,6 +123,8 @@ static inline void loadBands() {
 #if ENABLE_FAVORITES
 // Write the entire list of favorite stations to EEPROM
 static void saveFavorites() {
+    CHECK_EEPROM_WEAR();
+
     eeprom_update_byte((uint8_t*)EEPROM_FAVORITES_COUNT, g_totalFavorites);
     uint16_t addr = EEPROM_FAVORITES_START;
     for (uint8_t i = 0; i < g_totalFavorites; i++) {
@@ -118,7 +140,7 @@ static void loadFavorites() {
     // Sanity check favorite count to handle uninitialized EEPROM
     if (g_totalFavorites == 0xFF || g_totalFavorites > MAX_FAVORITES) {
         g_totalFavorites = 0;
-        saveFavorites();
+        if (!g_eepromBad) saveFavorites();
         return;
     }
 
@@ -132,18 +154,20 @@ static void loadFavorites() {
 
 // Save or load mode-specific settings as a single block
 static inline void handleModeSettingsEEPROM(bool save) {
-    if (save)
+    if (save) {
+        CHECK_EEPROM_WEAR();
         eeprom_update_block(
             g_modeSettings,
             (void*)EEPROM_MODE_SETTINGS_START,
             sizeof(g_modeSettings)
         );
-    else
+    } else {
         eeprom_read_block(
             g_modeSettings,
             (const void*)EEPROM_MODE_SETTINGS_START,
             sizeof(g_modeSettings)
         );
+    }
 }
 
 // ==========================================
@@ -152,6 +176,11 @@ static inline void handleModeSettingsEEPROM(bool save) {
 
 // Main entry point for writing all receiver state to EEPROM
 static void saveAllReceiverInformation(bool full_save = true) {
+    if (g_eepromBad) {
+        g_stateIsDirty = false;
+        return;
+    }
+
     syncActiveStateToBand();
 
     // Skip write if frequency is unchanged on partial saves to reduce wear
@@ -198,9 +227,7 @@ static void readAllReceiverInformation() {
     // Validate EEPROM data with magic bytes and version, reset to defaults if invalid
     if (eeprom_read_byte((const uint8_t*)EEPROM_APP_ID_ADDRESS) != EEPROM_APP_ID ||
         eeprom_read_byte((const uint8_t*)EEPROM_VERSION_ADDRESS) != APP_VERSION) {
-#if ENABLE_EEPROM_RESET_MSG
-        drawEepromResetMsg();
-#endif
+
         // Populate g_modeSettings from the compile-time defaults already in g_Settings
         syncModeDependentSettings(false);
 
@@ -209,6 +236,15 @@ static void readAllReceiverInformation() {
 #endif
         // Now both RAM arrays are pristine and consistent, save them
         saveAllReceiverInformation(true);
+
+        // Check if write was successful
+        if (eeprom_read_byte((const uint8_t*)EEPROM_APP_ID_ADDRESS) != EEPROM_APP_ID)
+            g_eepromBad = true;
+
+#if ENABLE_EEPROM_RESET_MSG
+        drawEepromResetMsg();
+#endif
+
         loadActiveStateFromBand();
         // applyBandConfiguration();
         return;
