@@ -59,7 +59,7 @@ inline int16_t getAndResetEncoderCount(volatile int16_t& counter) {
     int16_t value;
     cli();
     value = counter;
-    counter = 0;
+    counter -= value;
     sei();
     return value;
 }

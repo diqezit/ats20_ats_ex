@@ -998,3 +998,14 @@ This version introduces the ability to save your favorite FM stations.
 
 ------------------------------------------------------------------------------------------------------------
 
+### **MOD_NO_RDS v6.3.6**
+
+*   **[Improved] System Robustness with EEPROM Data Validation:** Added strict boundary checks in `loadBandState()` 
+	for all indices (bandwidth, step) loaded from EEPROM. 
+	This prevents potential system instability or crashes caused by corrupted data leading to out-of-bounds array access.
+
+*   **[Improved] Graceful Failure on EEPROM Wear:** Implemented a simple wear-detection mechanism. 
+	If the firmware fails to write default settings after a reset, it flags the EEPROM as 'bad' (`EEPROM WEAR`). 
+	This prevents endless reset loops and blocks all future writes, allowing the receiver to continue operating with default settings.
+
+------------------------------------------------------------------------------------------------------------
