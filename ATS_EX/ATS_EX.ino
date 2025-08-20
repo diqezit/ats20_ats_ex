@@ -116,33 +116,22 @@ static void setCpuPrescaler(uint8_t prescaler) {
 // reducing repetitive setProperty calls from SI473z lib
 // Property list must be terminated with a {0, 0} pair to mark its end
 static void applyProperties(const uint16_t props[][2]) {
-    for (int i = 0; ; ++i) {
-        uint16_t prop_addr = pgm_read_word(&props[i][0]);
+    const uint16_t* p = &props[0][0];  // walk pairs [addr,val] PROGMEM
+    for (;;) {
+        uint16_t prop_addr = pgm_read_word(p++);
         if (prop_addr == 0) break;
-        uint16_t prop_val = pgm_read_word(&props[i][1]);
+        uint16_t prop_val = pgm_read_word(p++);
         g_si4735.setProperty(prop_addr, prop_val);
     }
 }
 
 static inline bool checkStopSeeking() {
-    bool seekStopFlag;
-    bool buttonPressed;
-
     noInterrupts();
-    seekStopFlag = g_seekStop;
+    bool pressed = !(PINC & (1 << (ENCODER_BUTTON - 14)));
+    if (pressed) g_seekStop = true;
+    bool stop = g_seekStop;
     interrupts();
-
-    if (seekStopFlag) return true;
-
-    buttonPressed = !(PINC & (1 << (ENCODER_BUTTON - 14)));
-
-    if (buttonPressed) {
-        noInterrupts();
-        g_seekStop = true;
-        interrupts();
-    }
-
-    return buttonPressed;
+    return stop;
 }
 
 // ==========================================
@@ -173,24 +162,20 @@ static inline void setAgcHardware(int8_t att_val) {
 // Sets BFO with user calibration and automatic CW pitch offset
 // Si4735 requires an inverted BFO value for sideband selection
 static void updateBFO() {
+    uint16_t pitch = pgm_read_word(&cw_pitch_options_hz[g_Settings[CWPitch].param]);
 
-    // get selected pitch from settings
-    uint16_t selected_pitch = pgm_read_word(&cw_pitch_options_hz[g_Settings[CWPitch].param]);
+    int16_t cwOffset = 0;
 
-    // Determine automatic CW offset - USB uses a negative offset / LSB a positive one
-    int16_t cwOffset = (g_currentMode == CW)
-        ? ((g_lastCWMode == USB) ? -selected_pitch : selected_pitch)
-        : 0;
+    if (g_currentMode == CW) {
+        cwOffset = (g_lastCWMode == USB) ? -(int16_t)pitch : (int16_t)pitch;
+    }
 
-    // Determine sideband context for calibration (LSB or USB)
-    uint8_t current_sideband = (g_currentMode == CW) ? g_lastCWMode : g_currentMode;
+    uint8_t sideband = (g_currentMode == CW) ? g_lastCWMode : g_currentMode;
 
-    // Invert calibration sign for USB modes to match observed hardware response
-    int8_t sign_multiplier = (current_sideband == USB) ? -1 : 1;
-    int16_t bfo_calibration_offset = g_Settings[BFO].param * BFO_CALIBRATION_MULTIPLIER * sign_multiplier;
+    int16_t calibration = (int16_t)g_Settings[BFO].param * BFO_CALIBRATION_MULTIPLIER;
+    if (sideband == USB) calibration = -calibration;
 
-    // Combine manual tuning, calibration, and pitch offset for the final BFO value
-    int16_t finalBfo = g_currentBFO + bfo_calibration_offset + cwOffset;
+    int16_t finalBfo = g_currentBFO + calibration + cwOffset;
 
     g_si4735.setSSBBfo(finalBfo * -1);
 }
@@ -281,7 +266,7 @@ static void applyAMNoiseBlankerSettings() {
     };
 
     // apply appropriate set of properties based on user setting
-    if (g_Settings[AMNoiseBlanker].param == 1) {
+    if (g_Settings[AMNoiseBlanker].param) {
         applyProperties(am_nb_on_props);
     } else {
         applyProperties(am_nb_off_props);
@@ -290,7 +275,7 @@ static void applyAMNoiseBlankerSettings() {
 
 // Applies user setting for forcing mono or allowing auto-stereo in FM mode
 static void applyFMStereoSettings() {
-    g_si4735.setFmStereoMode(g_Settings[ForceMono].param == 1);
+    g_si4735.setFmStereoMode(g_Settings[ForceMono].param);
 }
 
 // Applies all FM-specific audio enhancements
@@ -334,7 +319,7 @@ static void FMAudioConfigure() {
     applyFmSoftMuteSettings();
     applyProperties(noise_blanker_props);
 
-    if (g_Settings[FMAudioProfile].param == 1) {
+    if (g_Settings[FMAudioProfile].param) {
         applyProperties(hicut_speaker_eq_props);
     } else {
         applyProperties(hicut_default_props);
@@ -372,8 +357,7 @@ static void configureFMMode() {
     g_ssbLoaded = false;
 
     g_si4735.setFmBandwidth(current_band.bwIdxFM);
-    g_si4735.setFMDeEmphasis(
-        (g_Settings[DeEmp].param == 0) ? 1 : 2);
+    g_si4735.setFMDeEmphasis(g_Settings[DeEmp].param + 1);
 
     // after basic FM configuration is done - apply permanent audio enhancement profile
     FMAudioConfigure();
@@ -464,8 +448,9 @@ static void configureSSBMode(
         g_si4735.setSSBDspAfc(1);
         g_si4735.setSSBAvcDivider(0);
     } else { // LSB or USB
-        g_si4735.setSSBDspAfc(g_Settings[Sync].param == 1 ? 0 : 1);
-        g_si4735.setSSBAvcDivider(g_Settings[Sync].param == 0 ? 0 : 3);
+        uint8_t p = g_Settings[Sync].param;  // p ∈ {0,1}
+        g_si4735.setSSBDspAfc(1 - p);
+        g_si4735.setSSBAvcDivider(3 * p);
     }
 
     // Use SoftMute setting from storage for SSB
@@ -537,8 +522,6 @@ static void applyBandConfiguration(bool extraSSBReset) {
         showStatus(true);
     }
 
-    // resetEepromDelay() // redundant
-
     if (switchingBetweenFMandAM) setAmpState(true);
 
     g_previousFrequency = g_currentFrequency;
@@ -575,7 +558,7 @@ static inline void setupSeekParameters(uint16_t minLimit, uint16_t maxLimit) {
 // See: https://github.com/goshante/ats20_ats_ex/issues/42#issuecomment-3015265184
 static inline void performBfoRolloverWithBandCheck(uint16_t* freq, int32_t* bfo) {
 
-    if (abs(*bfo) >= BFO_ROLLOVER_MAX_HZ) {
+    if (*bfo >= BFO_ROLLOVER_MAX_HZ || *bfo <= -BFO_ROLLOVER_MAX_HZ) {
         // fast - for large jumps work directly with kHz steps
         int16_t steps_khz = *bfo / HZ_PER_KHZ;
         *freq += steps_khz;
@@ -704,7 +687,7 @@ static void bandSwitch(bool up, bool loadStoredFreq) {
     doBandwidth(0);
 
     bool clearUnits =
-        (g_Settings[SettingsIndex::SWUnits].param == 1) &&
+        g_Settings[SettingsIndex::SWUnits].param &&
         ((oldType == SW_BAND_TYPE) != (newType == SW_BAND_TYPE));
 
     showFrequency(clearUnits);
@@ -739,9 +722,9 @@ static void doFrequencyTune() {
         // - Seamless Crossover (e.g., AM<->SW) - keep temp_freq for smooth tuning
         // - Wrap-Around (involving FM) - reset frequency to the new band edge
         // Presence of FM_BAND_TYPE is a proxy for wrap-around behavior
-        bool is_wrap_around = (old_band.bandType == FM_BAND_TYPE);
         const Band& new_band = g_bandList[g_bandIndex];
-        is_wrap_around |= (new_band.bandType == FM_BAND_TYPE);
+        bool is_wrap_around = (old_band.bandType == FM_BAND_TYPE)
+            || (new_band.bandType == FM_BAND_TYPE);
 
         g_currentFrequency = is_wrap_around
             ? (g_seekDirection ? new_band.minimumFreq : new_band.maximumFreq)
@@ -1221,8 +1204,9 @@ void doSync(int8_t v) {
     toggleSetting(Sync);
 
     if (isSSB()) {
-        g_si4735.setSSBDspAfc(g_Settings[Sync].param == 1 ? 0 : 1);
-        g_si4735.setSSBAvcDivider(g_Settings[Sync].param == 0 ? 0 : 3);
+        uint8_t p = g_Settings[Sync].param; // p ∈ {0,1}
+        g_si4735.setSSBDspAfc(1 - p);
+        g_si4735.setSSBAvcDivider(3 * p);
         applyBandConfiguration(true);
     }
 }
@@ -1234,7 +1218,7 @@ void doSync(int8_t v) {
 void doDeEmp(int8_t v) {
     toggleSetting(DeEmp);
     if (g_currentMode == FM)
-        g_si4735.setFMDeEmphasis(g_Settings[DeEmp].param == 0 ? 1 : 2);
+        g_si4735.setFMDeEmphasis(g_Settings[DeEmp].param + 1);
 }
 
 //Settings: SW Units
@@ -1391,8 +1375,11 @@ void doFmSoftMuteThr(int8_t v) {
 
 // Helper for performing frequency update check
 static inline void performFrequencyUpdateCheck(uint32_t now) {
-    // calculate delta from the LAST frequency sent to the chip!
-    int32_t freq_delta = abs((int32_t)g_currentFrequency - g_previousFrequency);
+    uint16_t a = g_currentFrequency;
+    uint16_t b = g_previousFrequency;
+
+    // delta from the LAST frequency sent to the chip (16-bit diff, no abs)
+    uint16_t freq_delta = (a >= b) ? (a - b) : (b - a);
 
     bool time_elapsed = (now - g_lastFreqChange >= FREQ_UPDATE_DELAY_MS);
     bool force_update = (freq_delta >= FREQ_FORCE_UPDATE_THRESHOLD_KHZ);
@@ -1413,10 +1400,7 @@ static inline void performFrequencyUpdateCheck(uint32_t now) {
 static void handleDelayedFrequencyUpdate() {
     if (!g_processFreqChange || isSSB()) return;
 
-    uint32_t now = millis();
-
     int16_t safe_encoder_delta = getAndResetEncoderCount(g_safeEncoderMovement);
-
     if (safe_encoder_delta) {
         noInterrupts();
         g_encoderCount += safe_encoder_delta;
@@ -1426,7 +1410,7 @@ static void handleDelayedFrequencyUpdate() {
         return;
     }
 
-    performFrequencyUpdateCheck(now);
+    performFrequencyUpdateCheck(millis());
 }
 
 // Fetches signal quality (RSSI) using mode-specific commands
@@ -1635,10 +1619,7 @@ static inline void loadReceiverConfig() {
 
 // Helper to apply initial configuration and show status
 static inline void applyInitialConfiguration() {
-    noInterrupts();
-    CLKPR = 0x80;
-    CLKPR = g_Settings[SettingsIndex::CPUSpeed].param;
-    interrupts();
+    setCpuPrescaler(g_Settings[SettingsIndex::CPUSpeed].param);
 
     applyBandConfiguration(false);
     g_currentFrequency = g_si4735.getFrequency();
