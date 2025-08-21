@@ -1038,3 +1038,16 @@ This version introduces the ability to save your favorite FM stations.
     *   Improved `applyProperties()` to use a more efficient pointer-based walk over PROGMEM data tables instead of indexed access.
 
 ------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v6.3.8**
+
+`UI.h`
+
+*   **[Optimized] UI Flash Footprint:** Reduced total Flash size by **128 bytes**
+	via targeted micro-optimizations in the UI subsystem.
+	
+*   **[Optimized] Render Path:** Refactored main screen and menu drawing helpers 
+	(`showSignalQuality`, `showFrequency`, `fav_pageOf`, `calcSettingPos`) to eliminate redundant logic, function calls, and variables.
+
+------------------------------------------------------------------------------------------------------------
