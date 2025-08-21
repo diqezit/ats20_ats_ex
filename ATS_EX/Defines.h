@@ -48,10 +48,10 @@ constexpr auto EEPROM_FAVORITES_COUNT = 334;            // Size: 1.   End: 335.
 
 
 // Increment APP_VERSION to force EEPROM reset due to layout changes
-constexpr auto APP_VERSION = 63;
+constexpr auto APP_VERSION = 64;
 
 // Centralizes user-facing strings on main screen
-#define APP_NAME_LINE1 F("ATS-20* V6.3.8")
+#define APP_NAME_LINE1 F("ATS-20* V6.4")
 
 // Behavior
 constexpr auto SAVE_ON_IDLE_TIMEOUT = 15000UL;          // 15 seconds
@@ -124,6 +124,11 @@ constexpr auto MIN_SETFREQ_INTERVAL_MS = 25UL;
 // Set to 0 to disable them and fall back to the base library methods - off for save 36 bytes
 #define PATCH_EX_SSB 1
 
+// EXPERIMENTAL: CW (Morse code) to text decoder
+// To use - at first connect speaker audio via a 2.2 µF capacitor to analog pin A6
+// While in CW mode, a long-press on the MODE button will toggle the decoder view
+// Must be disable (ENABLE_FAVORITES 0) at first to compile (30720 bytes)
+#define ENABLE_CW_DECODER 0
 
 
 // =================================================================================================

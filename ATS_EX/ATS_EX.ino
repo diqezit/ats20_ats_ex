@@ -47,6 +47,7 @@ GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 #include "Battery.h"
 #include "Input.h"
 #include "UI.h"
+#include "CW_decoder.h"
 
 // ==========================================
 // ===== CORE UTILITIES & STATE SYNC ========
@@ -1650,6 +1651,10 @@ void setup() {
 void loop() {
     updateEncoderState();
     checkDisplayTimeout();
+
+#if ENABLE_CW_DECODER
+    if (handleCwViewGate()) return;
+#endif
 
     // Atomically get all accumulated encoder movement for this iteration
     int16_t safe_encoder_delta = getAndResetEncoderCount(g_safeEncoderMovement);

@@ -92,6 +92,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Battery.h" />
+    <ClInclude Include="CW_decoder.h" />
     <ClInclude Include="Defines.h" />
     <ClInclude Include="CustomFonts.h" />
     <ClInclude Include="Globals.h" />

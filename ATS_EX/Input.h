@@ -184,6 +184,58 @@ static void processFavoritesMenuControls() {
 }
 #endif
 
+#if ENABLE_CW_DECODER
+// ==========================================
+// ===== CW VIEW GATE & LIMITED CONTROLS ====
+// ==========================================
+
+static inline void processCwViewButtons() {
+    uint8_t evt;
+
+    // Volume UP (short + long)
+    evt = btn_VolumeUp.checkEvent(volumeEvent);
+    if (evt == BUTTONEVENT_SHORTPRESS ||
+        (BUTTONEVENT_ISLONGPRESS(evt) && BUTTONEVENT_LONGPRESSDONE != evt)) {
+        // ensure actual change on short if needed
+        if (evt == BUTTONEVENT_SHORTPRESS) doVolume(1);
+        g_lastAdjustmentTime = millis();
+    }
+
+    // Volume DOWN: short -> mute/unmute; long -> volume down
+    evt = btn_VolumeDn.checkEvent(volumeEvent);
+    if (evt == BUTTONEVENT_SHORTPRESS) {
+        handleVolumeDownShortPress();
+        g_lastAdjustmentTime = millis();
+    } else if (BUTTONEVENT_ISLONGPRESS(evt) && BUTTONEVENT_LONGPRESSDONE != evt) {
+        doVolume(-1);
+        g_lastAdjustmentTime = millis();
+    }
+
+    // MODE long -> exit CW view
+    evt = btn_Mode.checkEvent(simpleEvent);
+    if (evt == BUTTONEVENT_LONGPRESSDONE) {
+        g_cwViewActive = false;
+        cwViewExit();
+    }
+}
+
+// Returns true if CW view handled this frame (caller should return from loop)
+static inline bool handleCwViewGate() {
+    if (!g_cwViewActive) return false;
+
+    if (g_currentMode != CW) {
+        g_cwViewActive = false;
+        cwViewExit();
+        return false; // continue normal loop
+    }
+
+    // Exclusive CW frame: decoder + limited controls only
+    cwViewTask();
+    processCwViewButtons();
+    return true; // stop further processing this frame
+}
+#endif
+
 // ==========================================
 // ===== SPECIFIC BUTTON ACTION HANDLERS ====
 // ==========================================
@@ -307,6 +359,16 @@ static void handleModeShortPress() {
 // Long press on Mode toggles SYNC in SSB mode
 static void handleModeLongDone() {
     RETURN_IF_SETTINGS_ACTIVE();
+
+#if ENABLE_CW_DECODER
+    if (g_currentMode == CW) {
+        g_cwViewActive = !g_cwViewActive;
+        if (g_cwViewActive) cwViewEnter();
+        else cwViewExit();
+        return;
+    }
+#endif
+
     if (isSSB()) doSync(0);
 }
 
