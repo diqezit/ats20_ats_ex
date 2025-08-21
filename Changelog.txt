@@ -1051,3 +1051,19 @@ This version introduces the ability to save your favorite FM stations.
 	(`showSignalQuality`, `showFrequency`, `fav_pageOf`, `calcSettingPos`) to eliminate redundant logic, function calls, and variables.
 
 ------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v6.4**
+
+`ATS_EX.ino`, `Defines.h`, `Input.h`, `CW_decoder.h`
+
+*   **[New] Experimental function - built-in CW Decoder:**
+    *   Added a lightweight CW (Morse code) to text decoder
+    *   **Activation:** Long-press **MODE** button while in CW mode to toggle the decoder view
+    *   **Hardware:** Connect speaker audio via a **2.2 µF capacitor** to pin **A6**. No external DC bias circuit is needed
+    *   The decoder is tuned for the receiver's audio output (~40-380 mVpp) and decodes A-Z / 0-9
+
+*   **[Fix] UI Stability:** Reworked the main loop to automatically exit the CW decoder view when switching 
+	to other modes, preventing the UI from freezing
+
+------------------------------------------------------------------------------------------------------------

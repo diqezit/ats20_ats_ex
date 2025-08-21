@@ -156,7 +156,6 @@ static void loadFavorites();
 void tuneToSelectedFavorite();
 #endif
 
-
 // --- Core Utilities & State Management (needed by Input.h) ---
 static bool isSSB();
 static void doSeek();
@@ -182,6 +181,13 @@ static void showBandwidth();
 static void showModulation();
 static void showSettingsTitle();
 static void showSettings();
+
+#if ENABLE_CW_DECODER
+static void handleVolumeDownShortPress();
+static void cwViewEnter();
+static void cwViewExit();
+static inline void cwViewTask();
+#endif
 
 // --- Other Global Prototypes ---
 static void applyBandConfiguration(bool extraSSBReset = false);
@@ -311,6 +317,10 @@ bool g_favoritesActive;
 bool g_favoritesDirty;
 uint8_t g_favoriteSelected;
 uint8_t g_totalFavorites;
+#endif
+
+#if ENABLE_CW_DECODER
+bool g_cwViewActive = false;
 #endif
 
 // -------------------------------------------------------------------------------------------------
