@@ -65,6 +65,14 @@ inline int16_t getAndResetEncoderCount(volatile int16_t& counter) {
     return value;
 }
 
+// Centralized user activity tracker
+// Updates both "last adjustment" in milliseconds and "last activity" in seconds
+static inline void noteUserActivity() {
+    uint32_t now = millis();
+    g_lastAdjustmentTime = now;                         // ms resolution for UI/command timeouts
+    g_lastUserActivityTime = (uint16_t)(now / 1000);    // s resolution for display-off / save-on-idle
+}
+
 // most state is already in the band list
 // only need to sync the single live frequency variable
 void syncActiveStateToBand() {
@@ -876,12 +884,16 @@ static inline void performModeCycle(int8_t bw) {
     case CW:
         g_currentMode = AM;
         g_ssbLoaded = false;
+        if (bw > (int8_t)MAX_INDEX(bw_am_map))
+            bw = (int8_t)MAX_INDEX(bw_am_map);
         current_band.bwIdxAM = bw;
         break;
 
     case AM:
         g_currentMode = g_lastSsbMode;
         loadSSBPatch();
+        if (bw > (int8_t)MAX_INDEX(bw_ssb_map))
+            bw = (int8_t)MAX_INDEX(bw_ssb_map);
         current_band.bwIdxSSB = bw;
         g_currentBFO = g_savedSsbBfo[g_bandIndex];
         break;

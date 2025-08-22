@@ -1067,3 +1067,21 @@ This version introduces the ability to save your favorite FM stations.
 	to other modes, preventing the UI from freezing
 
 ------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v6.4.1**
+
+`ATS_EX.ino`, `Input.h`
+
+*   **[Improved] Unified User Activity Tracking:** 
+    *   Centralized all user activity detection (button presses, encoder turns) into a single, reliable mechanism. 
+		This ensures that auto-sleep and menu timeouts behave predictably and consistently across all modes and menus.
+
+*   **[Improved] Responsive Wake-from-Sleep:** Enhanced the user experience when waking the device from auto-sleep. 
+    *   The first button press now both wakes the display and executes its intended action, eliminating the need for a second press.
+
+*   **[Fixed] Critical Stability in Mode Switching:**
+    *   Corrected an out-of-bounds array access vulnerability during AM to SSB/CW mode changes, preventing potential crashes. 
+		The fix ensures stable modulation switching and adheres to stricter type safety.
+
+------------------------------------------------------------------------------------------------------------
