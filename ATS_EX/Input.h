@@ -20,16 +20,12 @@ static constexpr uint16_t BAND_LP_REPEAT_MS = 240;
 // any turn cancels active seek for instant user control
 static void rotaryEncoder() {
     uint8_t encoderStatus = g_encoder.process();
-    if (encoderStatus) {
-        noInterrupts();
-        if (encoderStatus == DIR_CW) {
-            g_encoderCount++;
-        } else {
-            g_encoderCount--;
-        }
-        g_seekStop = true;
-        interrupts();
-    }
+    if (!encoderStatus) return;
+
+    noInterrupts();
+    g_encoderCount += (encoderStatus == DIR_CW) ? 1 : -1;
+    g_seekStop = true;
+    interrupts();
 }
 
 // Safely read encoder counts from interrupt and filter rapid turns into a single action
@@ -63,7 +59,7 @@ static inline void setDisplayPower(bool on) {
 static inline void wakeUpDisplayIfNeeded() {
     if (!g_displayOn && autoDisplayOff) {
         setDisplayPower(true);
-        g_lastUserActivityTime = millis() / 1000;
+        noteUserActivity();
     }
 }
 
@@ -145,11 +141,10 @@ static inline void exitFavoritesMenu() {
     showStatus();
 }
 
-// Handle encoder rotation for favorites list
-// enabling circular navigation
+// Handle encoder rotation for favorites list with circular navigation
 static void handleFavoritesMenu(int16_t movement) {
     if (movement) {
-        g_lastAdjustmentTime = millis(); // Reset timer on encoder rotation
+        noteUserActivity(); // reset inactivity timer on encoder rotation
         if (g_totalFavorites > 0) {
             // Using doSwitchLogic for clean, wraparound navigation
             doSwitchLogic((int8_t&)g_favoriteSelected, 0, g_totalFavorites - 1, movement);
@@ -159,25 +154,27 @@ static void handleFavoritesMenu(int16_t movement) {
 }
 
 // Handles all button inputs when the favorites menu is active
-// It acts as a simple dispatcher, calling other functions for complex actions
+// It acts as a dispatcher and updates inactivity timer on each action
 static void processFavoritesMenuControls() {
-    // Encoder press - select favorite and tune to it
+    // Encoder press: select favorite and tune to it
     if (BUTTONEVENT_SHORTPRESS == btn_Encoder.checkEvent(simpleEvent)) {
+        noteUserActivity();
         tuneToSelectedFavorite();
         exitFavoritesMenu();
         return;
     }
 
-    // Bandwidth press -  delete selected favorite
+    // Bandwidth press: delete selected favorite
     if (BUTTONEVENT_SHORTPRESS == btn_Bandwidth.checkEvent(simpleEvent)) {
+        noteUserActivity();
         deleteFavorite();
         showFavorites(true);
-        g_lastAdjustmentTime = millis();
         return;
     }
 
-    // Step press - exit menu without tuning
+    // Step press: exit menu without tuning
     if (BUTTONEVENT_SHORTPRESS == btn_Step.checkEvent(simpleEvent)) {
+        noteUserActivity();
         exitFavoritesMenu();
         return;
     }
@@ -189,6 +186,7 @@ static void processFavoritesMenuControls() {
 // ===== CW VIEW GATE & LIMITED CONTROLS ====
 // ==========================================
 
+// Limited controls while CW view is active
 static inline void processCwViewButtons() {
     uint8_t evt;
 
@@ -198,22 +196,23 @@ static inline void processCwViewButtons() {
         (BUTTONEVENT_ISLONGPRESS(evt) && BUTTONEVENT_LONGPRESSDONE != evt)) {
         // ensure actual change on short if needed
         if (evt == BUTTONEVENT_SHORTPRESS) doVolume(1);
-        g_lastAdjustmentTime = millis();
+        noteUserActivity();
     }
 
     // Volume DOWN: short -> mute/unmute; long -> volume down
     evt = btn_VolumeDn.checkEvent(volumeEvent);
     if (evt == BUTTONEVENT_SHORTPRESS) {
         handleVolumeDownShortPress();
-        g_lastAdjustmentTime = millis();
+        noteUserActivity();
     } else if (BUTTONEVENT_ISLONGPRESS(evt) && BUTTONEVENT_LONGPRESSDONE != evt) {
         doVolume(-1);
-        g_lastAdjustmentTime = millis();
+        noteUserActivity();
     }
 
     // MODE long -> exit CW view
     evt = btn_Mode.checkEvent(simpleEvent);
     if (evt == BUTTONEVENT_LONGPRESSDONE) {
+        noteUserActivity();
         g_cwViewActive = false;
         cwViewExit();
     }
@@ -241,7 +240,7 @@ static inline bool handleCwViewGate() {
 // ==========================================
 
 // Encoder button is multi-purpose
-// action depends on context providing an enter or confirm
+// Action depends on context: enter/confirm or switch to step/seek
 static void handleEncoderShortPress() {
     if (g_activeCommand != CMD_NONE) {
         resetCommandMode();
@@ -251,29 +250,29 @@ static void handleEncoderShortPress() {
     if (g_settingsActive) {
         g_SettingEditing = !g_SettingEditing;
         DrawSetting(g_SettingSelected, true);
-        g_lastAdjustmentTime = millis();
+        noteUserActivity();
         return;
     }
 
     (isSSB() || !g_Settings[ScanSwitch].param) ? switchCommand(CMD_STEP) : doSeek();
 }
 
-// Button has dual roles for hardware efficiency
-// cycles bands or switches settings pages
+// BAND+ short press: in settings → next page; on main → switch to band command
 static void handleBandUpShortPress() {
     if (g_settingsActive) {
         switchSettingsPage();
-        g_lastAdjustmentTime = millis();
+        noteUserActivity();
     } else {
         switchCommand(CMD_BAND);
     }
 }
 
+// BAND− short press: toggle settings mode
 static void handleBandDownShortPress() {
     resetCommandMode();
     g_settingsActive = !g_settingsActive;
     switchSettings();
-    if (g_settingsActive) g_lastAdjustmentTime = millis();
+    if (g_settingsActive) noteUserActivity();
 }
 
 // Primary action toggles mute
@@ -317,7 +316,7 @@ static void handleAgcLongDone() {
 #endif
 }
 
-// Long press on STEP opens or closes the favorites menu
+// STEP long press: open/close favorites menu
 static void handleStepLongDone() {
     RETURN_IF_SETTINGS_ACTIVE();
 #if ENABLE_FAVORITES
@@ -326,8 +325,8 @@ static void handleStepLongDone() {
     } else {
         g_favoritesActive = true;
         g_favoriteSelected = 0;
-        g_lastAdjustmentTime = millis();    // Start timer on entry
-        showFavorites(true);                // Force a full redraw on entry
+        noteUserActivity();          // start menu inactivity timer and mark user activity
+        showFavorites(true);         // force a full redraw on entry
     }
 #endif
 }
@@ -385,18 +384,21 @@ void refreshCommandIndicators() {
 }
 
 // Activate a specific command mode for the encoder
-// pressing same button again deactivates it
+// Pressing the same button again deactivates it
 void switchCommand(CommandMode mode) {
-
     if (mode == CMD_BW && g_currentMode == CW) return;
 
     RETURN_IF_SETTINGS_ACTIVE();
-    g_activeCommand = (g_activeCommand != mode) ? mode : CMD_NONE;
+
+    CommandMode newMode = (g_activeCommand != mode) ? mode : CMD_NONE;
+    g_activeCommand = newMode;
+
     if (g_activeCommand != CMD_NONE) {
-        g_lastAdjustmentTime = millis();
+        noteUserActivity();
     } else {
         g_lastAdjustmentTime = 0;
     }
+
     refreshCommandIndicators();
 }
 
@@ -410,30 +412,49 @@ void resetCommandMode() {
     }
 }
 
-// Handle encoder for navigating settings items
-// with wrap-around to cycle through options
+// Wrap-around index (avoids negative or overflow)
+inline int8_t wrapAroundIndex(int16_t value, uint8_t total) {
+    while (value < 0) value += total;
+    while (value >= total) value -= total;
+    return (int8_t)value;
+}
+
+// Calculate which settings page the index belongs to
+inline uint8_t calculateSettingsPage(uint8_t index) {
+    if (index < 6) return 1;
+    if (index < 12) return 2;
+    if (index < 18) return 3;
+    if (index < 24) return 4;
+    return 5;
+}
+
+// Draw updated settings on screen
+inline void updateSettingDisplay(uint8_t prev, uint8_t current) {
+    if (prev != current) {
+        DrawSetting(prev, true);
+        DrawSetting(current, true);
+    }
+}
+
+// Navigate settings with wrap-around
+// update page if changed, else refresh only moved items
 static void navigateSettingsPage(int encoder_delta) {
     if (!encoder_delta) return;
 
-    const uint8_t total = SettingsIndex::SETTINGS_MAX;
-    uint8_t prev = (uint8_t)g_SettingSelected;
+    uint8_t prev = g_SettingSelected;
 
-    int16_t t = (int16_t)prev + (int16_t)encoder_delta;
-    while (t < 0)      t += total;
-    while (t >= total) t -= total;
+    g_SettingSelected = wrapAroundIndex(prev + encoder_delta, SettingsIndex::SETTINGS_MAX);
 
-    g_SettingSelected = (int8_t)t;
+    uint8_t newPage = calculateSettingsPage(g_SettingSelected);
 
-    uint8_t newPage = (t < 6) ? 1 : (t < 12) ? 2 : (t < 18) ? 3 : (t < 24) ? 4 : 5;
-
-    if (newPage != (uint8_t)g_SettingsPage) {
-        g_SettingsPage = (int8_t)newPage;
+    // Redraw
+    if (newPage != g_SettingsPage) {
+        g_SettingsPage = newPage;
         oled.clear();
         showSettingsTitle();
         showSettings();
-    } else if (prev != (uint8_t)g_SettingSelected) {
-        DrawSetting(prev, true);
-        DrawSetting(g_SettingSelected, true);
+    } else {
+        updateSettingDisplay(prev, g_SettingSelected);
     }
 }
 
@@ -514,8 +535,32 @@ static ButtonAction buttonActions[] = {
     { btn_Mode,      simpleEvent, handleModeShortPress,       handleModeLongDone,       CMD_NONE },
 };
 
+// Wake up the display if it was off due to timeout
+// Returns true if the event only woke the display
+inline bool handleDisplayWake(const SimpleButton& btn) {
+    if (!g_displayOn && autoDisplayOff) {
+        wakeUpDisplayIfNeeded();
+        return true;    // event only woke the display
+    }
+    noteUserActivity(); // normal user activity
+    return false;
+}
+
+// Handle short press for a button
+inline void handleShortPress(const ButtonAction& action) {
+    if (action.onShortPress) {
+        action.onShortPress();
+    } else if (action.cmdToSwitch != CMD_NONE) {
+        switchCommand(action.cmdToSwitch);
+    }
+}
+
+// Handle long press completion for a button
+inline void handleLongPressDone(const ButtonAction& action) {
+    if (action.onLongDone) action.onLongDone();
+}
+
 // Central dispatcher for button presses
-// giving priority to favorites menu with its unique control scheme
 void processButtonEvents() {
 #if ENABLE_FAVORITES
     if (g_favoritesActive) {
@@ -525,30 +570,38 @@ void processButtonEvents() {
 #endif
 
     for (auto& action : buttonActions) {
-        uint8_t evt = action.btn.checkEvent(action.checkFn);
+        const uint8_t evt = action.btn.checkEvent(action.checkFn);
+        if (evt == 0) continue;
 
-        if (evt && !g_displayOn && autoDisplayOff) {
-            wakeUpDisplayIfNeeded();
-            return;
-        }
+        // Wake display and track user activity
+        const bool wokeDisplay = handleDisplayWake(action.btn);
 
-        if (evt == BUTTONEVENT_SHORTPRESS) {
-            if (action.onShortPress) {
-                action.onShortPress();
-            } else if (action.cmdToSwitch != CMD_NONE) {
-                switchCommand(action.cmdToSwitch);
-            }
-        } else if (evt == BUTTONEVENT_LONGPRESSDONE && action.onLongDone) {
-            action.onLongDone();
+        // AGC ignores events if display was just woken
+        if (wokeDisplay && &action.btn == &btn_AGC) continue;
+
+        switch (evt) {
+        case BUTTONEVENT_SHORTPRESS:
+            handleShortPress(action);
+            break;
+
+        case BUTTONEVENT_LONGPRESSDONE:
+            handleLongPressDone(action);
+            break;
+
+        default:
+            break;
         }
     }
 }
 
 // Main orchestrator for encoder actions
-// determines context and calls correct handler
+// Decides context and calls the appropriate handler
 bool processEncoderActions(int16_t movement) {
-    if (g_activeCommand != CMD_NONE || g_settingsActive)
+    if (movement) {
+        noteUserActivity();
+    } else if (g_activeCommand != CMD_NONE || g_settingsActive) {
         g_lastAdjustmentTime = millis();
+    }
 
     bool was_tuning_event = false;
 
@@ -556,7 +609,6 @@ bool processEncoderActions(int16_t movement) {
 
     if (g_settingsActive) {
         processEncoderForSettings(movement);
-
     } else {
         was_tuning_event = processEncoderForCommands(movement);
     }

@@ -137,6 +137,7 @@ void syncModeDependentSettings(bool load);
 
 // --- Input Handling Orchestrators (called by loop) ---
 inline int16_t getAndResetEncoderCount(volatile int16_t& counter);
+static inline void noteUserActivity();
 bool processEncoderActions(int16_t movement);
 void processButtonEvents();
 static void updateEncoderState();
