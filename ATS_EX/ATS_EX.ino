@@ -143,6 +143,50 @@ static inline bool checkStopSeeking() {
     return stop;
 }
 
+// Convert fixed-Hz window to 16-bit AFC register (clamped 1..0xFFFF)
+static uint16_t swAfcRegFromHzK(uint32_t fk1000, uint16_t winHz) {
+    if (!winHz) return 1;
+    uint32_t v = (fk1000 + (winHz / 2)) / winHz;
+    return (v > 0xFFFF) ? 0xFFFF : (uint16_t)v;
+}
+
+// PPM defaults (115/85 ppm) via applyProperties
+static void applySwAfcProfilePpm() {
+    static const uint16_t props[][2] PROGMEM = {
+        { AM_AFC_SW_PULL_IN_RANGE_PROP, AM_AFC_SW_PULL_IN_RANGE_VAL },
+        { AM_AFC_SW_LOCK_IN_RANGE_PROP, AM_AFC_SW_LOCK_IN_RANGE_VAL },
+        { 0, 0 }
+    };
+    applyProperties(props);
+}
+
+// Fixed-Hz windows at current frequency
+static void applySwAfcProfileHz(uint16_t pullHz, uint16_t lockHz) {
+    const uint32_t fk1000 = (uint32_t)g_currentFrequency * 1000UL;
+    const uint16_t rPull = swAfcRegFromHzK(fk1000, pullHz);
+    const uint16_t rLock = swAfcRegFromHzK(fk1000, lockHz);
+    g_si4735.setProperty(AM_AFC_SW_PULL_IN_RANGE_PROP, rPull);
+    g_si4735.setProperty(AM_AFC_SW_LOCK_IN_RANGE_PROP, rLock);
+}
+
+// Entry: 0=OFF, 1=PPM, 2=Hz Normal, 3=Hz Aggressive
+static void applySwAfc() {
+    if (g_bandList[g_bandIndex].bandType != SW_BAND_TYPE || g_currentMode != AM) return;
+
+    switch (g_Settings[SWAFC].param) {
+    case SW_AFC_PROFILE_PPM:
+        applySwAfcProfilePpm();
+        break;
+    case SW_AFC_PROFILE_HZ_NORMAL:
+        applySwAfcProfileHz(SW_AFC_PULL_HZ_NORMAL, SW_AFC_LOCK_HZ_NORMAL);
+        break;
+    case SW_AFC_PROFILE_HZ_AGGR:
+        applySwAfcProfileHz(SW_AFC_PULL_HZ_AGGR, SW_AFC_LOCK_HZ_AGGR);
+        break;
+    default: break; // OFF
+    }
+}
+
 // ==========================================
 // ===== LOW-LEVEL HARDWARE CONTROL =========
 // ==========================================
@@ -522,6 +566,8 @@ static void applyBandConfiguration(bool extraSSBReset) {
             configureAMMode(minFreq, maxFreq);
         }
         configureAMCommon(minFreq, maxFreq);
+
+        applySwAfc();
     }
 
     applyAgcSettings();
@@ -659,6 +705,7 @@ static void doSeek() {
     }
 
     g_si4735.setFrequency(g_currentFrequency);
+    applySwAfc(); // Recalculate AFC window for SW (AM) after seek
     doBandwidth(0);
     syncActiveStateToBand();
     showStatus(true);
@@ -1380,6 +1427,16 @@ void doFmSoftMuteThr(int8_t v) {
     doSwitchLogic(g_Settings[FmSmThr].param, 0, FM_SOFT_MUTE_MAX_SNR_LEVEL, v);
     if (g_currentMode == FM)
         g_si4735.setProperty(FM_PROP_SOFTMUTE_SNR_THRESH_ADDR, g_Settings[FmSmThr].param);
+}
+
+// Settings: Toggle handler for SW AFC menu item (SWA)
+// 0=OFF, 1=PPM, 2=Hz Normal, 3=Hz Aggressive
+void doSwAfcProfile(int8_t v) {
+    doSwitchLogic(g_Settings[SWAFC].param,
+        SW_AFC_PROFILE_OFF,
+        SW_AFC_PROFILE_HZ_AGGR,
+        v);
+    applySwAfc();
 }
 
 // ==========================================

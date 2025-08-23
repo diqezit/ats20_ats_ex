@@ -1085,3 +1085,17 @@ This version introduces the ability to save your favorite FM stations.
 		The fix ensures stable modulation switching and adheres to stricter type safety.
 
 ------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v6.5**
+
+`ATS_EX.ino`, `Defines.h`, `Globals.h`
+
+*   **[New] Selectable Short-Wave AFC for AM:**
+    *   Added a "SW AFC" (`SWA`) menu setting to auto-center AM stations on SW bands.
+    *   Offers four profiles: OFF (Default), PPM (datasheet defaults), Hz Normal (~1.6kHz window), and Hz Aggressive (~2.0kHz window).
+    *   EEPROM map updated to persist the selected profile.
+
+
+------------------------------------------------------------------------------------------------------------
+
