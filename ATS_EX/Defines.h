@@ -14,12 +14,12 @@
 //
 // 26 - 165      | 140 B    | 140 B    | 0 B     | EEPROM_BANDS_START             | State for all 28 bands (28 * 5 bytes)
 //
-// 176 - 200     | 25 B     | 25 B     | 0 B     | EEPROM_SETTINGS_START          | Global settings array `g_Settings` (25 items)
+// 176 - 201     | 26 B     | 26 B     | 0 B     | EEPROM_SETTINGS_START          | Global settings array `g_Settings` (26 items)
 //
-// 208 - 213     | 6 B      | 6 B      | 0 B     | EEPROM_MODE_SETTINGS_START     | Mode-dependent settings
+// 212 - 217     | 6 B      | 6 B      | 0 B     | EEPROM_MODE_SETTINGS_START     | Mode-dependent settings
 //
-// 224 - 323     | 100 B    | 100 B    | 0 B     | EEPROM_FAVORITES_START         | Unified favorite stations (20 * 5 bytes)
-// 334           | 1 B      | 1 B      | 0 B     | EEPROM_FAVORITES_COUNT         | Count of saved favorites
+// 228 - 327     | 100 B    | 100 B    | 0 B     | EEPROM_FAVORITES_START         | Unified favorite stations (20 * 5 bytes)
+// 338           | 1 B      | 1 B      | 0 B     | EEPROM_FAVORITES_COUNT         | Count of saved favorites
 // =================================================================================================
 
 // --- Core EEPROM Validation ---
@@ -34,24 +34,23 @@ constexpr auto EEPROM_VERSION_ADDRESS = 1;
 // BLOCK SIZES FOR CALCULATION:
 // ReceiverHeader:      6 bytes
 // BandStatePacked:     5 bytes (x28 bands = 140 bytes)
-// Settings:            25 bytes (SETTINGS_MAX = 25 items * 1 byte each)
+// Settings:            26 bytes (SETTINGS_MAX = 26 items * 1 byte each)
 // ModeSettings:        6 bytes (MODE_SETTINGS_COUNT * MODE_CONTEXT_COUNT = 3 * 2)
 // FavoriteStation:     5 bytes (x20 stations = 100 bytes)
 // FavoritesCount:      1 byte
 
-constexpr auto EEPROM_HEADER_START = 10;                // Size: 6.   End: 16.
-constexpr auto EEPROM_BANDS_START = 26;                 // Size: 140. End: 166.
-constexpr auto EEPROM_SETTINGS_START = 176;             // Size: 25.  End: 201.
-constexpr auto EEPROM_MODE_SETTINGS_START = 208;        // Size: 6.   End: 214.
-constexpr auto EEPROM_FAVORITES_START = 224;            // Size: 100. End: 324.
-constexpr auto EEPROM_FAVORITES_COUNT = 334;            // Size: 1.   End: 335.
-
+constexpr auto EEPROM_HEADER_START = 10;                // Size: 6   End: 16
+constexpr auto EEPROM_BANDS_START = 26;                 // Size: 140 End: 166
+constexpr auto EEPROM_SETTINGS_START = 176;             // Size: 26  End: 202
+constexpr auto EEPROM_MODE_SETTINGS_START = 212;        // Size: 6   End: 218
+constexpr auto EEPROM_FAVORITES_START = 228;            // Size: 100 End: 328
+constexpr auto EEPROM_FAVORITES_COUNT = 338;            // Size: 1   End: 339
 
 // Increment APP_VERSION to force EEPROM reset due to layout changes
-constexpr auto APP_VERSION = 64;
+constexpr auto APP_VERSION = 65;
 
 // Centralizes user-facing strings on main screen
-#define APP_NAME_LINE1 F("ATS-20* V6.4.1")
+#define APP_NAME_LINE1 F("ATS-20* V6.5")
 
 // Behavior
 constexpr auto SAVE_ON_IDLE_TIMEOUT = 15000UL;          // 15 seconds
@@ -240,6 +239,54 @@ constexpr auto AM_NB_DELAY_DEFAULT = 172;
 // Recommended by SiLabs for classic C40-like performance on D60 chips
 constexpr uint16_t AM_SOFT_MUTE_SLOPE_PROP = 0x3301;
 constexpr uint16_t AM_SOFT_MUTE_SLOPE_RECOMMENDED = 2;
+
+// =================================================================================================
+// --------------- Short-Wave AFC (AM on SW) profiles (Si47xx AN332) -------------------------------
+// -------------------------------------------------------------------------------------------------
+//   Configure AFC pull-in and lock-in ranges on SW in AM mode to improve capture and hold
+// 
+//   0x3104 AM_AFC_SW_PULL_IN_RANGE  pull-in range
+//   0x3105 AM_AFC_SW_LOCK_IN_RANGE  lock-in range
+// 
+// PPM defaults
+//   115 ppm -> 0x21F7
+//   85  ppm -> 0x2DF5
+// 
+//   Written only when band is SW and mode is AM
+//   On older silicon the write is ignored
+// 
+// Profiles (g_Settings[SWAFC].param)
+//   0 OFF
+//   1 PPM defaults
+//   2 Fixed Hz  pull 1600  lock 1200
+//   3 Fixed Hz  pull 2000  lock 1500
+// 
+// Fixed Hz conversion
+//   reg = round(1000 * freq_kHz / window_Hz) clamped to 1..0xFFFF
+// 
+//   Keep pull-in >= lock-in
+//   Does not calibrate the dial
+//   Default SWA is 0 OFF
+// =================================================================================================
+
+constexpr uint16_t AM_AFC_SW_PULL_IN_RANGE_PROP = 0x3104; // pull-in
+constexpr uint16_t AM_AFC_SW_LOCK_IN_RANGE_PROP = 0x3105; // lock-in
+
+// Profile 1 PPM defaults
+constexpr uint16_t AM_AFC_SW_PULL_IN_RANGE_VAL = 0x21F7;  // 8695
+constexpr uint16_t AM_AFC_SW_LOCK_IN_RANGE_VAL = 0x2DF5;  // 11765
+
+// Profile IDs
+constexpr uint8_t  SW_AFC_PROFILE_OFF = 0;
+constexpr uint8_t  SW_AFC_PROFILE_PPM = 1;
+constexpr uint8_t  SW_AFC_PROFILE_HZ_NORMAL = 2;
+constexpr uint8_t  SW_AFC_PROFILE_HZ_AGGR = 3;
+
+// Fixed Hz windows
+constexpr uint16_t SW_AFC_PULL_HZ_NORMAL = 1600;
+constexpr uint16_t SW_AFC_LOCK_HZ_NORMAL = 1200;
+constexpr uint16_t SW_AFC_PULL_HZ_AGGR = 2000;
+constexpr uint16_t SW_AFC_LOCK_HZ_AGGR = 1500;
 
 // FM multipath blending: automatic cleanup when reflections (multipath) break the stereo image
 // No manual mono/stereo switching needed; in good conditions it is transparent

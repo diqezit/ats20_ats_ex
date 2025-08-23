@@ -97,6 +97,7 @@ enum SettingsIndex {
     ForceMono,      // FMO (Force Mono Reception)
     SQL,            // SQL (Squelch)
     CWPitch,        // CWP - CW Pitch
+    SWAFC,          // SWA - SW AFC (AM on SW bands)
 
     // --- Page 5: Advanced FM Audio ---
     FmSmAtt,        // FSA - FM Soft Mute Attenuation
@@ -214,6 +215,7 @@ void doCutoffFilter(int8_t v);
 void doCPUSpeed(int8_t v = 0);
 void doBFOCalibration(int8_t v);
 void doCWPitch(int8_t v);
+void doSwAfcProfile(int8_t v);
 void doScanSwitch(int8_t v = 0);
 void doRSSIAMOff(int8_t v = 0);
 void doAntennaCapacitor(int8_t v = 0);
@@ -422,6 +424,7 @@ SettingsItem g_Settings[] =
     { "FMO", 0,  SettingType::Switch,     doForceMono         },
     { "SQL", 0,  SettingType::Num,        doSquelch           },
     { "CWP", 2,  SettingType::Num,        doCWPitch           },
+    { "SWA", 0,  SettingType::Num,        doSwAfcProfile      },
 
     // Page 5
     { "FSA", 22, SettingType::Num,        doFmSoftMuteAtt     },
@@ -458,6 +461,7 @@ const PROGMEM SwitchMapEntry switch_setting_map[] = {
     [ForceMono] = {2, true},
     [SQL] = {0, false},
     [CWPitch] = {0, false},
+    [SWAFC] = {2, true},
     // Page 5
     [FmSmAtt] = {0, false},
     [FmSmThr] = {0, false},
