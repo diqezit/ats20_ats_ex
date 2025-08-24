@@ -183,55 +183,18 @@ static void processFavoritesMenuControls() {
 
 #if ENABLE_CW_DECODER
 // ==========================================
-// ===== CW VIEW GATE & LIMITED CONTROLS ====
+// ===== CW VIEW GATE =======================
 // ==========================================
 
-// Limited controls while CW view is active
-static inline void processCwViewButtons() {
-    uint8_t evt;
-
-    // Volume UP (short + long)
-    evt = btn_VolumeUp.checkEvent(volumeEvent);
-    if (evt == BUTTONEVENT_SHORTPRESS ||
-        (BUTTONEVENT_ISLONGPRESS(evt) && BUTTONEVENT_LONGPRESSDONE != evt)) {
-        // ensure actual change on short if needed
-        if (evt == BUTTONEVENT_SHORTPRESS) doVolume(1);
-        noteUserActivity();
-    }
-
-    // Volume DOWN: short -> mute/unmute; long -> volume down
-    evt = btn_VolumeDn.checkEvent(volumeEvent);
-    if (evt == BUTTONEVENT_SHORTPRESS) {
-        handleVolumeDownShortPress();
-        noteUserActivity();
-    } else if (BUTTONEVENT_ISLONGPRESS(evt) && BUTTONEVENT_LONGPRESSDONE != evt) {
-        doVolume(-1);
-        noteUserActivity();
-    }
-
-    // MODE long -> exit CW view
-    evt = btn_Mode.checkEvent(simpleEvent);
-    if (evt == BUTTONEVENT_LONGPRESSDONE) {
-        noteUserActivity();
-        g_cwViewActive = false;
-        cwViewExit();
-    }
-}
-
-// Returns true if CW view handled this frame (caller should return from loop)
+// Returns true if CW view is active (caller should return from loop)
+// This function acts as a simple gate, delegating all work to cwViewTask
+// and blocking the rest of the main loop.
 static inline bool handleCwViewGate() {
     if (!g_cwViewActive) return false;
-
-    if (g_currentMode != CW) {
-        g_cwViewActive = false;
-        cwViewExit();
-        return false; // continue normal loop
-    }
-
-    // Exclusive CW frame: decoder + limited controls only
+    
+    // In CW mode, run the decoder task and stop further processing in the main loop
     cwViewTask();
-    processCwViewButtons();
-    return true; // stop further processing this frame
+    return true;
 }
 #endif
 
@@ -355,7 +318,7 @@ static void handleModeShortPress() {
     cycleAmSsbCwModes();
 }
 
-// Long press on Mode toggles SYNC in SSB mode
+// Long press on Mode toggles SYNC in SSB mode OR enters/exits CW Decoder
 static void handleModeLongDone() {
     RETURN_IF_SETTINGS_ACTIVE();
 
@@ -562,6 +525,14 @@ inline void handleLongPressDone(const ButtonAction& action) {
 
 // Central dispatcher for button presses
 void processButtonEvents() {
+#if ENABLE_CW_DECODER
+    if (g_cwViewActive) {
+        if (btn_Mode.checkEvent(simpleEvent) == BUTTONEVENT_LONGPRESSDONE)
+            handleModeLongDone();
+        return;
+    }
+#endif
+
 #if ENABLE_FAVORITES
     if (g_favoritesActive) {
         processFavoritesMenuControls();
@@ -573,21 +544,16 @@ void processButtonEvents() {
         const uint8_t evt = action.btn.checkEvent(action.checkFn);
         if (evt == 0) continue;
 
-        // Wake display and track user activity
         const bool wokeDisplay = handleDisplayWake(action.btn);
-
-        // AGC ignores events if display was just woken
         if (wokeDisplay && &action.btn == &btn_AGC) continue;
 
         switch (evt) {
         case BUTTONEVENT_SHORTPRESS:
             handleShortPress(action);
             break;
-
         case BUTTONEVENT_LONGPRESSDONE:
             handleLongPressDone(action);
             break;
-
         default:
             break;
         }
