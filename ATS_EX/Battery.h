@@ -124,7 +124,11 @@ void updateAndShowBattery(bool forceShow) {
     updateStablePercent();
     static uint32_t lastChargeShow = 0;
     if ((millis() - lastChargeShow) > BATT_DISPLAY_UPDATE_INTERVAL_MS || forceShow) {
+#if ENABLE_CW_DECODER
+        if (!g_cwViewActive) showChargeOnDisplay();
+#else
         showChargeOnDisplay();
+#endif
         lastChargeShow = millis();
     }
 }

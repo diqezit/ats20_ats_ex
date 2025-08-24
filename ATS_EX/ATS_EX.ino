@@ -1722,34 +1722,35 @@ void loop() {
     checkDisplayTimeout();
 
 #if ENABLE_CW_DECODER
-    if (handleCwViewGate()) return;
+    if (g_cwViewActive) {
+        cwViewTask();
+        processButtonEvents();
+    } else {
 #endif
-
-    // Atomically get all accumulated encoder movement for this iteration
-    int16_t safe_encoder_delta = getAndResetEncoderCount(g_safeEncoderMovement);
+        int16_t safe_encoder_delta = getAndResetEncoderCount(g_safeEncoderMovement);
 
 #if ENABLE_FAVORITES
-    if (g_favoritesActive) {
-        if (safe_encoder_delta) {
-            handleFavoritesMenu(safe_encoder_delta);
+        if (g_favoritesActive) {
+            if (safe_encoder_delta) {
+                handleFavoritesMenu(safe_encoder_delta);
+            }
+            processButtonEvents();
+            handleFavoritesTimeout();
+            return;
         }
-        processButtonEvents();
-        handleFavoritesTimeout();
-        return; // End iteration if in favorites menu
-    }
 #endif
 
-    handleDelayedFrequencyUpdate();
+        handleDelayedFrequencyUpdate();
 
-    bool frequencyTuned = false;
+        bool frequencyTuned = false;
+        if (safe_encoder_delta)
+            frequencyTuned = processEncoderActions(safe_encoder_delta);
 
-    // Pass the movement value to the main encoder action handler
-    if (safe_encoder_delta)
-        frequencyTuned = processEncoderActions(safe_encoder_delta);
-
-    // process buttons only if the encoder was not used for a major tuning event
-    if (!frequencyTuned)
-        processButtonEvents();
+        if (!frequencyTuned)
+            processButtonEvents();
+#if ENABLE_CW_DECODER
+    }
+#endif
 
     handlePeriodicTasks();
 }

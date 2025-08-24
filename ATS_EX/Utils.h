@@ -125,11 +125,9 @@ static inline void clamp_index(int8_t& var, const int8_t max_val, bool strict = 
 
 #if DEBUG_MODE
 
-
 // =====================================================================================
 // Lighweight Debugger (replaces SerialPrint to save flash space)
 // =====================================================================================
-
 
 // UART (baud 9600)
 void initDebugUART() {
@@ -147,6 +145,17 @@ void debugPrint_P(const char* str) {
         while (!(UCSR0A & (1 << UDRE0)));
         UDR0 = c;
     }
+}
+
+// Fast single-char print (RAM)
+static inline void debugPutChar(char c) {
+    while (!(UCSR0A & (1 << UDRE0)));
+    UDR0 = c;
+}
+
+// CRLF
+static inline void debugPrintCRLF() {
+    debugPutChar('\r'); debugPutChar('\n');
 }
 
 // Prints a character buffer

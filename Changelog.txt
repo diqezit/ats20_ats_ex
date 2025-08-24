@@ -1099,3 +1099,19 @@ This version introduces the ability to save your favorite FM stations.
 
 ------------------------------------------------------------------------------------------------------------
 
+
+### **MOD_NO_RDS v6.5.1**
+
+`CW_decoder.h`
+
+`(!) Attention: This release is a complete overhaul of the experimental CW Decoder. All changes are confined to this feature.`
+
+*   **[Reworked] Complete CW Decoder Overhaul:** The decoder is now robust and significantly more sensitive.
+    This was achieved by implementing an **adaptive ADC reference** 
+	that automatically switches between `INTERNAL` (1.1V) and `AVCC` (5V) to prevent signal saturation, 
+	and a new **software AC coupling filter** to ensure reliable decoding with simple hardware.
+    All signal processing parameters were fine-tuned for better weak-signal performance. 
+	The UI has been upgraded to a proper **multi-line viewport** that wraps and clears automatically.
+
+	
+------------------------------------------------------------------------------------------------------------

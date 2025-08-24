@@ -50,7 +50,7 @@ constexpr auto EEPROM_FAVORITES_COUNT = 338;            // Size: 1   End: 339
 constexpr auto APP_VERSION = 65;
 
 // Centralizes user-facing strings on main screen
-#define APP_NAME_LINE1 F("ATS-20* V6.5")
+#define APP_NAME_LINE1 F("ATS-20* V6.5.1")
 
 // Behavior
 constexpr auto SAVE_ON_IDLE_TIMEOUT = 15000UL;          // 15 seconds
@@ -122,6 +122,7 @@ constexpr auto MIN_SETFREQ_INTERVAL_MS = 25UL;
 // These functions may offer better performance than the original library.
 // Set to 0 to disable them and fall back to the base library methods - off for save 36 bytes
 #define PATCH_EX_SSB 1
+
 
 // EXPERIMENTAL: CW (Morse code) to text decoder
 // To use - at first connect speaker audio via a 2.2 µF capacitor to analog pin A6
