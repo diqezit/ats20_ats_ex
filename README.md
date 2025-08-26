@@ -172,49 +172,71 @@ _Screen examples in the 6.x versions_
 
 ------------------------------------------------------------------------------------------------------------
 
-
 ### **Firmware Installation**
 
-This guide explains how to upload firmware to your ATS-20(+) receiver
+This guide explains how to upload the firmware to your ATS-20(+) receiver using a Windows PC and the xLoader software
 
-#### **Step-by-Step**
+#### **Step 1: Download the Necessary Files**
 
-1.  **Download the necessary files:**
-    *   **Firmware File:** [**ATS\_EX.ino.with\_bootloader.hex**](https://github.com/diqezit/ats20_ats_ex/blob/mod_no_rds/ATS_EX/ATS_EX.ino.with_bootloader.hex) (Click the link, then find the "Download raw file" button).
-    *   **Programming Software:** [**xLoader**](https://github.com/binaryupdates/xLoader) (Download the zip file and extract it).
+You will need two things: the programming software and the correct firmware file
 
-2.  **Install Drivers (if needed):**
-    *   Most ATS-20(+) receivers use a CH340 chip for USB communication. 
-		If your computer doesn't recognize the receiver when you plug it in, you may need to install the driver. 
-		This is typically a one-time setup.
-    *   Download and install the driver from a reliable source, such as [SparkFun](https://learn.sparkfun.com/tutorials/how-to-install-ch340-drivers/all).
+1.  **Programming Software:**
+    *   Download [**xLoader**](https://github.com/binaryupdates/xLoader) (Click the green "Code" button, then "Download ZIP". Extract the files to a folder on your computer)
 
-3.  **Connect the Receiver:**
-    *   **Connect your ATS-20+ receiver directly to your PC**
-    *   Power on receiver.
+2.  **Firmware File (.hex):**
+    *   For flashing via USB, you only need the file **without** the bootloader
+    *   **Click here to download:** [**ATS\_EX.ino.eightanaloginputs.hex**](https://github.com/diqezit/ats20_ats_ex/blob/mod_no_rds/ATS_EX/ATS_EX.ino.eightanaloginputs.hex) (Click the link, then find the "Download raw file" button)
 
-4.  **Find the COM Port:**
-    *   Open **Device Manager** in Windows.
-    *   Look under the "Ports (COM & LPT)" section.
-    *   Note the COM port number assigned to your receiver (e.g., `COM3`, `COM4`). 
-		If no port appears, check your driver installation or USB cable.
+> **📌 Which File Should I Use?**
+> *   The `ATS_EX.ino.eightanaloginputs.hex` file is the correct one for updating your receiver's firmware over a standard USB connection using xLoader
+> *   The `ATS_EX.ino.with_bootloader.hex` file is an advanced file used only for programming with an external ISP programmer (like a USBasp). **Do not use this file with xLoader for a standard USB update**
+>   *   [Link for advanced users: **With\_bootloader**](https://github.com/diqezit/ats20_ats_ex/blob/mod_no_rds/ATS_EX/ATS_EX.ino.with_bootloader.hex)
 
-5.  **Configure and Upload:**
-    *   Launch `xLoader.exe`.
-    *   Set parameters exactly as shown in the image below:
-        *   **Hex file:** Click the `...` button and select the `ATS_EX.ino.with_bootloader.hex` file you downloaded.
-        *   **Device:** Select `Uno(ATmega328)`.
-        *   **COM Port:** Select the port number you found in Device Manager.
-        *   **Baud rate:** Set to `57600`.
+#### **Step 2: Install Drivers (If Needed)**
 
+Most ATS-20(+) receivers use a CH340 chip for USB communication. If your computer does not recognize the receiver when you plug it in, you must install the driver. This is a one-time setup
 
-    <img width="257" height="262" alt="image" src="https://github.com/user-attachments/assets/285a943a-7b0f-4f39-b580-3757103eafb4" />
+*   Download and install the CH340 driver from a reliable source, such as [SparkFun's Guide](https://learn.sparkfun.com/tutorials/how-to-install-ch340-drivers/all)
 
-6.  **Start the Upload:**
-    *   Click the **Upload** button.
-    *   Wait for the process to complete. xLoader will display a message like "30xxx bytes uploaded" at the bottom of the window.
-    *   Your receiver should restart automatically with the new firmware and reset. 
-	*   Installation is complete!
+#### **Step 3: Connect the Receiver**
+
+*   Connect your ATS-20+ receiver directly to a USB port on your PC
+*   Power on the receiver
+
+#### **Step 4: Find the COM Port**
+
+*   Open **Device Manager** in Windows (you can search for it in the Start Menu)
+*   Expand the **"Ports (COM & LPT)"** section
+*   Note the COM port number assigned to your receiver (e.g., `COM3`, `COM4`). If no port appears, verify your driver installation and USB cable
+
+#### **Step 5: Configure xLoader and Upload**
+
+1.  Launch `xLoader.exe` from the folder where you extracted it
+2.  Configure the settings precisely as follows:
+    *   **Hex file:** Click the `...` button and select the `ATS_EX.ino.eightanaloginputs.hex` file you downloaded
+    *   **Device:** Select `Duemilanove/Nano(ATmega328)`. This is correct for most ATS-20+ boards, which use an old bootloader
+    *   **COM Port:** Select the port number you found in Device Manager
+    *   **Baud rate:** Set to `57600`
+
+    Your settings should look like this:
+    <p align="center">
+      <img width="257" alt="xLoader Correct Settings" src="https://github.com/user-attachments/assets/1ccd9d42-bbe1-43e2-b944-6440cdca3477" />
+    </p>
+
+#### **Step 6: Start the Upload**
+
+1.  Click the **Upload** button
+2.  The receiver's lights may flash during the process. Wait for it to complete
+3.  xLoader will display a message like "29xxx bytes uploaded" at the bottom of the window when finished
+4.  Your receiver should restart automatically with the new firmware. If the screen shows "EEPROM RST" on the first boot, this is normal
+
+**Installation is complete!**
+
+---
+> **Troubleshooting Tips**
+> *   **Upload Fails or Times Out:** Double-check that you have selected the correct COM port and that no other software (like a serial monitor) is using it. Try a different USB cable or port
+> *   **Still Fails:** Some boards require you to press and release the receiver's **RESET** button just a moment before you click the "Upload" button in xLoader
+> *   **Using an Arduino Uno Board Profile:** If your receiver has a newer bootloader (like an official Arduino Uno), you may need to select `Uno(ATmega328)` as the Device and `115200` as the Baud rate. However, `57600` is correct for the vast majority of ATS-20+
 
 ------------------------------------------------------------------------------------------------------------
 
@@ -341,56 +363,61 @@ This feature saves a complete station profile: frequency mode (AM/LSB/USB/CW/FM)
     4.  **Delete:** To remove a station highlight it in the list and press the **`BW`** button.
     5.  **Exit:** To close the menu without tuning **short-press `STEP`**. The menu also closes automatically after 10 seconds of inactivity.
 
-#### **3.3. The Settings Menu: A Deep Dive**
+---
 
-To enter and exit the settings menu perform a **short press** on the **`BAND-`** button. The menu is organized into pages.
+### **3.3. The Settings Menu: A Deep Dive**
+
+To enter and exit the Settings Menu, perform a **short press** on the **`BAND-`** button. The menu is organized into pages.
 
 *   **Navigation:** Rotate the encoder to select an item. Short-press **`BAND+`** to switch between pages.
-*   **Editing:** Select an item then short-press the encoder to enter "Edit Mode" (a `>` appears next to the value). Rotate the encoder to change the value. Press the encoder again to confirm.
+*   **Editing:** Select an item, then short-press the encoder to enter "Edit Mode" (a `>` appears next to the value). Rotate the encoder to change the value. Press the encoder again to confirm.
 *   **Save & Exit:** The menu closes automatically after 10 seconds of inactivity or you can exit manually by pressing `BAND-`. All changes are saved to EEPROM upon exit.
+
+> **💡 Tip:** An item's name (e.g., `ATT`, `SCN`) corresponds directly to a `SettingsIndex` enum in the source code.
 
 #### **Page 1: General & Audio**
 
 | Name | Detailed Description | Type | Range / Options |
 | :--- | :--- | :--- | :--- |
-| `ATT` | **Attenuator/AGC.** `AUT`: Automatic Gain Control. **Manual values**: Disables AGC and sets a fixed attenuation level to prevent overload. | Selection | `AUT`, `1`..`37` |
-| `SCN` | **Scan Switch.** `On`: Encoder press starts station scanning. `Off`: Encoder press activates Step selection. | Switch | `On` / `Off` |
-| `AVC` | **Auto Volume Control.** Sets max gain for the AVC system in AM/SSB. Higher values boost volume on weak stations. Active when `ATT` is `AUT`. | Number | `12`..`90` |
-| `SMA` | **Soft Mute Attenuation.** Defines the audio reduction level when soft mute is active. `0` disables it. | Number | `0`..`32` |
-| `SMT` | **Soft Mute Threshold.** Sets the minimum **SNR** below which soft mute activates to reduce static hiss. | Number | `0`..`63` |
-| `DE` | **FM De-Emphasis.** Matches regional broadcast standards. `50`: Europe/Asia. `75`: North America. | Selection | `50` / `75` |
+| `ATT` | **Attenuator/AGC.** `AUT`: Automatic Gain Control. **Manual values**: Disables AGC and sets a fixed attenuation level to prevent overload from strong local stations. | Selection | `AUT`, `1`..`37` |
+| `SCN` | **Scan Switch.** `On`: A short press on the encoder starts station scanning. `Off`: A short press on the encoder activates Step selection. | Switch | `On` / `Off` |
+| `AVC` | **Auto Volume Control.** Sets the max gain for the AVC system in AM/SSB. Higher values boost volume on weak stations. **Note:** This only works when `ATT` is set to `AUT`. | Number | `12`..`90` |
+| `SMA` | **AM Soft Mute Attenuation.** Defines the audio reduction level when soft mute is active on AM bands. `0` disables it. | Number | `0`..`32` |
+| `SMT` | **AM Soft Mute Threshold.** Sets the minimum **SNR** below which soft mute activates on AM bands to reduce static hiss. Higher values mute more aggressively. | Number | `0`..`63` |
+| `DE` | **FM De-Emphasis.** Matches regional broadcast standards for correct treble response. `50`: Europe/Asia. `75`: North America. | Selection | `50` / `75` |
 
 #### **Page 2: SSB & Display**
 
 | Name | Detailed Description | Type | Range / Options |
 | :--- | :--- | :--- | :--- |
-| `BFO` | **BFO Calibration.** Corrects the master oscillator's global offset for SSB/CW. Use if all stations sound off-pitch. | Number | `-25`..`+25` |
-| `SSM` | **SSB Soft Mute.** Enables/disables an alternative soft muting algorithm specifically adapted for SSB mode. | Switch | `On` / `Off` |
-| `SVC` | **SSB Volume Control.** Activates/deactivates a separate automatic volume control system that works only in LSB, USB, and CW modes. | Switch | `On` / `Off` |
-| `COF` | **SSB Cutoff Filter.** Manages a high-pass audio filter. `AUT`: Filter is chosen based on the current BW. `1`, `2`: Manual selection. | Selection | `AUT`, `1`, `2` |
-| `SYN` | **SSB Sync (AFC).** Enables DSP's Automatic Frequency Control to compensate for signal drift in SSB mode. | Switch | `On` / `Off` |
-| `SCR` | **Screen Brightness.** Adjusts the OLED display brightness. | Number | `1`..`10` |
+| `BFO` | **BFO Calibration.** Corrects the master oscillator's global offset for SSB/CW (in 100Hz steps). Use if all stations consistently sound off-pitch. | Number | `-25`..`+25` |
+| `SSM` | **SSB Soft Mute.** Enables/disables an alternative soft muting algorithm specifically adapted for SSB mode to reduce background noise. | Switch | `On` / `Off` |
+| `SVC` | **SSB Volume Control.** Activates/deactivates a separate automatic volume control system that works only in LSB, USB, and CW modes to stabilize audio levels. | Switch | `On` / `Off` |
+| `COF` | **SSB Cutoff Filter.** Manages a high-pass audio filter. `AUT`: Filter is chosen based on the current BW. `1`: Tapered audio. `2`: Reduced hiss (more aggressive). | Selection | `AUT`, `1`, `2` |
+| `SYN` | **SSB Sync (AFC).** Enables the DSP's Automatic Frequency Control to compensate for signal drift in SSB mode, reducing fading and distortion. | Switch | `On` / `Off` |
+| `SCR` | **Screen Brightness.** Adjusts the OLED display brightness from `0` (min) to `9` (max). | Number | `0`..`9` |
 
 #### **Page 3: Hardware & System**
 
 | Name | Detailed Description | Type | Range / Options |
 | :--- | :--- | :--- | :--- |
-| `CAP` | **Antenna Capacitor.** `AUT`: Engaged for FM only. `On`: Forced on for all bands. May improve reception on some antennas. | Selection | `AUT` / `On` |
-| `CPU` | **CPU Speed.** `16MHz`: Max performance. `8MHz`: Low-power mode, increases battery life with a slightly slower UI. | Selection | `16MHz` / `8MHz` |
-| `BAP` | **Battery Pin.** Selects the analog pin (`A1`/`A2`) for voltage measurement to match your board's hardware. | Selection | `A1` / `A2` |
-| `SWU` | **SW Units.** Changes the Shortwave frequency format. `kHz`: e.g., `7100 kHz`. `MHz`: e.g., `7.100 MHz`. | Selection | `kHz` / `MHz` |
-| `RSI` | **Disable AM RSSI.** A troubleshooting option. `On`: Disables RSSI polling in AM to prevent audible clicks on some boards. | Switch | `On` / `Off` |
-| `DIS` | **Display Off Timer.** Automatically turns off the screen after inactivity. `Off`: Always on. | Selection | `Off`, `10m`..`60m`|
+| `CAP` | **Antenna Capacitor.** `On`: Forced on for all bands. `Off`: Always off. Use `On` if your antenna benefits from capacitive coupling; `Off` for a direct or active antenna path. | Switch | `On` / `Off` |
+| `CPU` | **CPU Speed.** `16MHz`: Max performance for a responsive UI. `8MHz`: Low-power mode, increases battery life with a slightly slower UI. Radio performance is unaffected. | Selection | `16MHz` / `8MHz` |
+| `BAP` | **Battery Pin.** Selects the analog pin (`A1`/`A2`) for voltage measurement to match your board's hardware layout. | Selection | `A1` / `A2` |
+| `SWU` | **SW Units.** Changes the Shortwave frequency display format. `kHz`: e.g., `7100 kHz`. `MHz`: e.g., `7.100 MHz`. | Selection | `kHz` / `MHz` |
+| `RSI` | **Disable AM RSSI.** A troubleshooting option. `On`: Disables RSSI polling in AM to prevent audible clicks on some boards. Does not affect FM or SSB. | Switch | `On` / `Off` |
+| `DIS` | **Display Off Timer.** Automatically turns off the screen after a period of inactivity. The receiver continues to operate. | Selection | `Off`, `10m`..`60m`|
 
 #### **Page 4: Audio Profiles & Filters**
 
 | Name | Detailed Description | Type | Range / Options |
 | :--- | :--- | :--- | :--- |
-| `FMP` | **FM Audio Profile.** `On`: Applies an EQ profile optimized for the internal speaker. `Off`: Flat audio output for headphones. | Switch | `On` / `Off` |
-| `ANB` | **AM Noise Blanker.** An experimental digital filter to reduce impulse noise (e.g., from car ignitions) in AM modes. | Switch | `On` / `Off` |
+| `FMP` | **FM Audio Profile.** `On`: Applies an EQ profile optimized for the small internal speaker. `Off`: Provides a flat audio output, better for headphones. | Switch | `On` / `Off` |
+| `ANB` | **AM Noise Blanker.** An experimental digital filter to reduce impulse noise (e.g., from car ignitions) in AM and SSB modes. | Switch | `On` / `Off` |
 | `FMO` | **Force FM Mono.** Overrides stereo reception to improve clarity on weak, noisy FM stations. | Switch | `On` / `Off` |
 | `SQL` | **Squelch Level.** Sets the signal strength threshold to open the audio path. Higher values require a stronger signal. `0` = Off. | Number | `0`..`63` |
-| `CWP` | **CW Pitch.** Adjusts the audible tone for CW (Morse code) reception. | Selection | `500`..`800` Hz |
+| `CWP` | **CW Pitch.** Adjusts the audible tone for CW (Morse code) reception and sets the center frequency for the CW decoder. | Selection | `500`..`800` Hz |
+| `SWA` | **SW AFC.** Configures AFC on SW bands in AM mode. `0`: Off. `1`: PPM defaults. `2`: Normal (1600/1200Hz pull/lock). `3`: Aggressive (2000/1500Hz). | Number | `0`..`3` |
 
 #### **Page 5: Advanced FM Audio**
 
@@ -399,6 +426,12 @@ To enter and exit the settings menu perform a **short press** on the **`BAND-`**
 | `FSA` | **FM Soft Mute Attenuation.** Defines the amount of audio reduction when soft mute is active on the FM band. | Number | `0`..`32` |
 | `FST` | **FM Soft Mute Threshold.** Sets the minimum **SNR** below which soft mute activates specifically for the FM band. | Number | `0`..`63` |
 
+---
+> **📌 Key Notes:**
+> *   AM and FM soft mutes are configured independently (`SMA`/`SMT` for AM, `FSA`/`FST` for FM).
+> *   `SVC`, `SSM`, `SYN`, and `COF` settings only apply to SSB and CW modes where applicable.
+> *   `SWA` (SW AFC) is only active on Shortwave bands while in AM mode. On older Si473x chips, this setting may be ignored.
+> *   The `DIS` (Display Off Timer) only turns off the screen; the receiver continues to function normally. Press any button to wake it.
 ---
 
 ### **Section 4: Maintenance & Support**
