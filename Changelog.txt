@@ -1115,3 +1115,17 @@ This version introduces the ability to save your favorite FM stations.
 
 	
 ------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v6.5.2**
+
+`CW_decoder.h`
+
+`(!) Note: This release is a complete overhaul of the CW decoder engine for a major boost in accuracy and stability.`
+
+*   **[Reworked] Complete CW Decoder Overhaul:** The core logic has been replaced with a sophisticated adaptive engine 
+	that dynamically tracks operator speed. A new real-time WPM (Words Per Minute) calculation with output smoothing provides 
+	stable speed reading. The addition of timing hysteresis prevents decoding flutter, significantly boosting accuracy and stability 
+	across various speeds and noisy conditions.
+
+------------------------------------------------------------------------------------------------------------
