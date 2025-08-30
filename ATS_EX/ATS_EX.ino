@@ -258,29 +258,39 @@ static void handleSquelch(void) {
 // ===== HARDWARE CONFIGURATION =============
 // ==========================================
 
-// This function is required for using SSB. Si473x controllers do not support SSB by-default.
-// But we can patch internal RAM of Si473x with special patch to make it work in SSB mode.
-// Patch must be applied every time we enable SSB after AM or FM.
+
+// load SSB patch at runtime so SSB mode is available
+// mute amp during patch, use fast I2C for throughput, restore band BW, then unmute
 static void loadSSBPatch() {
     setAmpState(false);
-
     g_si4735.setI2CFastModeCustom(I2C_SSB_PATCH_SPEED_HZ);
-
     g_si4735.queryLibraryId();
-
     g_si4735.patchPowerUp();
     delay(PATCH_LOAD_DELAY_MS);
-    g_si4735.downloadCompressedPatch(ssb_patch_content, sizeof(ssb_patch_content), cmd_0x15, sizeof(cmd_0x15));
 
-    // use bw from the current band's state
+#if PATCH_EX_SSB
+
+    // compact path - compressed patch + 0x15 offset table to reduce flash
+    g_si4735.downloadCompressedPatch(
+        compressed_ssb_patch_content,  // PROGMEM data
+        cutoff_places_offsets,         // PROGMEM table
+        cutoff_nonzero_lengths,        // PROGMEM table
+        cmd_0x15_offsets               // PROGMEM table
+    );
+#else
+
+    // legacy patch + absolute 0x15 line list
+    g_si4735.downloadCompressedPatch(
+        ssb_patch_content,
+        sizeof(ssb_patch_content),
+        cmd_0x15,
+        sizeof(cmd_0x15));
+
+#endif
+
     g_si4735.setSSBConfig(g_bwSSBIdx[g_bandList[g_bandIndex].bwIdxSSB], 1, 0, 1, 0, 1);
     g_si4735.setI2CStandardMode();
-
     g_ssbLoaded = true;
-
-    // line that reset the step here with index has been removed
-    // allows the step setting for SSB to persist for each band individually for now
-
     setAmpState(true);
 }
 

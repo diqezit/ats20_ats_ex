@@ -1129,3 +1129,17 @@ This version introduces the ability to save your favorite FM stations.
 	across various speeds and noisy conditions.
 
 ------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v6.5.3**
+
+`SI4735_fixed.h`, `patch_ssb_compressed.h`, `ATS_EX.ino`
+
+*   **[Finalized] New SSB Patch System:** The firmware now exclusively uses the new highly compressed patch format
+	completely removing old space-consuming patch arrays. 
+	The patch loading code (`downloadCompressedPatch`) has been cleaned up to be simpler and easier to follow
+	resulting in a more efficient and slightly smaller final firmware.
+
+*   **[Credit]** Credit for the clever patch compression method goes to @den3rats.
+
+------------------------------------------------------------------------------------------------------------
