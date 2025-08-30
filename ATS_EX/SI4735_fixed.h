@@ -36,48 +36,145 @@ public:
         } while (!currentStatus.resp.VALID && !currentStatus.resp.BLTF && (millis() - elapsed_seek) < maxSeekTime);
     }
 
-    // overrides the patch loading functions for potential performance gains
+    // ====================================================================================
+    // ============================== SSB PATCH LOGIC ====================================
+    // ====================================================================================
+    // This section implements compressed SSB (Single Side Band) patch loading for SI4735
+    // The patch enables advanced SSB features and improves reception quality
+    // 
+    // The compression algorithm works by:
+    // 1. Storing only non-zero bytes from the original patch data
+    // 2. Using offset tables to track special command positions (0x15 vs 0x16)
+    // 3. Handling "cutoff" positions where data is split across two I2C transactions
+    // 
+    // Data structure:
+    // - compressed_ssb_patch_content: actual non-zero patch bytes
+    // - cmd_0x15_offsets: positions where command 0x15 is used (otherwise 0x16)
+    // - cutoff_places_offsets: positions requiring special split handling
+    // - cutoff_nonzero_lengths: number of non-zero bytes at cutoff positions
+    //   (values < 100 indicate next line uses 0x15, >= 100 means normal continuation)
+    //
+    // The patch consists of 1105 lines, each sending 8 bytes via I2C
+    // Base addresses change at specific line boundaries (0, 129, 405, 758, 1023+)
+    // ====================================================================================
+    // https://github.com/diqezit/ats20_ats_ex/issues/22#issuecomment-3237646622
+    // Credit for the clever patch compression method goes to den3rats
+    // ====================================================================================
+
 #if PATCH_EX_SSB
-    // Optimized function to load the compressed SSB patch
-    bool downloadCompressedPatch(
-        const uint8_t* ssb_patch_content,
-        const uint16_t ssb_patch_content_size,
-        const uint16_t* cmd_0x15,
-        const int16_t cmd_0x15_size_bytes) {
+private:
+    // On-the-fly decompression logic for the SSB patch
+    // This approach saves over 6KB of Flash by storing only non-zero data
+    // and using small lookup tables to reconstruct the original 1105 patch lines
 
-        uint16_t command_line = 0;
-        uint16_t cmd_0x15_idx = 0;
-        const uint16_t cmd_0x15_elem_count = cmd_0x15_size_bytes >> 1;
+    // The patch is structured in memory segments not a flat array
+    // This determines the correct base address for a given line index
+    inline uint16_t getBaseForLine(uint16_t patch_line) {
+        switch (patch_line) {
+        case 0 ... 128:    return 0;
+        case 129 ... 404:  return 256;
+        case 405 ... 757:  return 512;
+        case 758 ... 1022: return 768;
+        default:           return 1024;
+        }
+    }
 
-        for (uint16_t offset = 0; offset < ssb_patch_content_size; offset += 7) {
+    // Determines command type. Most lines use 0x16
+    // A small lookup table for rare 0x15 commands saves significant space
+    inline uint8_t getCommandType(uint16_t patch_line, uint16_t base,
+        const uint8_t* cmd_0x15_offsets, uint8_t& cmd_0x15_idx) {
+        return (base + pgm_read_byte_near(cmd_0x15_offsets + cmd_0x15_idx) == patch_line)
+            ? (cmd_0x15_idx++, 0x15) : 0x16;
+    }
 
-            // Select the command byte - 0x15 if the current line number is in the special list, otherwise 0x16
-            uint8_t cmd = (cmd_0x15_idx < cmd_0x15_elem_count
-                && pgm_read_word_near(cmd_0x15 + cmd_0x15_idx) == command_line)
-                ? 0x15
-                : 0x16;
+    // Calculates parameters for special "cutoff" lines that have variable data lengths
+    // This avoids storing padding zeros. A single byte from cutoff_nonzero_lengths encodes
+    // both the data length and whether a secondary 0x15 line must follow
+    inline void getCutoffParams(uint16_t patch_line, uint16_t base,
+        const uint8_t* cutoff_places_offsets,
+        const uint8_t* cutoff_nonzero_lengths,
+        uint8_t& cutoff_place_idx,
+        uint8_t& non_zero_bytes, bool& has_next_0x15) {
+        if ((base + pgm_read_byte_near(cutoff_places_offsets + cutoff_place_idx)) == patch_line) {
+            non_zero_bytes = 1 + pgm_read_byte_near(cutoff_nonzero_lengths + cutoff_place_idx++);
 
-            if (cmd == 0x15) cmd_0x15_idx++;
+            // This compacts two pieces of information into one byte:
+            // the length and a flag indicating a follow-up command
+            has_next_0x15 = non_zero_bytes < 100;
+            if (!has_next_0x15) non_zero_bytes -= 100;
 
-            Wire.beginTransmission(deviceAddress);
-            Wire.write(cmd);
+        } else {
+            non_zero_bytes = 8;
+            has_next_0x15 = false;
+        }
+    }
 
-            for (uint8_t i = 0; i < 7; i++) {
-                Wire.write(pgm_read_byte_near(ssb_patch_content + offset + i));
+    // Unified function to send an 8-byte patch command via I2C
+    inline bool sendPatchData(uint8_t cmd, uint8_t start_idx, uint8_t end_idx,
+        const uint8_t* compressed_ssb_patch_content,
+        uint16_t& patch_data_idx) {
+        Wire.beginTransmission(deviceAddress);
+        Wire.write(cmd);
+
+        for (uint8_t i = 1; i < 8; i++) {
+            Wire.write((i >= start_idx && i < end_idx)
+                ? pgm_read_byte_near(compressed_ssb_patch_content + patch_data_idx++)
+                : 0x00);
+        }
+
+        Wire.endTransmission();
+        waitToSend();
+
+        Wire.requestFrom(deviceAddress, 1);
+        return !(Wire.read() & 0B01000000);
+    }
+
+    // Orchestrates decompression and sending for a single patch line
+    inline bool processSinglePatchLine(uint16_t& patch_line,
+        const uint8_t* compressed_ssb_patch_content,
+        const uint8_t* cutoff_places_offsets,
+        const uint8_t* cutoff_nonzero_lengths,
+        const uint8_t* cmd_0x15_offsets,
+        uint16_t& patch_data_idx,
+        uint8_t& cutoff_place_idx,
+        uint8_t& cmd_0x15_idx) {
+
+        uint16_t base = getBaseForLine(patch_line);
+        uint8_t cmd = getCommandType(patch_line, base, cmd_0x15_offsets, cmd_0x15_idx);
+
+        uint8_t non_zero_bytes;
+        bool has_next_0x15;
+        getCutoffParams(patch_line, base, cutoff_places_offsets, cutoff_nonzero_lengths,
+            cutoff_place_idx, non_zero_bytes, has_next_0x15);
+
+        if (!sendPatchData(cmd, 1, non_zero_bytes, compressed_ssb_patch_content, patch_data_idx))
+            return false;
+
+        if (has_next_0x15) {
+            patch_line++;
+            return sendPatchData(0x15, 3, 8, compressed_ssb_patch_content, patch_data_idx);
+        }
+
+        return true;
+    }
+
+public:
+    // Main entry point to upload the entire compressed SSB patch
+    bool downloadCompressedPatch(const uint8_t* compressed_ssb_patch_content,
+        const uint8_t* cutoff_places_offsets,
+        const uint8_t* cutoff_nonzero_lengths,
+        const uint8_t* cmd_0x15_offsets) {
+        uint16_t patch_data_idx = 0;
+        uint8_t cutoff_place_idx = 0, cmd_0x15_idx = 0;
+        const uint16_t ssb_patch_lines_count = 1105;
+
+        for (uint16_t patch_line = 0; patch_line < ssb_patch_lines_count; patch_line++) {
+            if (!processSinglePatchLine(patch_line, compressed_ssb_patch_content,
+                cutoff_places_offsets, cutoff_nonzero_lengths,
+                cmd_0x15_offsets, patch_data_idx,
+                cutoff_place_idx, cmd_0x15_idx)) {
+                return false;
             }
-
-            Wire.endTransmission();
-            waitToSend();
-
-            // This check ensures each 8-byte patch segment transferred successfully
-            // Per AN332 (p.135), after each 0x15/0x16 command, device returns status byte
-            // If ERR bit (bit 6) set, indicates failure (e.g., checksum error) — abort to prevent device instability or RAM corruption
-            // Without this, partial patch may cause unpredictable behavior
-            // Read 1-byte status; if bit 6 (0B01000000) set, return false to abort
-            Wire.requestFrom(deviceAddress, 1);
-            if (Wire.read() & 0B01000000) return false;
-
-            command_line++;
         }
 
         delayMicroseconds(250);
