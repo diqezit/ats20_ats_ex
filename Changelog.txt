@@ -1143,3 +1143,21 @@ This version introduces the ability to save your favorite FM stations.
 *   **[Credit]** Credit for the clever patch compression method goes to @den3rats.
 
 ------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v6.5.4**
+
+`(!) Attention: This is a technical release focused on a major internal refactoring. All user-facing features and behavior remain unchanged.`
+
+*   **[Refactored] Core Code Overhaul:** The main `ATS_EX.ino` file was split into smaller focused helper functions. 
+	This improves code readability and simplifies future maintenance without impacting firmware size or performance. The refactoring covered:
+    *   **Tuning & Seek:** Broke down BFO rollover, AM/FM/SSB tuning, band switching, and seek logic into dedicated 
+		inline helpers to clarify complex state transitions.
+    *   **Hardware Control:** Modularized low-level functions for SSB patch loading, FM audio profiles, and hardware 
+		configuration to isolate hardware-specific logic.
+    *   **State Management:** Extracted core utilities for state sync, user activity tracking, and timed tasks into 
+		reusable helpers.
+    *   **User Action Handlers:** Refactored settings menu, favorites management, and parameter handlers (e.g., step, volume) 
+		for better clarity and consistency.
+	
+------------------------------------------------------------------------------------------------------------
