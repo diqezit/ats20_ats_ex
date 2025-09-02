@@ -1,4 +1,5 @@
 #pragma once 
+// Credit for the clever patch compression method goes to den3rats
 
 // 0x15 line starts as 1-byte offsets from segment base
 // bases: [0, 256, 512, 768, 1024]
