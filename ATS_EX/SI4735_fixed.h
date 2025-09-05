@@ -17,23 +17,40 @@ public:
             return;
 
         seekStation(up_down, 0);
+        delay(100); // Wait for seek to start
 
         do {
-            delay(maxDelaySetFrequency);
+            delay(200); // Increased delay for stability
             getStatus(0, 0);
 
             freq.raw.FREQH = currentStatus.resp.READFREQH;
             freq.raw.FREQL = currentStatus.resp.READFREQL;
             currentWorkFrequency = freq.value;
-            if (showFunc)
-                showFunc(freq.value);
+            if (showFunc) showFunc(freq.value);
 
             if (currentStatus.resp.ERR || (stopSeeking && stopSeeking())) {
                 getStatus(0, 1); // '1' in the second argument cancels the ongoing seek.
                 return;
             }
 
-        } while (!currentStatus.resp.VALID && !currentStatus.resp.BLTF && (millis() - elapsed_seek) < maxSeekTime);
+            // Check timeout
+            if ((millis() - elapsed_seek) > maxSeekTime) {
+                getStatus(0, 1); // Cancel on timeout
+                return;
+            }
+
+        } while (!currentStatus.resp.STCINT); // Wait for Seek/Tune Complete Interrupt
+
+        // Clear interrupt flag and get final result
+        getStatus(1, 0);
+        freq.raw.FREQH = currentStatus.resp.READFREQH;
+        freq.raw.FREQL = currentStatus.resp.READFREQL;
+        currentWorkFrequency = freq.value;
+    }
+
+    // Overloaded version without stopSeeking callback (matches original library interface)
+    void seekStationProgress(void (*showFunc)(uint16_t f), uint8_t up_down) {
+        seekStationProgress(showFunc, nullptr, up_down);
     }
 
     // ====================================================================================

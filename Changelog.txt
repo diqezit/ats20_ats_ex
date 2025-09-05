@@ -1161,3 +1161,15 @@ This version introduces the ability to save your favorite FM stations.
 		for better clarity and consistency.
 	
 ------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v6.5.5**
+
+`SI4735_fixed.h`
+
+*   **[Fixed] Critical seek logic error (`seekStationProgress`):**
+    *   `seek` operation is now initiated only once instead of being restarted in a loop. Is now correctly awaited 
+		by polling the `STCINT` (Seek/Tune Complete) flag.
+		https://github.com/pu2clr/SI4735/issues/45
+
+------------------------------------------------------------------------------------------------------------
