@@ -130,220 +130,93 @@ static void getBandName(char* buffer, uint8_t band_idx) {
 // ===== UI DRAWING UTILITIES ===============
 // ==========================================
 
-// Utility to clear a rectangular region of the display
-static inline void clearBox(uint8_t x, uint8_t y, uint8_t w, uint8_t h) {
-    // null pointer in partialUpdate clears the area
+// clear a rectangular region
+// partialUpdate with null buffer erases box fast
+static inline void clearBox(uint8_t x,
+    uint8_t y,
+    uint8_t w,
+    uint8_t h) {
     oled.partialUpdate(x, y, w, h, NULL);
 }
 
-// Sets cursor, prints text with optional inversion, and resets inversion state
+// print text with temporary inversion
+// reset invert state to avoid leaking styles into next draw
 template <typename T>
-static void drawInverted(uint8_t x, uint8_t y, T text, bool invert) {
+static void drawInverted(uint8_t x,
+    uint8_t y,
+    T text,
+    bool invert) {
     oled.setCursor(x, y);
     oled.invertText(invert);
     oled.print(text);
-    oled.invertText(false); // Always reset state to non-inverted
+    oled.invertText(false);
 }
 
-// Pre-calculates width of main frequency digits for alignment purposes
-// This avoids building the string just to measure it, which is faster
-static inline uint16_t freqMainWidth(uint16_t khzBFO, uint8_t dotPos, bool ssbMode) {
-    uint8_t mainChars = ssbMode ? ilen(khzBFO) : UI_FREQ_MAIN_WIDTH_AMFM;
-    bool hasDot = (!ssbMode && dotPos);
-    uint8_t totalChars = mainChars + (hasDot ? 1 : 0);
+// map setting index to screen coordinates (row-first L,R)
+// two columns reduce navigation distance on small OLED
+// see: https://github.com/diqezit/ats20_ats_ex/issues/43#issuecomment-3183836389
+static void calcSettingPos(uint8_t idx,
+    uint8_t& xOffset,
+    uint8_t& yOffset) {
+    uint8_t place = idx % UI_SETTINGS_PER_PAGE; // 0..5 within the page
+    uint8_t row = place >> 1;                   // 0..2 (every 2 items -> next row)
+    bool    right = (place & 1);                // even = left, odd = right
 
-    uint16_t w = (uint16_t)mainChars * SEVEN_SEG_DIGIT_WIDTH;
-    if (hasDot) w += SEVEN_SEG_DOT_WIDTH;
-    if (totalChars > 1) w += (uint16_t)(totalChars - 1) * DIGIT_SPACING;
-    return w;
-}
-
-// Renders just the SSB tail digits (e.g., ".00") with spacing
-// This is separate to handle its unique layout needs next to the main frequency
-static int drawSSBTailDigits(int startX, int pixelY, uint16_t tailBFO) {
-    int curX = startX;
-
-    // center the dot between main and tail blocks
-    curX += DIGIT_SPACING;
-
-    oled.drawDigit('.', curX, pixelY);                  curX += SEVEN_SEG_DOT_WIDTH + DIGIT_SPACING;
-    oled.drawDigit('0' + (tailBFO / 10), curX, pixelY); curX += SEVEN_SEG_DIGIT_WIDTH + DIGIT_SPACING;
-    oled.drawDigit('0' + (tailBFO % 10), curX, pixelY); curX += SEVEN_SEG_DIGIT_WIDTH; // No spacing after last digit
-    return curX;
-}
-
-// Draws SSB tail digits only if in SSB mode, otherwise does nothing
-static int drawSSBTailIfNeeded(bool ssb, int x, int y, uint16_t tail) {
-    if (!ssb) return x;
-    return drawSSBTailDigits(x, y, tail);
-}
-
-// Calculates X/Y position for a setting based on its index
-// This arranges settings into two columns for a compact menu
-static void calcSettingPos(uint8_t idx, uint8_t& xOffset, uint8_t& yOffset) {
-    uint8_t place = idx % UI_SETTINGS_PER_PAGE; // Position within the current page
-    uint8_t withinCol = place;
-
-    if (place >= UI_SETTINGS_PER_COL) {
-        xOffset = UI_SETTINGS_RIGHT_COL_X;
-        withinCol -= UI_SETTINGS_PER_COL;
-    } else {
-        xOffset = UI_SETTINGS_LEFT_COL_X;
-    }
-
-    yOffset = UI_SETTINGS_ROW_START + withinCol * UI_SETTINGS_ROW_STEP;
-}
-
-// Draws a single item (name and value) in the settings menu
-static void drawSettingItem(
-    uint8_t x, uint8_t y,
-    const char* name, const char* val,
-    bool selName, bool selVal) {
-    oled.setCursor(UI_SETTING_NAME_PREFIX_X + x, y);
-    oled.print(selName ? '>' : ' ');
-    oled.print(name);
-
-    oled.setCursor(UI_SETTING_VALUE_X + x, y);
-    oled.print(selVal ? '>' : ' ');
-    oled.print(val);
+    xOffset = right ? UI_SETTINGS_RIGHT_COL_X : UI_SETTINGS_LEFT_COL_X;
+    yOffset = UI_SETTINGS_ROW_START + row * UI_SETTINGS_ROW_STEP;
 }
 
 // ==========================================
-// ===== UI: MAIN SCREEN COMPONENTS =========
+// ===== UI: BRIGHTNESS =====================
 // ==========================================
 
-// Determines display properties like units (kHz/MHz) based on current band and mode
-static void prepareDisplayConfig(
-    bool ssbMode, BandType band,
-    uint8_t& outMode, uint8_t& outDotPos,
-    const char*& outUnit) {
+// map 0..9 to non linear contrast
+// give finer control at low end where eyes are sensitive
+static inline __attribute__((always_inline))
+uint8_t brightnessToContrast(uint8_t s) {
+    return (uint8_t)(((uint32_t)s * ((uint16_t)s * 130 + 6060)) >> 8);
+}
 
-    outMode = 0;
-    outDotPos = 0;
-    outUnit = "kHz";
+// apply contrast curve to OLED
+// add +1 to avoid full black at lowest setting
+static void applyBrightness() {
+    uint8_t s = g_Settings[Brightness].param;
+    oled.setContrast((uint8_t)(brightnessToContrast(s) + 1));
+}
 
-    if (ssbMode) {
-        outMode = 2; // SSB needs special handling for BFO
-    } else if (band == FM_BAND_TYPE) {
-        outMode = 1;
-        outDotPos = UI_DOTPOS_FM;
-        outUnit = "MHz";
-    } else if (band == SW_BAND_TYPE && g_Settings[SettingsIndex::SWUnits].param == 1) {
-        // SW can optionally show MHz for user preference
-        outDotPos = UI_DOTPOS_SW_MHZ;
-        outUnit = "MHz";
+// ==========================================
+// ===== UI: SIMPLE STATUS WIDGETS ==========
+// ==========================================
+
+// compute single char indicator for shared slot
+// compact mapping keeps UI readable at a glance
+static inline __attribute__((always_inline))
+char stereoIndicatorChar() {
+    if (g_currentMode == FM) {
+        return (g_stereoStatus && g_Settings[ForceMono].param == 0)
+            ? '*' : ' ';
     }
-}
-
-// Formats the main frequency digits and extracts the BFO part for SSB
-static void prepareMainFreq(
-    uint8_t displayMode, char* freqDisplay,
-    uint16_t& khzBFO, uint16_t& tailBFO, uint8_t dotPos) {
-
-    if (displayMode == 2) { // SSB
-        splitFreq(khzBFO, tailBFO);
-        convertToChar(freqDisplay, khzBFO, ilen(khzBFO), 0, '.', ' ');
-    } else { // AM / FM
-        convertToChar(freqDisplay, g_currentFrequency, UI_FREQ_MAIN_WIDTH_AMFM, dotPos, '.', '/');
+    if (g_currentMode == CW) {
+        return (g_lastCWMode == LSB) ? 'L' : 'U';
     }
+    if (isSSB() && g_Settings[Sync].param == 1) return 'S';
+    return ' ';
 }
 
-// Clears the frequency area to prevent graphical artifacts ("ghosting")
-// This is needed when the frequency changes length (e.g., 999 -> 1000)
-static void renderClearOrBlink(
-    bool cleanDisplay,
-    uint8_t len, uint8_t prevLen,
-    uint8_t off, int pixelY) {
-
-    if (cleanDisplay) {
-        clearBox(0, pixelY, UI_SCREEN_W, SEVEN_SEG_DIGIT_HEIGHT);
-    } else if (len != prevLen) {
-        // When length changes clear from start to the right edge
-        clearBox(off, pixelY, UI_SCREEN_W - off, SEVEN_SEG_DIGIT_HEIGHT);
-    }
+// single slot shows CW sideband, SSB sync, or FM stereo
+// saves space by overloading position user already watches
+void updateStereoIndicator() {
+    oled.setCursor(UI_STEREO_INDICATOR_X, UI_STEREO_INDICATOR_ROW);
+    oled.write(stereoIndicatorChar());
 }
 
-// Positions the unit label (kHz/MHz) to visually align with the seven-segment digits
-// It is hidden on long SSB frequencies to avoid overlapping the BFO decimal part
-static void renderUnit(bool ssbMode, uint8_t len, const char* unit) {
-    if (ssbMode && len >= 5) return;  // avoid collision with SSB tail
-
-    uint8_t row = (UI_FREQ_TOP_PX + SEVEN_SEG_DIGIT_HEIGHT - UI_CHAR_H) / UI_CHAR_H;
-    if (row > 7) row = 7;
-
-    clearBox(UI_UNIT_X_PX, row * UI_CHAR_H, 3 * UI_CHAR_W, UI_CHAR_H);
-    oled.setCursor(UI_UNIT_X_PX, row);
-    oled.print(unit);
-}
-
-// Helper function to render each character in the frequency string using drawDigit
-static int renderFrequencyString(const char* freqDisplay, int startX, int pixelY) {
-    int curX = startX;
-
-    for (const char* p = freqDisplay; *p; ++p) {
-        char ch = *p;
-        oled.drawDigit(ch, curX, pixelY);
-        curX += (ch == '.' ? SEVEN_SEG_DOT_WIDTH : SEVEN_SEG_DIGIT_WIDTH) + DIGIT_SPACING;
-    }
-    // remove last spacing to allow renderSSBTail to position itself correctly
-    return curX - DIGIT_SPACING;
-}
-
-// Renders main frequency, aligning it to prevent "jumpiness" during tuning
-// The frequency is right-aligned to the units label, so it expands to the left
-static void showFrequency(bool cleanDisplay = false) {
-    RETURN_IF_SETTINGS_ACTIVE();
-
-    static uint8_t prevLen = 0;
-
-    char     freqDisplay[UI_FREQ_BUF_LEN];
-    uint16_t khzBFO, tailBFO;
-    bool     ssbMode = isSSB();
-    BandType band = g_bandList[g_bandIndex].bandType;
-
-    uint8_t  off = (ssbMode ? UI_FREQ_X_OFFSET_SSB_PX : UI_FREQ_X_OFFSET_AMFM_PX);
-
-    uint8_t displayMode, dotPos;
-    const char* unit;
-    prepareDisplayConfig(ssbMode, band, displayMode, dotPos, unit);
-    prepareMainFreq(displayMode, freqDisplay, khzBFO, tailBFO, dotPos);
-
-    uint8_t len = ssbMode ? ilen(khzBFO) : ilen(g_currentFrequency);
-
-    uint16_t mainWidth = freqMainWidth(khzBFO, dotPos, ssbMode);
-    uint16_t tailWidth = ssbMode ? UI_SSB_TAIL_WIDTH : 0;
-    uint16_t totalWidth = mainWidth + tailWidth;
-
-    // Calculate start position for right-alignment
-    int startX = off;
-    int alignedStart = (int)UI_UNIT_X_PX - DIGIT_SPACING - (int)totalWidth;
-    if (alignedStart > startX) startX = alignedStart;
-
-    int pixelY = UI_FREQ_TOP_PX;
-
-    uint8_t offClear = UI_FREQ_X_OFFSET_SSB_PX;
-    renderClearOrBlink(cleanDisplay, len, prevLen, offClear, pixelY);
-
-    int mainEndX = renderFrequencyString(freqDisplay, startX, pixelY);
-
-    drawSSBTailIfNeeded(ssbMode, mainEndX, pixelY, tailBFO);
-    renderUnit(ssbMode, len, unit);
-
-    prevLen = len;
-}
-
-//This function is called by station seek logic
-static void showFrequencySeek(uint16_t freq) {
-    g_currentFrequency = freq;
-    showFrequency();
-    delay(UI_SEEK_DELAY_MS);
-}
-
-//Draw current band tag (e.g., "40m")
+// show band tag like "40m"
+// invert only when band command is active and not FM
 static void showBandTag() {
     RETURN_IF_SETTINGS_ACTIVE();
 
-    bool invert = (g_activeCommand == CMD_BAND && g_bandList[g_bandIndex].bandType != FM_BAND_TYPE);
+    bool invert = (g_activeCommand == CMD_BAND &&
+        g_bandList[g_bandIndex].bandType != FM_BAND_TYPE);
 
     static char name_buffer[5];
     getBandName(name_buffer, g_bandIndex);
@@ -351,40 +224,24 @@ static void showBandTag() {
     drawInverted(0, 0, name_buffer, invert);
 }
 
-// Overloads a single screen position for multiple status indicators
-// Shows 'L'/'U' for CW sideband, 'S' for SSB sync, or '*' for FM stereo
-void updateStereoIndicator() {
-    char c;
-
-    if (g_currentMode == FM) {
-        c = (g_stereoStatus && g_Settings[ForceMono].param == 0) ? '*' : ' ';
-    } else if (g_currentMode == CW) {
-        c = (g_lastCWMode == LSB) ? 'L' : 'U';
-    } else if (isSSB() && g_Settings[Sync].param == 1) {
-        c = 'S'; // Sync-lock indicator
-    } else {
-        c = ' ';
-    }
-
-    oled.setCursor(UI_STEREO_INDICATOR_X, UI_STEREO_INDICATOR_ROW);
-    oled.print(c);
-}
-
-//Draw current modulation (AM/LSB/USB/CW/FM) and stereo indicator
+// modulation label and stereo indicator together
+// keeps related status in one glance area
 static void showModulation() {
-    bool invert = (g_activeCommand == CMD_BAND && g_bandList[g_bandIndex].bandType == FM_BAND_TYPE);
-    drawInverted(UI_MODE_LABEL_X, UI_MODE_LABEL_ROW, g_bandModeDesc[g_currentMode], invert);
+    bool invert = (g_activeCommand == CMD_BAND &&
+        g_bandList[g_bandIndex].bandType == FM_BAND_TYPE);
+
+    drawInverted(UI_MODE_LABEL_X,
+        UI_MODE_LABEL_ROW,
+        g_bandModeDesc[g_currentMode],
+        invert);
 
     updateStereoIndicator();
     showBandTag();
 }
 
-//Draw volume level or mute status
-static void showVolume() {
-    RETURN_IF_SETTINGS_ACTIVE();
-
-    char buf[3];
-
+// build volume text or ' M' when muted
+// user sees explicit mute instead of 0 value
+static inline void buildVolumeBuf(char* buf) {
     if (g_muteVolume == 0) {
         convertToChar(buf, g_si4735.getCurrentVolume(), 2, 0, 0);
     } else {
@@ -392,12 +249,38 @@ static void showVolume() {
         buf[1] = 'M';
         buf[2] = '\0';
     }
+}
+
+// volume or mute flag
+// mute shows ' M' so user understands silent audio state
+static void showVolume() {
+    RETURN_IF_SETTINGS_ACTIVE();
+
+    char buf[3];
+    buildVolumeBuf(buf);
+
     bool invert = (g_activeCommand == CMD_VOLUME);
     drawInverted(UI_VOLUME_X, UI_VOLUME_ROW, buf, invert);
 }
 
-// Displays the current signal quality value (RSSI) and RF hints
-// draw RSSI at fixed slot and refresh RF hints below volume
+// show Soft Mute hint when DSP attenuates weak signals
+// explains faint audio without user guessing
+static void showRfHints() {
+    const uint8_t x = UI_VOLUME_X;
+    const uint8_t row = UI_VOLUME_ROW + 2;
+    if (row > 7) return;
+
+    clearBox(x, (uint8_t)(row * UI_CHAR_H),
+        (uint8_t)(2 * UI_CHAR_W), UI_CHAR_H);
+
+    if ((!isSSB()) && g_si4735.getCurrentSoftMuteIndicator()) {
+        oled.setCursor(x, row);
+        oled.print(F("SM"));
+    }
+}
+
+// RSSI and RF hints share area near volume
+// user sees signal and reason for low audio together
 static void showSignalQuality() {
     if (g_settingsActive
 #if ENABLE_FAVORITES
@@ -410,29 +293,16 @@ static void showSignalQuality() {
     if (g_signalQualityValue == UI_SIGNAL_NO_VALUE) {
         oled.print(F("   "));
     } else {
-        if (g_signalQualityValue < 10) oled.print(' ');
+        if (g_signalQualityValue < 10) oled.write(' ');
         oled.print(g_signalQualityValue);
-        oled.print(UI_RSSI_SEPARATOR);
+        oled.write(UI_RSSI_SEPARATOR);
     }
 
     showRfHints();
 }
 
-// Shows 'SM' (Soft Mute) hint when the DSP is quieting audio on weak signals.
-// This appears under the volume level to explain why audio might be faint.
-static void showRfHints() {
-    const uint8_t x = UI_VOLUME_X;
-    const uint8_t row = UI_VOLUME_ROW + 2;
-    if (row > 7) return;
-
-    clearBox(x, (uint8_t)(row * UI_CHAR_H), (uint8_t)(2 * UI_CHAR_W), UI_CHAR_H);
-    if ((!isSSB()) && g_si4735.getCurrentSoftMuteIndicator()) {
-        oled.setCursor(x, row);
-        oled.print(F("SM"));
-    }
-}
-
-// Renders the stable battery percentage value on the display.
+// show stable battery percent
+// cap at 100 to avoid overflow when ADC jitters
 static void showChargeOnDisplay() {
     RETURN_IF_SETTINGS_ACTIVE();
     int charge = min(g_stableBatteryPercent, (int)UI_BATT_MAX_PERCENT);
@@ -440,7 +310,8 @@ static void showChargeOnDisplay() {
     if (charge < UI_BATT_MAX_PERCENT) oled.print('%');
 }
 
-// display the step on the screen
+// show step value based on mode
+// index maps user selection to readable label
 static void showStep() {
     bool invert = (g_activeCommand == CMD_STEP);
 
@@ -457,73 +328,402 @@ static void showStep() {
     oled.invertText(false);
 }
 
-// Renders the bandwidth label
-static void showBandwidth() {
-    const uint8_t* table_ptr = nullptr;
-    uint8_t index = 0;
-
+// resolve BW table and index for current mode
+// CW returns false since value not selectable
+static inline bool bwResolve(const uint8_t*& table_ptr,
+    uint8_t& index) {
     switch (g_currentMode) {
     case LSB:
     case USB:
         table_ptr = bw_ssb_map;
         index = g_bandList[g_bandIndex].bwIdxSSB;
-        break;
+        return true;
     case AM:
         table_ptr = bw_am_map;
         index = g_bandList[g_bandIndex].bwIdxAM;
-        break;
+        return true;
     case FM:
         table_ptr = bw_fm_map;
         index = g_bandList[g_bandIndex].bwIdxFM;
-        break;
+        return true;
     case CW:
-        // for CW mode non-selectable value
-        return;
+    default:
+        return false;
     }
+}
+
+// bandwidth label per mode
+// CW returns early since value not selectable
+static void showBandwidth() {
+    const uint8_t* table_ptr = nullptr;
+    uint8_t index = 0;
+    if (!bwResolve(table_ptr, index)) return;
 
     uint8_t offset = pgm_read_byte(&table_ptr[index]);
     const char* bw_str_ptr = &bw_all_data[offset];
 
     bool invert = (g_activeCommand == CMD_BW);
-    drawInverted(UI_BW_LABEL_X, UI_BW_LABEL_ROW, (__FlashStringHelper*)bw_str_ptr, invert);
+    drawInverted(UI_BW_LABEL_X,
+        UI_BW_LABEL_ROW,
+        (__FlashStringHelper*)bw_str_ptr,
+        invert);
 }
 
 // ==========================================
-// ===== UI: FAVORITES MENU DRAWING =========
+// ===== UI: MAIN FREQUENCY DISPLAY =========
+// ==========================================
+
+// =-=-=-=-=-=-=-=-= UI: MAIN FREQUENCY HELPERS =-=-=-=-=-=-=-=-=
+
+// forward declare to allow helper to call it before definition
+static int renderFrequencyString(const char* freqDisplay,
+    int startX,
+    int pixelY);
+
+// compute main seven segment width
+// precompute to align right without building string twice
+static inline uint16_t freqMainWidth(uint16_t khzBFO,
+    uint8_t dotPos,
+    bool ssbMode) {
+    uint8_t mainChars = ssbMode ? ilen(khzBFO) : UI_FREQ_MAIN_WIDTH_AMFM;
+    bool hasDot = (!ssbMode && dotPos);
+    uint8_t totalChars = mainChars + (hasDot ? 1 : 0);
+
+    uint16_t w = (uint16_t)mainChars * SEVEN_SEG_DIGIT_WIDTH;
+    if (hasDot) w += SEVEN_SEG_DOT_WIDTH;
+    if (totalChars > 1) {
+        w += (uint16_t)(totalChars - 1) * DIGIT_SPACING;
+    }
+    return w;
+}
+
+// draw SSB tail ".dd" next to main block
+// keep spacing identical to main digits
+static int drawSSBTailDigits(int startX,
+    int pixelY,
+    uint16_t tailBFO) {
+    int curX = startX;
+
+    // center the dot between main and tail blocks
+    curX += DIGIT_SPACING;
+
+    oled.drawDigit('.', curX, pixelY);
+    curX += SEVEN_SEG_DOT_WIDTH + DIGIT_SPACING;
+
+    oled.drawDigit('0' + (tailBFO / 10), curX, pixelY);
+    curX += SEVEN_SEG_DIGIT_WIDTH + DIGIT_SPACING;
+
+    oled.drawDigit('0' + (tailBFO % 10), curX, pixelY);
+    curX += SEVEN_SEG_DIGIT_WIDTH; // no spacing after last digit
+
+    return curX;
+}
+
+// attach SSB tail only for SSB modes
+// AM FM skip to save cycles
+static inline int drawSSBTailIfNeeded(bool ssb,
+    int x,
+    int y,
+    uint16_t tail) {
+    return ssb ? drawSSBTailDigits(x, y, tail) : x;
+}
+
+// compute left offset per mode
+// SSB needs tighter left margin to fit tail
+static inline __attribute__((always_inline))
+uint8_t freqLeftOffset(bool ssbMode) {
+    return ssbMode ? UI_FREQ_X_OFFSET_SSB_PX
+        : UI_FREQ_X_OFFSET_AMFM_PX;
+}
+
+// choose start X so main block stays right aligned to unit label
+// use left offset as lower bound to avoid clipping left edge
+static inline __attribute__((always_inline))
+int freqStartX(uint16_t totalWidth,
+    uint8_t leftOff) {
+    int aligned = (int)UI_UNIT_X_PX - DIGIT_SPACING - (int)totalWidth;
+    return aligned > (int)leftOff ? aligned : (int)leftOff;
+}
+
+// visible length of numeric part
+// SSB uses BFO part so length differs from AM/FM
+static inline __attribute__((always_inline))
+uint8_t visibleLen(bool ssbMode,
+    uint16_t khzBFO) {
+    return ssbMode ? ilen(khzBFO) : ilen(g_currentFrequency);
+}
+
+// compute widths and start position
+// one place to keep alignment math together
+static inline __attribute__((always_inline))
+void freqComputeLayout(bool ssbMode,
+    uint16_t khzBFO,
+    uint8_t dotPos,
+    uint8_t leftOff,
+    uint16_t& mainWidth,
+    uint16_t& tailWidth,
+    uint16_t& totalWidth,
+    int& startX) {
+    mainWidth = freqMainWidth(khzBFO, dotPos, ssbMode);
+    tailWidth = ssbMode ? UI_SSB_TAIL_WIDTH : 0;
+    totalWidth = mainWidth + tailWidth;
+    startX = freqStartX(totalWidth, leftOff);
+}
+
+// draw main numeric and optional SSB tail
+// keep tail attach logic local
+static inline __attribute__((always_inline))
+void freqDrawMainAndTail(const char* freqDisplay,
+    int startX,
+    int pixelY,
+    bool ssbMode,
+    uint16_t tailBFO) {
+    int endX = renderFrequencyString(freqDisplay, startX, pixelY);
+    drawSSBTailIfNeeded(ssbMode, endX, pixelY, tailBFO);
+}
+
+// =-=-=-=-=-=-=-=-= UI: MAIN FREQUENCY CONFIG =-=-=-=-=-=-=-=-=
+
+// set unit and dot policy per band and mode
+// user expects MHz on FM and optional SW MHz per preference
+static void prepareDisplayConfig(bool ssbMode,
+    BandType band,
+    uint8_t& outMode,
+    uint8_t& outDotPos,
+    const char*& outUnit) {
+    outMode = 0;
+    outDotPos = 0;
+    outUnit = "kHz";
+
+    if (ssbMode) {
+        outMode = 2; // SSB needs special handling for BFO
+    } else if (band == FM_BAND_TYPE) {
+        outMode = 1;
+        outDotPos = UI_DOTPOS_FM;
+        outUnit = "MHz";
+    } else if (band == SW_BAND_TYPE &&
+        g_Settings[SettingsIndex::SWUnits].param == 1) {
+        // SW can optionally show MHz for user preference
+        outDotPos = UI_DOTPOS_SW_MHZ;
+        outUnit = "MHz";
+    }
+}
+
+// build main numeric string and extract BFO tail for SSB
+// SSB splits display so user sees precise tuned part and decimals
+static void prepareMainFreq(uint8_t displayMode,
+    char* freqDisplay,
+    uint16_t& khzBFO,
+    uint16_t& tailBFO,
+    uint8_t dotPos) {
+    if (displayMode == 2) { // SSB
+        splitFreq(khzBFO, tailBFO);
+        convertToChar(freqDisplay, khzBFO, ilen(khzBFO), 0, '.', ' ');
+    } else { // AM / FM
+        convertToChar(freqDisplay,
+            g_currentFrequency,
+            UI_FREQ_MAIN_WIDTH_AMFM,
+            dotPos,
+            '.',
+            '/');
+    }
+}
+
+// clear area only when needed
+// full clear on force or when width grows on digit count change
+static void renderClearOrBlink(bool cleanDisplay,
+    uint8_t len,
+    uint8_t prevLen,
+    uint8_t leftOff,
+    int pixelY) {
+    if (cleanDisplay) {
+        clearBox(0, pixelY, UI_SCREEN_W, SEVEN_SEG_DIGIT_HEIGHT);
+    } else if (len != prevLen) {
+        // length change may leave stale pixels on the right
+        clearBox(leftOff,
+            pixelY,
+            UI_SCREEN_W - leftOff,
+            SEVEN_SEG_DIGIT_HEIGHT);
+    }
+}
+
+// print unit in a row aligned to seven segment block
+// hide on long SSB to avoid collision with decimals
+static void renderUnit(bool ssbMode,
+    uint8_t len,
+    const char* unit) {
+    if (ssbMode && len >= 5) return;  // avoid collision with SSB tail
+
+    uint8_t row = (UI_FREQ_TOP_PX + SEVEN_SEG_DIGIT_HEIGHT - UI_CHAR_H)
+        / UI_CHAR_H;
+    if (row > 7) row = 7;
+
+    clearBox(UI_UNIT_X_PX, row * UI_CHAR_H, 3 * UI_CHAR_W, UI_CHAR_H);
+    oled.setCursor(UI_UNIT_X_PX, row);
+    oled.print(unit);
+}
+
+// draw main numeric block char by char
+// spacing matches seven segment glyph metrics
+static int renderFrequencyString(const char* freqDisplay,
+    int startX,
+    int pixelY) {
+    int curX = startX;
+
+    for (const char* p = freqDisplay; *p; ++p) {
+        char ch = *p;
+        oled.drawDigit(ch, curX, pixelY);
+        curX += (ch == '.' ? SEVEN_SEG_DOT_WIDTH
+            : SEVEN_SEG_DIGIT_WIDTH) + DIGIT_SPACING;
+    }
+    // remove trailing spacing to align SSB tail attach point
+    return curX - DIGIT_SPACING;
+}
+
+// =-=-=-=-=-=-=-=-= UI: MAIN FREQUENCY RENDER =-=-=-=-=-=-=-=-=
+
+// right align main frequency and draw optional SSB tail
+// avoids jumpiness during tuning and keeps unit column stable
+static void showFrequency(bool cleanDisplay = false) {
+    RETURN_IF_SETTINGS_ACTIVE();
+
+    static uint8_t prevLen = 0;
+
+    char     freqDisplay[UI_FREQ_BUF_LEN];
+    uint16_t khzBFO, tailBFO;
+    bool     ssbMode = isSSB();
+    BandType band = g_bandList[g_bandIndex].bandType;
+
+    uint8_t leftOff = freqLeftOffset(ssbMode);
+
+    uint8_t displayMode, dotPos;
+    const char* unit;
+    prepareDisplayConfig(ssbMode, band, displayMode, dotPos, unit);
+    prepareMainFreq(displayMode, freqDisplay, khzBFO, tailBFO, dotPos);
+
+    uint8_t len = visibleLen(ssbMode, khzBFO);
+
+    uint16_t mainWidth, tailWidth, totalWidth;
+    int startX;
+    freqComputeLayout(ssbMode, khzBFO, dotPos, leftOff,
+        mainWidth, tailWidth, totalWidth, startX);
+
+    const uint8_t pixelY = UI_FREQ_TOP_PX;
+
+    renderClearOrBlink(cleanDisplay, len, prevLen, leftOff, pixelY);
+
+    freqDrawMainAndTail(freqDisplay, startX, pixelY, ssbMode, tailBFO);
+    renderUnit(ssbMode, len, unit);
+
+    prevLen = len;
+}
+
+// called by seek to show in-progress frequency quickly
+// delay gives user time to perceive step during scan
+static void showFrequencySeek(uint16_t freq) {
+    g_currentFrequency = freq;
+    showFrequency();
+    delay(UI_SEEK_DELAY_MS);
+}
+
+// ==========================================
+/* ===== UI: FAVORITES MENU DRAWING ========= */
 // ==========================================
 
 #if ENABLE_FAVORITES
 
 static constexpr uint8_t FAV_HEADER_ROW = UI_FAV_HEADER_ROW;
-static constexpr uint8_t FAV_LIST_START_ROW = UI_FAV_LIST_START_ROW; // Start list at row 2 for spacing
-static constexpr uint8_t FAV_ROW_GAP = UI_FAV_ROW_GAP;               // Use 2 character rows
-static constexpr uint8_t FAV_ITEMS_PER_PG = UI_FAV_ITEMS_PER_PG;     // 3 items per page
+static constexpr uint8_t FAV_LIST_START_ROW = UI_FAV_LIST_START_ROW; // start at row 2
+static constexpr uint8_t FAV_ROW_GAP = UI_FAV_ROW_GAP;               // 2 char rows gap
+static constexpr uint8_t FAV_ITEMS_PER_PG = UI_FAV_ITEMS_PER_PG;     // 3 per page
 
-// returns page for a given favorite index
+// =-=-=-=-=-=-=-=-= UI: FAVORITES HELPERS =-=-=-=-=-=-=-=-=
+
+// page for a given index
+// simple math keeps navigation predictable
 static inline uint8_t fav_pageOf(uint8_t index) {
     return index / FAV_ITEMS_PER_PG;
 }
 
-// returns page bounds [start,end)
-static inline void fav_getPageBounds(uint8_t page, uint8_t& start, uint8_t& end) {
+// page bounds [start, end)
+// clamp to total to avoid out of range reads
+static inline void fav_getPageBounds(uint8_t page,
+    uint8_t& start,
+    uint8_t& end) {
     start = page * FAV_ITEMS_PER_PG;
-    end = (start + FAV_ITEMS_PER_PG < g_totalFavorites) ? (start + FAV_ITEMS_PER_PG) : g_totalFavorites;
+    end = (start + FAV_ITEMS_PER_PG < g_totalFavorites)
+        ? (start + FAV_ITEMS_PER_PG)
+        : g_totalFavorites;
 }
 
-// row index for item on current page
-static inline uint8_t fav_rowForIndex(uint8_t index, uint8_t page_start_index) {
-    return FAV_LIST_START_ROW + (index - page_start_index) * FAV_ROW_GAP;
+// row index on current page
+// fixed spacing keeps list readable on small OLED
+static inline uint8_t fav_rowForIndex(uint8_t index,
+    uint8_t page_start_index) {
+    return FAV_LIST_START_ROW +
+        (index - page_start_index) * FAV_ROW_GAP;
 }
 
-// Header padding to right-align the XX|YY counter
-static inline uint8_t fav_calcHeaderPadding(uint8_t selected, uint8_t total) {
+// padding to right-align XX|YY in header
+// stable header width aids orientation
+static inline uint8_t fav_calcHeaderPadding(uint8_t selected,
+    uint8_t total) {
     uint8_t selDigits = (selected > 9) ? 2 : 1;
     uint8_t totDigits = (total > 9) ? 2 : 1;
-    uint8_t counterWidth = selDigits + 1 + totDigits;            // "XX|XX"
-    return (UI_COLS - UI_FAV_HEADER_TITLE_WIDTH) - counterWidth; // 21 chars total
+    uint8_t counterWidth = selDigits + 1 + totDigits; // "XX|YY"
+    return (UI_COLS - UI_FAV_HEADER_TITLE_WIDTH) - counterWidth;
 }
 
-// prefix '>' + number with padding
+// start column for right-aligned freq block
+// prevents overlap with prefix and mode label
+static inline uint8_t fav_calcFreqStartCol(uint8_t freqWidth) {
+    uint8_t col = UI_FAV_FREQ_RIGHT_COL - freqWidth;
+    if (col < UI_FAV_FREQ_MIN_COL) col = UI_FAV_FREQ_MIN_COL;
+    return col;
+}
+
+// =-=-=-=-=-=-=-=-= UI: FAVORITES AM/SSB HELPERS =-=-=-=-=-=-=-=-=
+
+// modes that show ".dd"
+// user expects decimals only in SSB or CW
+static inline __attribute__((always_inline))
+bool fav_isSSB(uint8_t mod) {
+    return (mod == LSB || mod == USB || mod == CW);
+}
+
+// apply BFO into kHz and decimal tail
+// keep tail positive so decimals print stable
+static inline __attribute__((always_inline))
+void fav_splitBFO(int16_t bfo,
+    uint16_t& khz,
+    uint16_t& tail) {
+    int16_t d = bfo / 1000;
+    int16_t r = bfo % 1000;
+    if (r < 0) { r += 1000; --d; }  // borrow one kHz
+    khz += d;
+    tail = (uint16_t)(r / 10);      // two decimals
+}
+
+// width for AM vs SSB/CW rows
+// SSB uses ".dd" so width grows
+static inline __attribute__((always_inline))
+uint8_t fav_widthAMSSB(bool isSSB) {
+    return isSSB ? 8 : 5;
+}
+
+// print ".dd" with leading zero
+// aligns with main list formatting
+static inline __attribute__((always_inline))
+void fav_printDotDec2(uint16_t tl) {
+    oled.print('.');
+    if (tl < 10) oled.print('0');
+    oled.print(tl);
+}
+
+// =-=-=-=-=-=-=-=-= UI: FAVORITES RENDER =-=-=-=-=-=-=-=-=
+
+// prefix '>' + 1-based 2-digit number
+// fixed width keeps grid aligned
 static inline void fav_drawPrefix(uint8_t idx, bool sel) {
     oled.print(sel ? '>' : ' ');
     uint8_t num = idx + 1;
@@ -532,16 +732,10 @@ static inline void fav_drawPrefix(uint8_t idx, bool sel) {
     oled.print(' ');
 }
 
-// calculate start column for right-aligned frequency block
-// this prevents frequency from overlapping prefix or mode labels
-static inline uint8_t fav_calcFreqStartCol(uint8_t freqWidth) {
-    uint8_t col = UI_FAV_FREQ_RIGHT_COL - freqWidth;
-    if (col < UI_FAV_FREQ_MIN_COL) col = UI_FAV_FREQ_MIN_COL;
-    return col;
-}
-
-// FM line, right-aligned before the mode label
-static inline void fav_drawFreqFM(const FavoriteStation& fav, uint8_t row) {
+// FM freq right-aligned before mode label
+// right align preserves visual grid across list
+static inline void fav_drawFreqFM(const FavoriteStation& fav,
+    uint8_t row) {
     uint16_t ip = fav.frequency / 100;
     uint8_t  dp = (fav.frequency % 100) / 10;
 
@@ -554,42 +748,40 @@ static inline void fav_drawFreqFM(const FavoriteStation& fav, uint8_t row) {
     oled.print(dp);
 }
 
-// Displays AM/SSB/CW frequency, applying the BFO offset for an accurate reading
-static inline void fav_drawFreqAMSSB(const FavoriteStation& fav, uint8_t row) {
+// AM/SSB/CW freq with applied BFO and optional ".dd"
+// show tuned freq so list matches what user hears
+static inline void fav_drawFreqAMSSB(const FavoriteStation& fav,
+    uint8_t row) {
     char buf[8];
     uint16_t khz = fav.frequency, tl = 0;
 
-    bool isSSB = (fav.modulation == LSB || fav.modulation == USB || fav.modulation == CW);
-    if (isSSB) {
-        // Apply BFO to show the actual tuned frequency, not just the base
-        int16_t d = fav.bfo / 1000, r = fav.bfo % 1000;
-        if (r < 0) { r += 1000; d--; }
-        khz += d; tl = r / 10;
-    }
+    bool isSSB = fav_isSSB(fav.modulation);
+    if (isSSB) fav_splitBFO(fav.bfo, khz, tl);
 
     convertToChar(buf, khz, 5, 0, '.', ' ');
 
-    uint8_t width = isSSB ? 8 : 5;      // 5 digits for kHz; add ".dd" only for SSB/CW
+    uint8_t width = fav_widthAMSSB(isSSB);
     uint8_t startCol = fav_calcFreqStartCol(width);
 
     oled.setCursor(startCol * UI_CHAR_W, row);
     oled.print(buf);
 
-    if (isSSB) {
-        oled.print('.');
-        if (tl < 10) oled.print('0');   // keep two decimals
-        oled.print(tl);
-    }
+    if (isSSB) fav_printDotDec2(tl);
 }
 
-// Mode label at fixed column (rightmost)
-static inline void fav_drawModeLabel(const FavoriteStation& fav, uint8_t row) {
+// mode label at fixed column (rightmost)
+// fixed column makes scan easy on small OLED
+static inline void fav_drawModeLabel(const FavoriteStation& fav,
+    uint8_t row) {
     oled.setCursor(UI_FAV_MODE_LABEL_X, row);
     oled.print(g_bandModeDesc[fav.modulation]);
 }
 
-// Draws one favorite line
-static inline void fav_drawLine(uint8_t idx, uint8_t row, bool sel) {
+// draw one favorite line
+// clear row to avoid leftovers from previous content
+static inline void fav_drawLine(uint8_t idx,
+    uint8_t row,
+    bool sel) {
     const auto& fav = g_favorites[idx];
 
     clearBox(0, row * UI_CHAR_H, UI_SCREEN_W, UI_CHAR_H);
@@ -606,7 +798,10 @@ static inline void fav_drawLine(uint8_t idx, uint8_t row, bool sel) {
     fav_drawModeLabel(fav, row);
 }
 
-// Header with status info
+// =-=-=-=-=-=-=-=-= UI: FAVORITES HEADER =-=-=-=-=-=-=-=-=
+
+// header with title and right-aligned counter
+// stable header helps orientation across pages
 static void fav_drawHeader() {
     oled.setCursor(0, FAV_HEADER_ROW);
     oled.invertText(true);
@@ -629,67 +824,89 @@ static void fav_drawHeader() {
     oled.invertText(false);
 }
 
-// Draws current page of favorites
-static void fav_drawPage(uint8_t page) {
-    clearBox(0, (FAV_LIST_START_ROW - 1) * UI_CHAR_H, UI_SCREEN_W, UI_FAV_PAGE_CLEAR_ROWS * UI_CHAR_H);
+// =-=-=-=-=-=-=-=-= UI: FAVORITES CONTENT FLOW =-=-=-=-=-=-=-=-=
+
+// render explicit empty list message
+// avoid blank UI so user sees state immediately
+static inline void fav_renderEmptyList() {
+    clearBox(0,
+        (FAV_LIST_START_ROW - 1) * UI_CHAR_H,
+        UI_SCREEN_W,
+        UI_FAV_PAGE_CLEAR_ROWS * UI_CHAR_H);
+    drawInverted(UI_FAV_EMPTY_LIST_X,
+        UI_FAV_EMPTY_LIST_ROW,
+        F("EMPTY LIST"),
+        false);
+}
+
+// decide if content needs full redraw
+// update prev on decision to keep state in sync
+static inline bool fav_shouldRedrawContent(bool force_redraw,
+    uint8_t cur_page,
+    uint8_t& prev_page) {
+    if (force_redraw || cur_page != prev_page) {
+        prev_page = cur_page; // commit page change
+        return true;
+    }
+    return false;
+}
+
+// draw current page or empty state
+// keep the branch local so caller stays small
+static inline void fav_drawPageOrEmpty(uint8_t page) {
+    if (!g_totalFavorites) {
+        fav_renderEmptyList();
+    } else {
+        // full clear per page avoids ghosting
+        clearBox(0,
+            (FAV_LIST_START_ROW - 1) * UI_CHAR_H,
+            UI_SCREEN_W,
+            UI_FAV_PAGE_CLEAR_ROWS * UI_CHAR_H);
+
+        uint8_t start, end;
+        fav_getPageBounds(page, start, end);
+
+        for (uint8_t i = start; i < end; ++i) {
+            uint8_t row = fav_rowForIndex(i, start);
+            fav_drawLine(i, row, i == g_favoriteSelected);
+        }
+    }
+}
+
+// update only selection cursors on same page
+// reduces flicker and i2c traffic
+static void fav_updateCursors(uint8_t page) {
+    if (!g_totalFavorites) return;
 
     uint8_t start, end;
     fav_getPageBounds(page, start, end);
 
     for (uint8_t i = start; i < end; ++i) {
         uint8_t row = fav_rowForIndex(i, start);
-        fav_drawLine(i, row, i == g_favoriteSelected);
+        oled.setCursor(0, row);
+        oled.print(i == g_favoriteSelected ? '>' : ' ');
     }
 }
 
-// Updates only selection cursors to avoid full-screen flicker on simple navigation
-static void fav_updateCursors(uint8_t page) {
-    if (g_totalFavorites > 0) {
-        uint8_t start, end;
-        fav_getPageBounds(page, start, end);
-
-        for (uint8_t i = start; i < end; ++i) {
-            uint8_t row = fav_rowForIndex(i, start);
-            oled.setCursor(0, row);
-            oled.print(i == g_favoriteSelected ? '>' : ' ');
-        }
-    }
-}
-
-// Header redraw decision
-static void fav_handleHeader(bool force_redraw) {
-    static uint8_t prev_selected = 0xFF;
-
-    if (force_redraw || prev_selected != g_favoriteSelected) {
-        fav_drawHeader();
-    }
-    prev_selected = g_favoriteSelected;
-}
-
-// Content redraw or cursor update
+// content redraw or cursor update
+// full redraw on page change else cursor only
 static void fav_handleContent(bool force_redraw) {
     static uint8_t prev_page = 0xFF;
     uint8_t page = fav_pageOf(g_favoriteSelected);
 
-    // Full redraw on page change or if forced
-    if (force_redraw || page != prev_page) {
-        prev_page = page;
-        if (!g_totalFavorites) {
-            clearBox(0, (FAV_LIST_START_ROW - 1) * UI_CHAR_H, UI_SCREEN_W, UI_FAV_PAGE_CLEAR_ROWS * UI_CHAR_H);
-            drawInverted(UI_FAV_EMPTY_LIST_X, UI_FAV_EMPTY_LIST_ROW, F("EMPTY LIST"), false);
-        } else {
-            fav_drawPage(page);
-        }
+    if (fav_shouldRedrawContent(force_redraw, page, prev_page)) {
+        fav_drawPageOrEmpty(page);
     } else {
-        // Just move the cursor on same-page selection change
         fav_updateCursors(page);
     }
 }
 
+// =-=-=-=-=-=-=-=-= UI: FAVORITES ORCHESTRATION =-=-=-=-=-=-=-=-=
+
 // Favorites menu orchestrator
-// Decides whether to do a full redraw or a faster cursor-only update
+// choose cheapest update path to keep UI snappy
 static void showFavorites(bool force_redraw) {
-    fav_handleHeader(force_redraw);
+    fav_drawHeader();
     fav_handleContent(force_redraw);
 }
 
@@ -699,136 +916,271 @@ static void showFavorites(bool force_redraw) {
 // ===== UI: SETTINGS MENU DRAWING ==========
 // ==========================================
 
-// builds user-facing text for switch-like params
-static inline void handleSwitchParam(
-    char* buf, uint8_t idx,
-    int8_t param, uint8_t type) {
-    uint8_t base = pgm_read_byte(&switch_setting_map[idx].baseIndex);
-    uint8_t inverted = pgm_read_byte(&switch_setting_map[idx].inverted);
+// =-=-=-=-=-=-=-=-= UI: SETTINGS PAGE =-=-=-=-=-=-=-=-=
 
-    uint8_t textIdx = (idx == SettingsIndex::DisplayOff)
-        ? (param ? 10 + param : 2) // "OFF" or specific timeout
-        : (type == SettingType::SwitchAuto ? param
-            : (base + (inverted ? -param : param))); // "ON"/"OFF" or "MAN"/"AUT"
+// map switch param to user text
+// early return skips pgm reads for DisplayOff and SwitchAuto
+// invert keeps meaning stable when hardware polarity reversed
+static inline void handleSwitchParam(char* buf,
+    uint8_t idx,
+    int8_t param,
+    uint8_t type) {
 
+    if (idx == SettingsIndex::DisplayOff) {
+        uint8_t textIdx = param ? 10 + param : 2;
+        strcpy_P(buf, paramTexts[textIdx]);
+        return;
+    }
+
+    if (type == SettingType::SwitchAuto) {
+        strcpy_P(buf, paramTexts[(uint8_t)param]);
+        return;
+    }
+
+    uint8_t base =
+        pgm_read_byte(&switch_setting_map[idx].baseIndex);
+    uint8_t inverted =
+        pgm_read_byte(&switch_setting_map[idx].inverted);
+    uint8_t textIdx =
+        base + (inverted ? -param : param);
     strcpy_P(buf, paramTexts[textIdx]);
 }
 
-// Translates an internal setting value to a human-readable string for display
-// For example, brightness 0 becomes "1", and enum values become "ON" or "OFF"
-static void SettingParamToUI(char* buf, uint8_t idx) {
-    const auto& s = g_Settings[idx];
-    int8_t param = s.param;
+// =-=-=-=-=-=-=-=-= UI: SPECIAL PARAM FORMATTERS =-=-=-=-=-=-=-=-=
 
-    if (idx == CWPitch) {
-        uint16_t pitch = pgm_read_word(&cw_pitch_options_hz[param]);
-        convertToChar(buf, pitch, UI_SETTING_NUM_WIDTH);
-        return;
+// handle indices with aliases or lookup tables first
+// user expects names for pins and Hz instead of raw numbers
+static inline __attribute__((always_inline))
+bool formatAliasByIndex(char* buf,
+    uint8_t idx,
+    int8_t param) {
+    switch (idx) {
+
+    case CWPitch: {
+        uint16_t hz =
+            pgm_read_word(&cw_pitch_options_hz[param]);
+        convertToChar(buf, hz, UI_SETTING_NUM_WIDTH);
+        return true;
     }
 
-    if (idx == SettingsIndex::BATT_PIN) {
-        strcpy_P(buf, (param == 1) ? BATT_PIN_NAME_ALT : BATT_PIN_NAME_DEFAULT);
-        return;
+    case SettingsIndex::BATT_PIN: {
+        strcpy_P(buf,
+            (param == 1) ? BATT_PIN_NAME_ALT
+            : BATT_PIN_NAME_DEFAULT);
+        return true;
     }
+    default:
+        return false;
+    }
+}
 
-    if (s.type >= SettingType::Switch) {
-        handleSwitchParam(buf, idx, param, s.type);
-        return;
+// map to switch labels and zero-based mode names
+// zero means AUT or OFF by rule to avoid mode confusion
+static inline __attribute__((always_inline))
+bool formatSwitchAndZeroLabels(char* buf,
+    uint8_t idx,
+    int8_t param,
+    uint8_t type) {
+
+    if (type >= SettingType::Switch) {
+        handleSwitchParam(buf, idx, param, type);
+        return true;
     }
 
     if (param == 0) {
-        if (s.type == SettingType::ZeroAuto) {
-            strcpy_P(buf, paramTexts[0]); // AUT
-            return;
+
+        if (type == SettingType::ZeroAuto) {
+            strcpy_P(buf, paramTexts[0]);  // AUT
+            return true;
         }
+
         if (idx == SQL) {
-            strcpy_P(buf, paramTexts[2]); // OFF
-            return;
+            strcpy_P(buf, paramTexts[2]);  // OFF
+            return true;
         }
     }
-
-    int8_t valueToDisplay = param;
-    if (idx == SettingsIndex::Brightness) {
-        valueToDisplay++; // Show 1-10 to user instead of 0-9
-    }
-
-    uint8_t val_to_convert = (valueToDisplay < 0) ? -valueToDisplay : valueToDisplay;
-    convertToChar(buf, val_to_convert, UI_SETTING_NUM_WIDTH);
-
-    if (valueToDisplay < 0) {
-        buf[0] = '-';
-    }
-    buf[3] = '\0';
+    return false;
 }
 
-// draws one settings item
-static void DrawSetting(uint8_t idx, bool full) {
+// try to format via aliases and modes first
+// split keeps business rules local and easy to change
+static inline __attribute__((always_inline))
+bool SettingParamToUI_Special(char* buf,
+    uint8_t idx,
+    int8_t param,
+    uint8_t type) {
+    if (formatAliasByIndex(buf, idx, param)) return true;
+    if (formatSwitchAndZeroLabels(buf, idx, param, type)) return true;
+    return false;
+}
+
+// final numeric formatting path
+// fixed width aligns columns, brightness shows 1..10
+static inline __attribute__((always_inline))
+void SettingParamToUI_Number(char* buf,
+    uint8_t idx,
+    int8_t param) {
+
+    // user expects 1..10 not 0..9
+    if (idx == SettingsIndex::Brightness) param++;
+
+    uint8_t v = (param < 0) ? (uint8_t)(-param)
+        : (uint8_t)param;
+    convertToChar(buf, v, UI_SETTING_NUM_WIDTH);
+
+    if (param < 0) buf[0] = '-'; // keep sign without extra path
+    buf[UI_SETTING_NUM_WIDTH] = '\0';
+}
+
+// convert internal value to compact UI string
+// special path first then numeric path
+static void SettingParamToUI(char* buf,
+    uint8_t idx) {
+    int8_t  param = g_Settings[idx].param;
+    uint8_t type = g_Settings[idx].type;
+
+    if (SettingParamToUI_Special(buf, idx, param, type)) return;
+
+    SettingParamToUI_Number(buf, idx, param);
+}
+
+// =-=-=-=-=-=-=-=-= UI: DRAW HELPERS =-=-=-=-=-=-=-=-=
+
+// compute on-screen position for global index
+// local index avoids reflow when page changes
+static inline __attribute__((always_inline))
+void settingPosFromIndex(uint8_t idx,
+    uint8_t page,
+    uint8_t& x,
+    uint8_t& y) {
+    uint8_t local = idx - ((page - 1) * UI_SETTINGS_PER_PAGE);
+    calcSettingPos(local, x, y);
+}
+
+// draw name and value of a setting
+// cheap '>' markers show focus and edit state
+static void drawSettingItem(uint8_t x,
+    uint8_t y,
+    const char* name,
+    const char* val,
+    bool selName,
+    bool selVal) {
+    oled.setCursor(UI_SETTING_NAME_PREFIX_X + x, y);
+    oled.write(selName ? '>' : ' ');
+    oled.print(name);
+
+    oled.setCursor(UI_SETTING_VALUE_X + x, y);
+    oled.write(selVal ? '>' : ' ');
+    oled.print(val);
+}
+
+// draw value cell only
+// cheap marker indicates edit state without redrawing name
+static inline __attribute__((always_inline))
+void drawValueCell(uint8_t x,
+    uint8_t y,
+    const char* buf,
+    bool editing) {
+    oled.setCursor(UI_SETTING_VALUE_X + x, y);
+    oled.write(editing ? '>' : ' ');
+    oled.print(buf);
+}
+
+// draw full row with highlight flags
+// highlight when selected and not editing to match UX
+static inline __attribute__((always_inline))
+void drawFullRow(uint8_t x,
+    uint8_t y,
+    uint8_t idx,
+    const char* buf,
+    bool isSelected,
+    bool isEditing) {
+    drawSettingItem(x,
+        y,
+        g_Settings[idx].name,
+        buf,
+        (isSelected && !isEditing),
+        isEditing);
+}
+
+// =-=-=-=-=-=-=-=-= UI: SETTINGS RENDER =-=-=-=-=-=-=-=-=
+
+// draw single setting row
+// format once then choose full redraw or value only to cut OLED traffic
+static void DrawSetting(uint8_t idx,
+    bool full) {
     if (!g_settingsActive) return;
 
-    char buf[5];
+    char buf[UI_SETTING_NUM_WIDTH + 1];
 
-    uint8_t xOffset, yOffset;
-    calcSettingPos(idx - ((g_SettingsPage - 1) * UI_SETTINGS_PER_PAGE), xOffset, yOffset);
+    uint8_t x, y;
+    settingPosFromIndex(idx, g_SettingsPage, x, y);
+
+    SettingParamToUI(buf, idx);
+
+    const bool isSelected = (idx == g_SettingSelected);
+    const bool isEditing = (isSelected && g_SettingEditing);
 
     if (full) {
-        // Full redraw of name and value
-        SettingParamToUI(buf, idx);
-        drawSettingItem(
-            xOffset, yOffset, g_Settings[idx].name, buf,
-            (idx == g_SettingSelected && !g_SettingEditing),
-            (idx == g_SettingSelected && g_SettingEditing));
+        drawFullRow(x, y, idx, buf, isSelected, isEditing);
     } else {
-        // Partial redraw of just the value
-        SettingParamToUI(buf, idx);
-        oled.setCursor(UI_SETTING_VALUE_X + xOffset, yOffset);
-        oled.print((idx == g_SettingSelected && g_SettingEditing) ? '>' : ' ');
-        oled.print(buf);
+        drawValueCell(x, y, buf, isEditing);
     }
 }
 
-// settings title bar
+// render header with page counters
+// invert draws bar without extra bitmap fixed label masks stale pixels
 static void showSettingsTitle() {
     oled.setCursor(0, 0);
     oled.invertText(true);
     oled.print(F("      SETTINGS    "));
     oled.print((uint8_t)g_SettingsPage);
-    oled.print('|');
+    oled.write('|');
     oled.print((uint8_t)g_SettingsMaxPages);
     oled.invertText(false);
 }
 
-// draws visible settings page
+// draw current page only
+// precompute base to cut math per item and guard end of list
 static void showSettings() {
-    for (uint8_t i = 0; i < UI_SETTINGS_PER_PAGE && i + ((g_SettingsPage - 1) * UI_SETTINGS_PER_PAGE) < SETTINGS_MAX; i++)
-        DrawSetting(i + ((g_SettingsPage - 1) * UI_SETTINGS_PER_PAGE), true);
+    const uint8_t base =
+        (g_SettingsPage - 1) * UI_SETTINGS_PER_PAGE;
+    for (uint8_t i = 0; i < UI_SETTINGS_PER_PAGE; ++i) {
+        const uint8_t cur = base + i;
+        if (cur >= SETTINGS_MAX) break;
+        DrawSetting(cur, true);
+    }
 }
 
 // ==========================================
-// ===== UI: ORCHESTRATORS & GENERAL ========
+// ===== UI: ORCHESTRATORS & MESSAGES =======
 // ==========================================
 
-// Maps user brightness 0-9 to a non-linear contrast curve
-// This provides finer control at lower brightness levels where it matters most
-static void applyBrightness() {
-    uint8_t s = g_Settings[Brightness].param;
+// =-=-=-=-=-=-=-=-= UI: SPLASH =-=-=-=-=-=-=-=-=
 
-    // A quadratic-like curve to make low-end adjustments less drastic
-    uint8_t contrast_value = (((uint32_t)s * ((uint16_t)s * 130 + 6060)) >> 8);
-
-    oled.setContrast(contrast_value + 1);
+#if ANIMATE_SPLASH
+// draw one animation dash
+// simple sweep gives user feedback while init runs
+static inline __attribute__((always_inline))
+void splashAnimStep(uint8_t i) {
+    oled.setCursor(i * UI_CHAR_W, UI_SPLASH_ANIM_ROW);
+    oled.write('-');
 }
+#endif
 
-// Startup screen
+// show startup screen then clear
+// hold to let user read title before first draw
 void showSplashScreen() {
     oled.clear();
 
-    drawInverted(UI_SPLASH_LINE1_X, UI_SPLASH_LINE1_ROW, APP_NAME_LINE1, false);
-    drawInverted(UI_SPLASH_LINE2_X, UI_SPLASH_LINE2_ROW, F("MOD NO RDS"), false);
+    drawInverted(UI_SPLASH_LINE1_X, UI_SPLASH_LINE1_ROW,
+        APP_NAME_LINE1, false);
+    drawInverted(UI_SPLASH_LINE2_X, UI_SPLASH_LINE2_ROW,
+        F("MOD NO RDS"), false);
 
 #if ANIMATE_SPLASH
-    for (int i = 0; i < UI_SPLASH_ANIM_STEPS; i++) {
-        oled.setCursor(i * UI_CHAR_W, UI_SPLASH_ANIM_ROW);
-        oled.print('-');
+    for (uint8_t i = 0; i < UI_SPLASH_ANIM_STEPS; i++) {
+        splashAnimStep(i);
         delay(UI_SPLASH_ANIM_DELAY_MS);
     }
 #endif
@@ -837,15 +1189,21 @@ void showSplashScreen() {
     oled.clear();
 }
 
-// Displays a confirmation message when a station is saved to favorites
+// =-=-=-=-=-=-=-=-= UI: MESSAGES =-=-=-=-=-=-=-=-=
+
+// show save confirmation then return to main
+// brief delay makes message readable
 void showSavedConfirmation() {
     oled.setCursor(UI_SAVED_MSG_X, UI_SAVED_MSG_ROW);
     oled.print(F("SAVED"));
     delay(UI_SAVED_MSG_MS);
-    showStatus(true); // Redraw the main screen to clear the message
+    showStatus(true); // force freq redraw to clear message
 }
 
-// Orchestrator for drawing the main status screen
+// =-=-=-=-=-=-=-=-= UI: STATUS ORCHESTRATOR =-=-=-=-=-=-=-=-=
+
+// draw main status in stable order
+// frequency first so rest aligns to that layout
 void showStatus(bool cleanFreq) {
     showSignalQuality();
     showFrequency(cleanFreq);

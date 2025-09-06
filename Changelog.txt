@@ -1173,3 +1173,33 @@ This version introduces the ability to save your favorite FM stations.
 		https://github.com/pu2clr/SI4735/issues/45
 
 ------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v6.5.6**
+
+`UI.h`
+
+`(!) Note: Technical refactor of the Settings and Favorites UI; all user-facing behavior is unchanged.`
+
+*   **[Refactored] Complete UI subsystem overhaul:** Split monolithic drawing code into 50+ specialized helper functions 
+	for better maintainability without changing user-facing behavior or increasing firmware size.
+
+*   **[Optimized] Rendering performance:** 
+    *   Implemented partial screen updates (settings value-only, favorites cursor-only)
+    *   Reduced PROGMEM reads through early returns and caching
+    *   Minimized I2C traffic with conditional clears and single-char writes
+
+*   **[Fixed] Display accuracy:**
+    *   Settings now show correct labels: `DisplayOff`→OFF, `SQL`→OFF, `Brightness`→1-10
+    *   Favorites display true tuned frequency with BFO applied
+    *   Right-aligned frequency remains stable during digit count changes
+    *   RSSI values <10 now properly spaced
+
+*   **[Improved] Code organization:** 
+	Logical function grouping - utilities → brightness → status widgets → frequency display → favorites → settings → orchestrators
+
+*   [Changed] Settings navigation order (row-first L→R):
+    *   Selection now moves across a row (Left→Right) and then down to the next row
+    *   Implemented by remapping calcSettingPos() only; no layout or redraw logic changed
+
+------------------------------------------------------------------------------------------------------------
