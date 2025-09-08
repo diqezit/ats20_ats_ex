@@ -99,9 +99,10 @@ enum SettingsIndex {
     CWPitch,        // CWP - CW Pitch
     SWAFC,          // SWA - SW AFC (AM on SW bands)
 
-    // --- Page 5: Advanced FM Audio ---
+    // --- Page 5: Advanced FM Audio & Display ---
     FmSmAtt,        // FSA - FM Soft Mute Attenuation
     FmSmThr,        // FST - FM Soft Mute Threshold
+    SMeter,         // SPT - S-Point display
 
     SETTINGS_MAX
 };
@@ -184,6 +185,7 @@ static void showModulation();
 static void showSettingsTitle();
 static void showSettings();
 
+// --- CW Decoder hooks ---
 #if ENABLE_CW_DECODER
 static void handleVolumeDownShortPress();
 static void cwViewEnter();
@@ -201,6 +203,7 @@ static void loadSSBPatch();
 static void showChargeOnDisplay();
 static void showFrequencySeek(uint16_t freq);
 
+// --- Settings handlers ---
 void doAttenuation(int8_t v);
 void doSoftMute(int8_t v);
 void doSoftMuteThreshold(int8_t v);
@@ -227,9 +230,12 @@ void doBatteryPinSelect(int8_t v = 0);
 void doSquelch(int8_t v);
 void doFmSoftMuteAtt(int8_t v);
 void doFmSoftMuteThr(int8_t v);
+void doSMeter(int8_t v = 0);
 
+// --- App entry and UI status ---
 void showSplashScreen();
 void showStatus(bool cleanFreq = false);
+void rssiToSLevel(char* buffer, uint8_t rssi);
 void updateAndShowBattery(bool forceShow);
 void updateStereoIndicator();
 static void showRfHints();
@@ -429,6 +435,7 @@ SettingsItem g_Settings[] =
     // Page 5
     { "FSA", 22, SettingType::Num,        doFmSoftMuteAtt     },
     { "FST", 10, SettingType::Num,        doFmSoftMuteThr     },
+    { "SPT", 0,  SettingType::Switch,     doSMeter            },
 };
 
 // defines the text conversion rules ONLY for settings of type 'Switch'
@@ -465,6 +472,7 @@ const PROGMEM SwitchMapEntry switch_setting_map[] = {
     // Page 5
     [FmSmAtt] = {0, false},
     [FmSmThr] = {0, false},
+    [SMeter] = {2, true},
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -537,6 +545,24 @@ const uint8_t g_bwSSBIdx[] = { 4, 5, 0, 1, 2, 3 };
 const uint8_t g_bwSSBMaxIdx = 5;
 const uint8_t g_maxFilterAM = 6;
 const uint8_t g_bwAMIdx[] = { 4, 5, 3, 6, 2, 1, 0 };
+
+// -------------------------------------------------------------------------------------------------
+// S‑Meter mapping + constants and PROGMEM helpers
+// -------------------------------------------------------------------------------------------------
+
+// dBuV thresholds for S0 through S9+50 on HF
+static const uint8_t THR_HF[] PROGMEM = { 1,2,3,4,10,16,22,28,34,44,54,64,74,84,94 };
+// dBuV thresholds for S3 through S9+50 on FM
+static const uint8_t THR_FM[] PROGMEM = { 0,2,8,14,24,34,44,54,64,74 };
+// Special non-linear S-point mapping for low signal FM
+static const uint8_t FM_S4[] PROGMEM = { 3,6,7,8 };
+
+static constexpr uint8_t LEN_HF = sizeof(THR_HF);
+static constexpr uint8_t LEN_FM = sizeof(THR_FM);
+
+static inline uint8_t CREAD(const uint8_t* p, uint8_t i) {
+    return pgm_read_byte(&p[i]);
+}
 
 // -------------------------------------------------------------------------------------------------
 // Tuning Step Tables

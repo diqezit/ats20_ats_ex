@@ -1203,3 +1203,16 @@ This version introduces the ability to save your favorite FM stations.
     *   Implemented by remapping calcSettingPos() only; no layout or redraw logic changed
 
 ------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v6.6**
+
+`ATS_EX.ino`, `Defines.h`, `Globals.h`, `UI.h`
+
+*   **[New] S-Point Signal Meter:**
+    *   Added a "S-Point" (`SPT`) display setting. Now you can switch from the raw RSSI number 
+		to classic `S0` to `S9+` meter reading. I find it much more intuitive for HF/SWL.
+    *   The mapping uses different dBuV thresholds for HF and FM, so the S-readings should feel correct for the band you're on. 
+		It's off by default, so if you prefer the old RSSI numbers, you don't have to change anything.
+	
+------------------------------------------------------------------------------------------------------------

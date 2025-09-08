@@ -7,19 +7,19 @@
 //
 // Address Range | Allotted | Used     | Free    | Symbol(s)                      | Description
 //---------------|----------|----------|---------|--------------------------------|----------------------------------
-// 0             | 1 B      | 1 B      | 0 B     | EEPROM_APP_ID_ADDRESS          | Custom ID to validate data structure
+// 0             | 1 B      | 1 B      | 0 B     | EEPROM_APP_ID_ADDRESS          | Custom ID to validate data
 // 1             | 1 B      | 1 B      | 0 B     | EEPROM_VERSION_ADDRESS         | Firmware version for compatibility
 //
-// 10 - 25       | 16 B     | 6 B      | 10 B    | EEPROM_HEADER_START            | Global state header (volume, mode etc.)
+// 10 - 25       | 16 B     | 6 B      | 10 B    | EEPROM_HEADER_START            | Global state header
 //
-// 26 - 165      | 140 B    | 140 B    | 0 B     | EEPROM_BANDS_START             | State for all 28 bands (28 * 5 bytes)
+// 26 - 165      | 140 B    | 140 B    | 0 B     | EEPROM_BANDS_START             | 28 bands state (28 * 5)
 //
-// 176 - 201     | 26 B     | 26 B     | 0 B     | EEPROM_SETTINGS_START          | Global settings array `g_Settings` (26 items)
+// 176 - 202     | 27 B     | 27 B     | 0 B     | EEPROM_SETTINGS_START          | g_Settings (27 items)
 //
-// 212 - 217     | 6 B      | 6 B      | 0 B     | EEPROM_MODE_SETTINGS_START     | Mode-dependent settings
+// 213 - 218     | 6 B      | 6 B      | 0 B     | EEPROM_MODE_SETTINGS_START     | Mode-dependent settings
 //
-// 228 - 327     | 100 B    | 100 B    | 0 B     | EEPROM_FAVORITES_START         | Unified favorite stations (20 * 5 bytes)
-// 338           | 1 B      | 1 B      | 0 B     | EEPROM_FAVORITES_COUNT         | Count of saved favorites
+// 229 - 328     | 100 B    | 100 B    | 0 B     | EEPROM_FAVORITES_START         | Favorites (20 * 5)
+// 339           | 1 B      | 1 B      | 0 B     | EEPROM_FAVORITES_COUNT         | Favorite count
 // =================================================================================================
 
 // --- Core EEPROM Validation ---
@@ -41,16 +41,16 @@ constexpr auto EEPROM_VERSION_ADDRESS = 1;
 
 constexpr auto EEPROM_HEADER_START = 10;                // Size: 6   End: 16
 constexpr auto EEPROM_BANDS_START = 26;                 // Size: 140 End: 166
-constexpr auto EEPROM_SETTINGS_START = 176;             // Size: 26  End: 202
-constexpr auto EEPROM_MODE_SETTINGS_START = 212;        // Size: 6   End: 218
-constexpr auto EEPROM_FAVORITES_START = 228;            // Size: 100 End: 328
-constexpr auto EEPROM_FAVORITES_COUNT = 338;            // Size: 1   End: 339
+constexpr auto EEPROM_SETTINGS_START = 176;             // Size: 27  End: 203
+constexpr auto EEPROM_MODE_SETTINGS_START = 213;        // Size: 6   End: 219
+constexpr auto EEPROM_FAVORITES_START = 229;            // Size: 100 End: 329
+constexpr auto EEPROM_FAVORITES_COUNT = 339;            // Size: 1   End: 340
 
 // Increment APP_VERSION to force EEPROM reset due to layout changes
-constexpr auto APP_VERSION = 65;
+constexpr auto APP_VERSION = 66;
 
 // Centralizes user-facing strings on main screen
-#define APP_NAME_LINE1 F("ATS-20* V6.5.5")
+#define APP_NAME_LINE1 F("ATS-20* V6.6")
 
 // Behavior
 constexpr auto SAVE_ON_IDLE_TIMEOUT = 15000UL;          // 15 seconds

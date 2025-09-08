@@ -1707,6 +1707,73 @@ void doSwAfcProfile(int8_t v) {
     applySwAfc();
 }
 
+// Settings: switcher - S-Point display to RSSI display
+void doSMeter(int8_t v) {
+    toggleSetting(SMeter);
+}
+
+// ==========================================
+// ===== S-METER LOGIC ======================
+// ==========================================
+
+// tiny tables so linear scan saves flash on avr
+// index selects bucket users see on screen
+static inline uint8_t firstGeIndex(uint8_t rssi, const uint8_t* thr, uint8_t n) {
+    uint8_t i = 0;
+    while (i < n && rssi > CREAD(thr, i)) ++i;
+    return i;
+}
+
+// users expect classic hf s scale
+// thresholds match ui spec and field reports
+// cap at +60 to keep 3 char display stable
+static inline void mapHF(uint8_t rssi, uint8_t* s, uint8_t* over) {
+    uint8_t i = firstGeIndex(rssi, THR_HF, LEN_HF);
+    if (i < 9) {
+        *s = i; *over = 0;
+    } else {
+        *s = 9;
+        *over = (i < LEN_HF) ? (i - 9) * 10 : 60;
+    }
+}
+
+// fm needs different low end mapping users read squelch earlier
+// early buckets map to S3 S6 S7 S8 per spec
+// same +60 cap keeps display tight
+static inline void mapFM(uint8_t rssi, uint8_t* s, uint8_t* over) {
+    uint8_t i = firstGeIndex(rssi, THR_FM, LEN_FM);
+    if (i < 4) {
+        *s = CREAD(FM_S4, i); *over = 0;
+    } else if (i < 5) {
+        *s = 9; *over = 0;
+    } else {
+        *s = 9;
+        *over = (i < LEN_FM) ? (i - 4) * 10 : 60;
+    }
+}
+
+// ui shows Sx S9 or S9+ per radio convention
+// fixed 3 chars keep columns aligned on small lcd
+// blank on no value avoids stale reading on screen
+// split by mode matches user mental model
+void rssiToSLevel(char* buffer, uint8_t rssi) {
+    if (rssi == UI_SIGNAL_NO_VALUE) {
+        // avoid byte-by-byte clearing
+        *(uint16_t*)buffer = 0x2020;            // "  "
+        *(uint16_t*)(buffer + 2) = 0x0020;      // " \0"
+        return;
+    }
+    uint8_t s = 0, over = 0;
+    if (g_currentMode != FM) mapHF(rssi, &s, &over);
+    else                     mapFM(rssi, &s, &over);
+
+    // each step above S9 means +10dB over reference
+    buffer[0] = 'S';
+    buffer[1] = (s < 9) ? ('0' + s) : '9';
+    buffer[2] = (s < 9 || over == 0) ? ' ' : '+';
+    buffer[3] = '\0';
+}
+
 // ==========================================
 // ===== PERIODIC & TIMED TASKS =============
 // ==========================================
