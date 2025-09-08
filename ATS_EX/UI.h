@@ -279,8 +279,37 @@ static void showRfHints() {
     }
 }
 
-// RSSI and RF hints share area near volume
-// user sees signal and reason for low audio together
+// =-=-=-=-=-=-=-=-= UI: Signal Quality Display Mini-Block =-=-=-=-=-=-=-=-=
+
+// blank field on missing value so user does not see stale text
+static inline void uiSignalClear() {
+    oled.setCursor(UI_RSSI_X, UI_RSSI_ROW);
+    oled.print(F("   "));
+}
+
+// switch between raw RSSI and S scale since users read S on HF and digits on FM
+static inline void uiRenderSignalValue(uint8_t rssi, uint8_t useSMeter) {
+    oled.setCursor(UI_RSSI_X, UI_RSSI_ROW);
+
+    switch (useSMeter) {
+    case 0: {
+        // pad single digit for width 2
+        if (rssi < 10) oled.write(' ');
+        oled.print(rssi);
+        oled.write(UI_RSSI_SEPARATOR);
+        break;
+    }
+    default: {
+        char s_buffer[4];
+        rssiToSLevel(s_buffer, rssi);
+        oled.print(s_buffer);
+        break;
+    }
+    }
+}
+
+// skip while menus open and draw hints after value
+// keep UI free from mapping rules, use rssiToSLevel for S text
 static void showSignalQuality() {
     if (g_settingsActive
 #if ENABLE_FAVORITES
@@ -288,14 +317,10 @@ static void showSignalQuality() {
 #endif
         ) return;
 
-    oled.setCursor(UI_RSSI_X, UI_RSSI_ROW);
-
     if (g_signalQualityValue == UI_SIGNAL_NO_VALUE) {
-        oled.print(F("   "));
+        uiSignalClear();
     } else {
-        if (g_signalQualityValue < 10) oled.write(' ');
-        oled.print(g_signalQualityValue);
-        oled.write(UI_RSSI_SEPARATOR);
+        uiRenderSignalValue(g_signalQualityValue, g_Settings[SMeter].param);
     }
 
     showRfHints();
