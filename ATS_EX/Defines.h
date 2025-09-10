@@ -1,9 +1,12 @@
 #pragma once
 
 // =================================================================================================
+// Defines.h - Global Constants, Memory Map, and Compile-Time Switches
+// =================================================================================================
 // EEPROM Memory Map
 // This map defines the layout for all persistent data.
 // A compact layout saves space and simplifies block operations.
+// There must be a gap of 10 bytes between sections
 //
 // Address Range | Allotted | Used     | Free    | Symbol(s)                      | Description
 //---------------|----------|----------|---------|--------------------------------|----------------------------------
@@ -12,14 +15,14 @@
 //
 // 10 - 25       | 16 B     | 6 B      | 10 B    | EEPROM_HEADER_START            | Global state header
 //
-// 26 - 165      | 140 B    | 140 B    | 0 B     | EEPROM_BANDS_START             | 28 bands state (28 * 5)
+// 26 - 193      | 168 B    | 168 B    | 0 B     | EEPROM_BANDS_START             | 28 bands state (28 * 6)
 //
-// 176 - 202     | 27 B     | 27 B     | 0 B     | EEPROM_SETTINGS_START          | g_Settings (27 items)
+// 204 - 232     | 29 B     | 29 B     | 0 B     | EEPROM_SETTINGS_START          | g_Settings (29 items)
 //
-// 213 - 218     | 6 B      | 6 B      | 0 B     | EEPROM_MODE_SETTINGS_START     | Mode-dependent settings
+// 243 - 251     | 9 B      | 9 B      | 0 B     | EEPROM_MODE_SETTINGS_START     | Mode-dependent settings (3*3)
 //
-// 229 - 328     | 100 B    | 100 B    | 0 B     | EEPROM_FAVORITES_START         | Favorites (20 * 5)
-// 339           | 1 B      | 1 B      | 0 B     | EEPROM_FAVORITES_COUNT         | Favorite count
+// 261 - 360     | 100 B    | 100 B    | 0 B     | EEPROM_FAVORITES_START         | Favorites (20 * 5)
+// 370           | 1 B      | 1 B      | 0 B     | EEPROM_FAVORITES_COUNT         | Favorite count
 // =================================================================================================
 
 // --- Core EEPROM Validation ---
@@ -29,28 +32,28 @@ constexpr auto EEPROM_VERSION_ADDRESS = 1;
 
 // --- Data Block Start Addresses ---
 // These addresses are calculated manually to avoid include-order issues
-// 10-byte gap is reserved between blocks for future expansion
+// A gap is reserved between blocks for future expansion
 //
 // BLOCK SIZES FOR CALCULATION:
 // ReceiverHeader:      6 bytes
-// BandStatePacked:     5 bytes (x28 bands = 140 bytes)
-// Settings:            26 bytes (SETTINGS_MAX = 26 items * 1 byte each)
-// ModeSettings:        6 bytes (MODE_SETTINGS_COUNT * MODE_CONTEXT_COUNT = 3 * 2)
+// BandStatePacked:     6 bytes (x28 bands = 168 bytes)
+// Settings:            29 bytes (SETTINGS_MAX = 29 items * 1 byte each)
+// ModeSettings:        9 bytes (MODE_SETTINGS_COUNT * MODE_CONTEXT_COUNT = 3 * 3)
 // FavoriteStation:     5 bytes (x20 stations = 100 bytes)
 // FavoritesCount:      1 byte
 
-constexpr auto EEPROM_HEADER_START = 10;                // Size: 6   End: 16
-constexpr auto EEPROM_BANDS_START = 26;                 // Size: 140 End: 166
-constexpr auto EEPROM_SETTINGS_START = 176;             // Size: 27  End: 203
-constexpr auto EEPROM_MODE_SETTINGS_START = 213;        // Size: 6   End: 219
-constexpr auto EEPROM_FAVORITES_START = 229;            // Size: 100 End: 329
-constexpr auto EEPROM_FAVORITES_COUNT = 339;            // Size: 1   End: 340
+constexpr auto EEPROM_HEADER_START = 10;                // Size: 6   End: 15
+constexpr auto EEPROM_BANDS_START = 26;                 // Size: 168 End: 193
+constexpr auto EEPROM_SETTINGS_START = 204;             // Size: 29  End: 232
+constexpr auto EEPROM_MODE_SETTINGS_START = 243;        // Size: 9,  End: 251
+constexpr auto EEPROM_FAVORITES_START = 261;            // Size: 100 End: 360
+constexpr auto EEPROM_FAVORITES_COUNT = 370;            // Size: 1   End: 370
 
 // Increment APP_VERSION to force EEPROM reset due to layout changes
-constexpr auto APP_VERSION = 66;
+constexpr auto APP_VERSION = 67;
 
 // Centralizes user-facing strings on main screen
-#define APP_NAME_LINE1 F("ATS-20* V6.6")
+#define APP_NAME_LINE1 F("ATS-20* V6.7")
 
 // Behavior
 constexpr auto SAVE_ON_IDLE_TIMEOUT = 15000UL;          // 15 seconds
@@ -108,19 +111,21 @@ constexpr auto MIN_SETFREQ_INTERVAL_MS = 25UL;
 #define ENABLE_EEPROM_RESET_MSG 1           // Set to 1 to show "EEPROM RESET" message, 0 to disable
 #define ANIMATE_SPLASH 1                    // Set to 1 to animate splash screen, 0 to disable
 
-// IC options
+// IC options - must disable some other features to compile & work properly
 #define ENABLE_FAVORITES 1                  // Set to 1 to use unified favorites, 0 to disable
 #define DISABLE_FM 0                        // not implemented yet
 
-#define ENABLE_ADVANCED_BATTERY_LOGIC 1     // Set to 1 to enable advanced battery logic, 0 to disable (must disable some other features to compile & work)
+#define ENABLE_ADVANCED_BATTERY_LOGIC 1     // Set to 1 to enable advanced battery logic, 0 to disable
 #define ENABLE_BATTERY_MONITOR 1            // Set to 1 to enable battery monitoring, 0 to disable
 
-// Debugging options
+// Debugging options - only for test purposes & port monotoring - see Utils.h
 #define DEBUG_MODE 0                        // Set to 1 to enable debug mode, 0 to disable, (This use serial speed 9600)
 
-// Set to 1 to enable compilation of the SSB patch loading functions overridden in SI4735_fixed.h
-// These functions may offer better performance than the original library.
-// Set to 0 to disable them and fall back to the base library methods - off for save 36 bytes
+// Set to 1 to enable the highly compressed SSB patch loading system
+// This advanced method significantly reduces firmware size
+// Enabled  (1) Saves 108 bytes of Flash memory compared to the original compressed patch
+// Disabled (0) Falls back to a less optimized format
+// Strongly recommended to keep enabled
 #define PATCH_EX_SSB 1
 
 
@@ -128,6 +133,7 @@ constexpr auto MIN_SETFREQ_INTERVAL_MS = 25UL;
 // To use - at first connect speaker audio via a 2.2 µF capacitor to analog pin A6
 // While in CW mode, a long-press on the MODE button will toggle the decoder view
 // Must be disable (ENABLE_FAVORITES 0) at first to compile (30720 bytes)
+// See CW_decoder.h for details
 #define ENABLE_CW_DECODER 0
 
 
@@ -245,26 +251,26 @@ constexpr uint16_t AM_SOFT_MUTE_SLOPE_RECOMMENDED = 2;
 // --------------- Short-Wave AFC (AM on SW) profiles (Si47xx AN332) -------------------------------
 // -------------------------------------------------------------------------------------------------
 //   Configure AFC pull-in and lock-in ranges on SW in AM mode to improve capture and hold
-// 
+//
 //   0x3104 AM_AFC_SW_PULL_IN_RANGE  pull-in range
 //   0x3105 AM_AFC_SW_LOCK_IN_RANGE  lock-in range
-// 
+//
 // PPM defaults
 //   115 ppm -> 0x21F7
 //   85  ppm -> 0x2DF5
-// 
+//
 //   Written only when band is SW and mode is AM
 //   On older silicon the write is ignored
-// 
+//
 // Profiles (g_Settings[SWAFC].param)
 //   0 OFF
 //   1 PPM defaults
 //   2 Fixed Hz  pull 1600  lock 1200
 //   3 Fixed Hz  pull 2000  lock 1500
-// 
+//
 // Fixed Hz conversion
 //   reg = round(1000 * freq_kHz / window_Hz) clamped to 1..0xFFFF
-// 
+//
 //   Keep pull-in >= lock-in
 //   Does not calibrate the dial
 //   Default SWA is 0 OFF
@@ -442,8 +448,10 @@ constexpr uint8_t SQUELCH_MAX_LEVEL = 60;
 // --- AVC Settings ---
 
 // Defines the adjustment range for Automatic Volume Control max gain
-constexpr uint8_t AVC_MAX_GAIN_MIN = 12;
-constexpr uint8_t AVC_MAX_GAIN_MAX = 90;
+// Maps index 0-10 to IC 473x gain AVC values 12-90
+// Check getAvcValueFromIndex in RadioControl.h for details
+constexpr uint8_t AVC_MAX_INDEX = 10;
+constexpr uint8_t AVC_MIN_INDEX = 0;
 
 // --- BFO Calibration ---
 

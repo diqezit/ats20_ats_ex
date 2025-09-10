@@ -68,7 +68,7 @@ static constexpr uint8_t GOERTZ_Q14_SHIFT = 14;
 #endif
 
 #ifndef DEBUG_CW
-#define DEBUG_CW 1
+#define DEBUG_CW 0
 #endif
 
 // Enable adaptive timing for automatic WPM tracking

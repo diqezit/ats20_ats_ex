@@ -55,8 +55,9 @@ enum ModeSettingType {
 
 enum ModeContext {
     MODE_CONTEXT_AM,
-    MODE_CONTEXT_SSB,
-    MODE_CONTEXT_COUNT
+    MODE_CONTEXT_LSB,
+    MODE_CONTEXT_USB,
+    MODE_CONTEXT_COUNT = 3  // Only 3 contexts since CW inherits from LSB/USB
 };
 
 enum SettingType {
@@ -67,42 +68,44 @@ enum SettingType {
 };
 
 enum SettingsIndex {
-    // --- Page 1: General & Sound ---
-    ATT,
-    ScanSwitch,     // SCN
-    AutoVolControl, // AVC
-    SoftMute,       // SM
-    SoftMuteThr,    // SMT - Soft Mute SNR Threshold
-    DeEmp,          // DE
+    // --- Page 1: Core Audio & RF ---
+    ATT,            // ATT - Attenuation / AGC
+    AutoVolControl, // AVC - Automatic Volume Control
+    SQL,            // SQL - Squelch
+    SoftMute,       // SM  - AM Soft Mute Attenuation
+    SoftMuteThr,    // SMT - AM Soft Mute Threshold
+    AMNoiseBlanker, // ANB - AM Noise Blanker
 
-    // --- Page 2: SSB & Visual ---
-    BFO,
-    SSM,
-    SVC,
-    CutoffFilter,   // COF
-    Sync,           // SYN
-    Brightness,     // SCR
-
-    // --- Page 3: Hardware ---
-    AntennaCap,     // CAP
-    CPUSpeed,       // CPU
-    BATT_PIN,       // BAP (Battery Pin Select)
-    SWUnits,        // SWU
-    RSSI_AM_Off,    // RSI
-    DisplayOff,     // DIS (Display Off Timeout)
-
-    // --- Page 4: Audio Profiles ---
-    FMAudioProfile, // FMP (FM Audio Profile for Speaker EQ)
-    AMNoiseBlanker, // ANB (AM Noise Blanker)
-    ForceMono,      // FMO (Force Mono Reception)
-    SQL,            // SQL (Squelch)
+    // --- Page 2: SSB & CW ---
+    BFO,            // BFO - BFO Calibration
+    SSM,            // SSM - SSB Soft Mute
+    SVC,            // SVC - SSB AVC Switch
+    CutoffFilter,   // COF - SSB Cutoff Filter
+    Sync,           // SYN - SSB Sync (DSP AFC)
     CWPitch,        // CWP - CW Pitch
-    SWAFC,          // SWA - SW AFC (AM on SW bands)
 
-    // --- Page 5: Advanced FM Audio & Display ---
+    // --- Page 3: FM & Advanced Audio ---
+    DeEmp,          // DE  - FM De-Emphasis
+    FMAudioProfile, // FMP - FM Audio Profile (Speaker EQ)
+    ForceMono,      // FMO - Force Mono Reception
     FmSmAtt,        // FSA - FM Soft Mute Attenuation
     FmSmThr,        // FST - FM Soft Mute Threshold
-    SMeter,         // SPT - S-Point display
+    SWAFC,          // SWA - SW AFC (AM on SW bands)
+
+    // --- Page 4: Display & UI ---
+    Brightness,     // SCR - Screen Brightness
+    SMeter,         // SPT - S-Point / RSSI Display
+    SWUnits,        // SWU - SW Units (kHz/MHz)
+    DisplayOff,     // DIS - Display Off Timeout
+    RSSI_AM_Off,    // RSI - Disable RSSI polling in AM
+    NAV,            // NAV - Settings Navigation Style
+
+    // --- Page 5: Hardware Configuration ---
+    AntennaCap,     // CAP - Antenna Capacitor
+    CPUSpeed,       // CPU - CPU Speed
+    BATT_PIN,       // BAP - Battery Pin Select
+    ScanSwitch,     // SCN - Scan Button Behavior
+    FmVolAdjust,    // FVA - FM Volume Adjust
 
     SETTINGS_MAX
 };
@@ -127,29 +130,65 @@ enum Modulations : uint8_t {
 // =================================================================================================
 
 #if DEBUG_MODE
+// --- Debugging ---
 void initDebugUART();
 void debugPrint_P(const char* str);
 void debugPrintNum(int16_t num);
 #endif
 
-// --- Memory Handling Orchestrators (using in EEPROM) ---
+// --- Memory & State Sync ---
 void syncActiveStateToBand();
 void loadActiveStateFromBand();
 void syncModeDependentSettings(bool load);
+static inline void initModeSettingsDefaults(void);
 
-// --- Input Handling Orchestrators (called by loop) ---
-inline int16_t getAndResetEncoderCount(volatile int16_t& counter);
+// --- Core Utilities & Helpers ---
 static inline void noteUserActivity();
+static void setCpuPrescaler(uint8_t prescaler);
+static inline uint16_t freqDelta16(uint16_t, uint16_t);
+static inline bool freqRateLimitOk(uint32_t);
+static inline bool freqTimeElapsed(uint32_t);
+static inline bool freqForceUpdate(uint16_t);
+static inline bool applySafeEncoderDeltaAndTune();
+static inline void applyCompensatedVolume();
+static inline bool amRssiPollingAllowed(uint32_t);
+static inline uint32_t currentCmdTimeoutMs();
+static inline bool shouldSaveStateOnIdle(uint16_t);
+static inline uint16_t displayTimeoutS(uint8_t);
+static inline void persistModeSetting(ModeSettingType, SettingsIndex);
+static inline uint8_t settingsPageStart(uint8_t page);
+static inline void settingsEnter();
+static inline void settingsExitAndSave();
+static bool isSSB();
+
+// --- Input Handling ---
+inline int16_t getAndResetEncoderCount(volatile int16_t& counter);
 bool processEncoderActions(int16_t movement);
 void processButtonEvents();
 static void updateEncoderState();
-static void refreshCommandIndicators();
 static void switchSettings();
+static void switchSettingsPage();
 static void switchCommand(CommandMode mode);
 static void resetCommandMode();
 static void wakeUpDisplayIfNeeded();
 
+// --- Direct Radio Control Actions ---
+static void doSeek();
+static void cycleAmSsbCwModes();
+static void doFrequencyTuneSSB();
+static void doFrequencyTune();
+static void doVolume(int8_t v);
+static void doStep(int8_t v);
+static void doBandwidth(uint8_t v);
+static void bandSwitch(bool up, bool loadStoredFreq = true);
+static void doCWSwitch();
+
+// --- Favorites Handling ---
 #if ENABLE_FAVORITES
+static inline bool favoriteExists(uint16_t f, uint8_t m);
+static inline void compactFavoritesFrom(uint8_t start);
+static inline void fixFavoriteSelectionAfterDelete();
+static inline bool favoriteNeedsFullReset(BandType, BandType, bool, bool);
 static void handleFavoritesTimeout();
 static void handleFavoritesMenu(int16_t movement);
 static void addFavorite();
@@ -159,20 +198,7 @@ static void loadFavorites();
 void tuneToSelectedFavorite();
 #endif
 
-// --- Core Utilities & State Management (needed by Input.h) ---
-static bool isSSB();
-static void doSeek();
-static void switchSettingsPage();
-static void cycleAmSsbCwModes();
-static void doFrequencyTuneSSB();
-static void doFrequencyTune();
-static void doVolume(int8_t v);
-static void doStep(int8_t v);
-static void doBandwidth(uint8_t v);
-static void setCpuPrescaler(uint8_t prescaler);
-static void resetEepromDelay();
-
-// --- UI Drawing (needed by Input.h) ---
+// --- UI Drawing ---
 static void DrawSetting(uint8_t idx, bool full);
 #if ENABLE_FAVORITES
 static void showFavorites(bool force_redraw = false);
@@ -184,6 +210,15 @@ static void showBandwidth();
 static void showModulation();
 static void showSettingsTitle();
 static void showSettings();
+void showSplashScreen();
+void showStatus(bool cleanFreq = false);
+void rssiToSLevel(char* buffer, uint8_t rssi);
+void updateAndShowBattery(bool forceShow);
+void updateStereoIndicator();
+static void showRfHints();
+static void showChargeOnDisplay();
+static void showFrequencySeek(uint16_t freq);
+static void refreshCommandIndicators();
 
 // --- CW Decoder hooks ---
 #if ENABLE_CW_DECODER
@@ -193,17 +228,7 @@ static void cwViewExit();
 static inline void cwViewTask();
 #endif
 
-// --- Other Global Prototypes ---
-static void applyBandConfiguration(bool extraSSBReset = false);
-static void setAmpState(bool on);
-static void bandSwitch(bool up, bool loadStoredFreq = true);
-static void doCWSwitch();
-static void applyBrightness();
-static void loadSSBPatch();
-static void showChargeOnDisplay();
-static void showFrequencySeek(uint16_t freq);
-
-// --- Settings handlers ---
+// --- Settings Handlers (Callbacks for the settings menu) ---
 void doAttenuation(int8_t v);
 void doSoftMute(int8_t v);
 void doSoftMuteThreshold(int8_t v);
@@ -230,15 +255,23 @@ void doBatteryPinSelect(int8_t v = 0);
 void doSquelch(int8_t v);
 void doFmSoftMuteAtt(int8_t v);
 void doFmSoftMuteThr(int8_t v);
+void doFmVolAdjust(int8_t v);
 void doSMeter(int8_t v = 0);
+void doNavStyle(int8_t v = 0);
 
-// --- App entry and UI status ---
-void showSplashScreen();
-void showStatus(bool cleanFreq = false);
-void rssiToSLevel(char* buffer, uint8_t rssi);
-void updateAndShowBattery(bool forceShow);
-void updateStereoIndicator();
-static void showRfHints();
+// --- High-Level Configuration & System ---
+static void applyBandConfiguration(bool extraSSBReset = false);
+static void setAmpState(bool on);
+static void applyBrightness();
+static void loadSSBPatch();
+static void resetEepromDelay();
+
+// --- Periodic & Timed Tasks ---
+static inline void handleSignalAndStereoUpdates();
+static inline void handleCommandTimeout();
+static inline void handleSettingsSave();
+static inline void checkDisplayTimeout();
+static void handlePeriodicTasks();
 
 // =================================================================================================
 // Data Structures
@@ -276,6 +309,7 @@ struct Band {
     int8_t bwIdxAM;
     int8_t bwIdxSSB;
     int8_t bwIdxFM;
+    int8_t bfoCal;
 };
 
 #if ENABLE_FAVORITES
@@ -306,10 +340,10 @@ bool g_stereoStatus;
 bool autoDisplayOff;
 bool g_squelchCutoff = false;
 bool g_displayOn = true;
-volatile bool g_seekStop;    // violatile important here!
+volatile bool g_seekStop;               // violatile important here!
 uint32_t g_lastAdjustmentTime;
-uint16_t g_lastUserActivityTime; // time of the last user frequency change (IN SECONDS)
-bool g_stateIsDirty;         // indicate if the state needs saving on idle
+uint16_t g_lastUserActivityTime;        // time of the last user frequency change (IN SECONDS)
+bool g_stateIsDirty;                    // indicate if the state needs saving on idle
 
 // -------------------------------------------------------------------------------------------------
 // UI & Command State
@@ -335,7 +369,7 @@ bool g_cwViewActive = false;
 // -------------------------------------------------------------------------------------------------
 // Radio State
 // -------------------------------------------------------------------------------------------------
-uint8_t g_signalQualityValue = 255; // Unified value for RSSI (all modes). 255 = invalidated.
+uint8_t g_signalQualityValue = 255;     // Unified value for RSSI (all modes). 255 = invalidated.
 uint32_t g_lastRSSIUpdate;
 uint8_t g_muteVolume;
 uint8_t g_volume = DEFAULT_VOLUME;
@@ -382,9 +416,11 @@ SI4735_fixed g_si4735;
 // Source for default values, centralized here
 const ModeDefaults defaultModeSettings[MODE_CONTEXT_COUNT] = {
     // [MODE_CONTEXT_AM]
-    {.agc = 0, .soft_mute = 0, .avc = 90 },
-    // [MODE_CONTEXT_SSB]
-    {.agc = 0, .soft_mute = 0, .avc = 90 }
+    {.agc = 0, .soft_mute = 0, .avc = 10 },  // index 10 = max level (90)
+    // [MODE_CONTEXT_LSB]
+    {.agc = 0, .soft_mute = 0, .avc = 10 },
+    // [MODE_CONTEXT_USB]
+    {.agc = 0, .soft_mute = 0, .avc = 10 }
 };
 
 // "Live State" storage for mode-dependent settings
@@ -400,79 +436,87 @@ int8_t g_modeSettings[MODE_SETTINGS_COUNT][MODE_CONTEXT_COUNT];
 // The initial values here are defaults and will be overwritten
 SettingsItem g_Settings[] =
 {
-    // Page 1
+    // --- Page 1: Core Audio & RF ---
     { "ATT", 0,  SettingType::ZeroAuto,   doAttenuation       },
-    { "SCN", 1,  SettingType::Switch,     doScanSwitch        },
-    { "AVC", 90, SettingType::Num,        doAvc               },
+    { "AVC", 10, SettingType::Num,        doAvc               },
+    { "SQL", 0,  SettingType::Num,        doSquelch           },
     { "SMA", 0,  SettingType::Num,        doSoftMute          },
     { "SMT", 0,  SettingType::Num,        doSoftMuteThreshold },
-    { "DE ", 1,  SettingType::Switch,     doDeEmp             },
+    { "ANB", 0,  SettingType::Switch,     doAMNoiseBlanker    },
 
-    // Page 2
+    // --- Page 2: SSB & CW ---
     { "BFO", 0,  SettingType::Num,        doBFOCalibration    },
     { "SSM", 1,  SettingType::Switch,     doSSBSoftMuteMode   },
     { "SVC", 1,  SettingType::Switch,     doSSBAVC            },
     { "COF", 0,  SettingType::SwitchAuto, doCutoffFilter      },
     { "SYN", 0,  SettingType::Switch,     doSync              },
-    { "SCR", 4,  SettingType::Num,        doBrightness        },
+    { "CWP", 2,  SettingType::Num,        doCWPitch           },
 
-    // Page 3
+    // --- Page 3: FM & Advanced Audio ---
+    { "DE ", 1,  SettingType::Switch,     doDeEmp             },
+    { "FMP", 1,  SettingType::Switch,     doFMAudioProfile    },
+    { "FMO", 0,  SettingType::Switch,     doForceMono         },
+    { "FSA", 22, SettingType::Num,        doFmSoftMuteAtt     },
+    { "FST", 10, SettingType::Num,        doFmSoftMuteThr     },
+    { "SWA", 0,  SettingType::Num,        doSwAfcProfile      },
+
+    // --- Page 4: Display & UI ---
+    { "SCR", 4,  SettingType::Num,        doBrightness        },
+    { "SPT", 0,  SettingType::Switch,     doSMeter            },
+    { "SWU", 0,  SettingType::Switch,     doSWUnits           },
+    { "DIS", 0,  SettingType::Switch,     doDisplayOff        },
+    { "RSI", 1,  SettingType::Switch,     doRSSIAMOff         },
+    { "NAV", 0,  SettingType::Switch,     doNavStyle          },
+
+    // --- Page 5: Hardware Configuration ---
     { "CAP", 0,  SettingType::Switch,     doAntennaCapacitor  },
     { "CPU", 0,  SettingType::Switch,     doCPUSpeed          },
     { "BAP", 0,  SettingType::Switch,     doBatteryPinSelect  },
-    { "SWU", 0,  SettingType::Switch,     doSWUnits           },
-    { "RSI", 1,  SettingType::Switch,     doRSSIAMOff         },
-    { "DIS", 0,  SettingType::Switch,     doDisplayOff        },
-
-    // Page 4
-    { "FMP", 1,  SettingType::Switch,     doFMAudioProfile    },
-    { "ANB", 0,  SettingType::Switch,     doAMNoiseBlanker    },
-    { "FMO", 0,  SettingType::Switch,     doForceMono         },
-    { "SQL", 0,  SettingType::Num,        doSquelch           },
-    { "CWP", 2,  SettingType::Num,        doCWPitch           },
-    { "SWA", 0,  SettingType::Num,        doSwAfcProfile      },
-
-    // Page 5
-    { "FSA", 22, SettingType::Num,        doFmSoftMuteAtt     },
-    { "FST", 10, SettingType::Num,        doFmSoftMuteThr     },
-    { "SPT", 0,  SettingType::Switch,     doSMeter            },
+    { "SCN", 1,  SettingType::Switch,     doScanSwitch        },
+    { "FVA", 0,  SettingType::Num,        doFmVolAdjust       },
 };
 
 // defines the text conversion rules ONLY for settings of type 'Switch'
 // it is indexed here by the SettingsIndex enum
 const PROGMEM SwitchMapEntry switch_setting_map[] = {
-    // Page 1
+    // --- Page 1: Core Audio & RF ---
     [ATT] = {0, false},
-    [ScanSwitch] = {2, true},
     [AutoVolControl] = {0, false},
+    [SQL] = {0, false},
     [SoftMute] = {0, false},
     [SoftMuteThr] = {0, false},
-    [DeEmp] = {3, false},
-    // Page 2
+    [AMNoiseBlanker] = {1, false},
+
+    // --- Page 2: SSB & CW ---
     [BFO] = {0, false},
     [SSM] = {7, false},
     [SVC] = {2, true},
     [CutoffFilter] = {0, false},
     [Sync] = {2, true},
+    [CWPitch] = {0, false},
+
+    // --- Page 3: FM & Advanced Audio ---
+    [DeEmp] = {3, false},
+    [FMAudioProfile] = {1, false},
+    [ForceMono] = {2, true},
+    [FmSmAtt] = {0, false},
+    [FmSmThr] = {0, false},
+    [SWAFC] = {2, true},
+
+    // --- Page 4: Display & UI ---
     [Brightness] = {0, false},
-    // Page 3
+    [SMeter] = {2, true},
+    [SWUnits] = {5, false},
+    [DisplayOff] = {0, false},
+    [RSSI_AM_Off] = {1, true},
+    [NAV] = {15, false},
+
+    // --- Page 5: Hardware Configuration ---
     [AntennaCap] = {1, false},
     [CPUSpeed] = {9, false},
     [BATT_PIN] = {0, false},
-    [SWUnits] = {5, false},
-    [RSSI_AM_Off] = {1, true},
-    [DisplayOff] = {0, false},
-    // Page 4
-    [FMAudioProfile] = {1, false},
-    [AMNoiseBlanker] = {1, false},
-    [ForceMono] = {2, true},
-    [SQL] = {0, false},
-    [CWPitch] = {0, false},
-    [SWAFC] = {2, true},
-    // Page 5
-    [FmSmAtt] = {0, false},
-    [FmSmThr] = {0, false},
-    [SMeter] = {2, true},
+    [ScanSwitch] = {2, true},
+    [FmVolAdjust] = {0, false},
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -486,40 +530,39 @@ constexpr uint16_t SW_MAX_FREQ = 30000;
 // we use an index to track the current band. band index 1 is mw.
 int8_t g_bandIndex = 1;
 
-// this array is now the single source of truth for all bands (reduse size flash too now)
-// it is defined here directly
+// array single source of truth for all bands
 Band g_bandList[g_bandCount] = {
-    // name,         min_freq,  max_freq, band_type,    current_freq, stepAM, stepSSB, stepFM, bwAM, bwSSB, bwFM
-    { PACK_STR4("LW  "),   150,       521, LW_BAND_TYPE,   300,        2,      4,       1,      4,    4,     0 },
-    { PACK_STR4("MW  "),   522,      1710, MW_BAND_TYPE,   522,        2,      4,       1,      4,    4,     0 },
+    // name,         min_freq,  max_freq, band_type,    current_freq, stepAM, stepSSB, stepFM, bwAM, bwSSB, bwFM, bfoCal
+    { PACK_STR4("LW  "),   150,       521, LW_BAND_TYPE,   300,        2,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("MW  "),   522,      1710, MW_BAND_TYPE,   522,        2,      4,       1,      4,    4,     0,   0 },
     // --- SW sub bands ---
-    { PACK_STR4("SW  "),  1710,      1810, SW_BAND_TYPE,  1750,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("160m"),  1810,      2000, SW_BAND_TYPE,  1850,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("SW  "),  2000,      2300, SW_BAND_TYPE,  2150,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("120m"),  2300,      2500, SW_BAND_TYPE,  2400,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("SW  "),  2500,      3200, SW_BAND_TYPE,  2800,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("90m "),  3200,      3400, SW_BAND_TYPE,  3300,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("SW  "),  3400,      3500, SW_BAND_TYPE,  3450,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("80m "),  3500,      3900, SW_BAND_TYPE,  3700,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("75m "),  3900,      4000, SW_BAND_TYPE,  3950,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("SW  "),  4000,      4750, SW_BAND_TYPE,  4400,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("60m "),  4750,      5060, SW_BAND_TYPE,  4850,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("SW  "),  5060,      5900, SW_BAND_TYPE,  5500,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("49m "),  5900,      6200, SW_BAND_TYPE,  6000,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("SW  "),  6200,      7000, SW_BAND_TYPE,  6500,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("40m "),  7000,      7200, SW_BAND_TYPE,  7100,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("41m "),  7200,      9400, SW_BAND_TYPE,  7450,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("31m "),  9400,      9900, SW_BAND_TYPE,  9600,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("SW  "),  9900,     11600, SW_BAND_TYPE, 11000,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("25m "), 11600,     12100, SW_BAND_TYPE, 11975,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("22m "), 12100,     13870, SW_BAND_TYPE, 13700,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("19m "), 13870,     15800, SW_BAND_TYPE, 15300,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("16m "), 15800,     18100, SW_BAND_TYPE, 17700,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("15m "), 18100,     21850, SW_BAND_TYPE, 21600,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("13m "), 21850,     26100, SW_BAND_TYPE, 25800,        1,      4,       1,      4,    4,     0 },
-    { PACK_STR4("11m "), 26100,     30000, SW_BAND_TYPE, 27500,        1,      4,       1,      4,    4,     0 },
+    { PACK_STR4("SW  "),  1710,      1810, SW_BAND_TYPE,  1750,        1,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("160m"),  1810,      2000, SW_BAND_TYPE,  1850,        1,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("SW  "),  2000,      2300, SW_BAND_TYPE,  2150,        1,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("120m"),  2300,      2500, SW_BAND_TYPE,  2400,        1,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("SW  "),  2500,      3200, SW_BAND_TYPE,  2800,        1,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("90m "),  3200,      3400, SW_BAND_TYPE,  3300,        1,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("SW  "),  3400,      3500, SW_BAND_TYPE,  3450,        1,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("80m "),  3500,      3900, SW_BAND_TYPE,  3700,        1,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("75m "),  3900,      4000, SW_BAND_TYPE,  3950,        1,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("SW  "),  4000,      4750, SW_BAND_TYPE,  4400,        1,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("60m "),  4750,      5060, SW_BAND_TYPE,  4850,        1,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("SW  "),  5060,      5900, SW_BAND_TYPE,  5500,        1,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("49m "),  5900,      6200, SW_BAND_TYPE,  6000,        1,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("SW  "),  6200,      7000, SW_BAND_TYPE,  6500,        1,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("40m "),  7000,      7200, SW_BAND_TYPE,  7100,        1,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("41m "),  7200,      9400, SW_BAND_TYPE,  7450,        1,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("31m "),  9400,      9900, SW_BAND_TYPE,  9600,        1,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("SW  "),  9900,     11600, SW_BAND_TYPE, 11000,        1,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("25m "), 11600,     12100, SW_BAND_TYPE, 11975,        1,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("22m "), 12100,     13870, SW_BAND_TYPE, 13700,        1,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("19m "), 13870,     15800, SW_BAND_TYPE, 15300,        1,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("16m "), 15800,     18100, SW_BAND_TYPE, 17700,        1,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("15m "), 18100,     21850, SW_BAND_TYPE, 21600,        1,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("13m "), 21850,     26100, SW_BAND_TYPE, 25800,        1,      4,       1,      4,    4,     0,   0 },
+    { PACK_STR4("11m "), 26100,     30000, SW_BAND_TYPE, 27500,        1,      4,       1,      4,    4,     0,   0 },
     // --- FM ---
-    { PACK_STR4("    "),  6400,     10800, FM_BAND_TYPE,  8400,        1,      4,       1,      4,    4,     0 }
+    { PACK_STR4("    "),  6400,     10800, FM_BAND_TYPE,  8400,        1,      4,       1,      4,    4,     0,   0 }
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -605,7 +648,8 @@ const uint16_t cw_pitch_options_hz[] PROGMEM = { 500, 600, 700, 800 };
 const char PROGMEM paramTexts[][4] = {
   "AUT", " ON", "OFF", " 50", " 75", "kHz", "MHz",
   "RSS", "SNR", "100", "50%",
-  "10m", "15m", "30m", "60m"
+  "10m", "15m", "30m", "60m",
+  "ROW", "COL"
 };
 
 // Timeout values in seconds for the display-off feature, indexed by the setting parameter

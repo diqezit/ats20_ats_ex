@@ -48,12 +48,16 @@ static bool isSSB() {
     return g_currentMode > AM && g_currentMode < FM;
 }
 
-// Gets the current mode context (AM or SSB) for loading mode-specific settings
-static ModeContext getModeContext() {
-    if (isSSB()) {
-        return MODE_CONTEXT_SSB;
+// Gets the current mode context for loading mode-specific settings
+static inline ModeContext getModeContext() {
+    switch (g_currentMode) {
+    case AM:  return MODE_CONTEXT_AM;
+    case LSB: return MODE_CONTEXT_LSB;
+    case USB: return MODE_CONTEXT_USB;
+    case CW:  return (g_lastCWMode == USB)
+        ? MODE_CONTEXT_USB : MODE_CONTEXT_LSB;  // CW inherits from LSB/USB
+    default:  return MODE_CONTEXT_AM;           // FM not used for AVC
     }
-    return MODE_CONTEXT_AM;
 }
 
 // Resets the EEPROM save timer to delay saving state until the user is idle
@@ -122,6 +126,16 @@ static inline void clamp_index(int8_t& var, const int8_t max_val, bool strict = 
     if (strict ? (var > max_val) : (var >= max_val)) var = 0;
 }
 
+// generic helper to update a value and call a function if it has changed
+// avoids duplicating the "if (new_value != old_value)" pattern
+template<typename T>
+static inline __attribute__((always_inline))
+void updateIfChanged(T& old_value, T new_value, void (*update_fn)()) {
+    if (old_value != new_value) {
+        old_value = new_value;
+        update_fn();
+    }
+}
 
 #if DEBUG_MODE
 
