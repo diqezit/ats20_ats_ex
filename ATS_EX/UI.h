@@ -1,9 +1,20 @@
 #pragma once
 
-// ======================================================================
+// ====================================================================================
+//
 // UI.h - UI Drawing Subsystem for ATS_EX
-// contains all functions responsible for rendering information on the OLED display
-// ======================================================================
+//
+// This file is the "display driver" for the receiver
+// Handles all OLED screen rendering and knows nothing about radio logic or user input
+// Its single responsibility is to translate data (frequency, volume, etc.)
+// into pixels on the screen
+//
+// The layout is defined by `UI_*` constants
+// Many values are pre-calculated to save CPU cycles during runtime rendering
+// Right-alignment is used for frequency and lists
+// to prevent visual jitter as numbers change width
+//
+// ====================================================================================
 
 #include "Defines.h"
 #include "Globals.h"
@@ -152,18 +163,49 @@ static void drawInverted(uint8_t x,
     oled.invertText(false);
 }
 
-// map setting index to screen coordinates (row-first L,R)
-// two columns reduce navigation distance on small OLED
-// see: https://github.com/diqezit/ats20_ats_ex/issues/43#issuecomment-3183836389
-static void calcSettingPos(uint8_t idx,
+// Navigate left-right then down like reading text
+// Reduces encoder turns for faster menu access
+static inline void calcSettingPosRowFirst(
+    uint8_t place,
     uint8_t& xOffset,
     uint8_t& yOffset) {
-    uint8_t place = idx % UI_SETTINGS_PER_PAGE; // 0..5 within the page
-    uint8_t row = place >> 1;                   // 0..2 (every 2 items -> next row)
-    bool    right = (place & 1);                // even = left, odd = right
+    uint8_t row = place >> 1;      // 0..2 every two items
+    bool    right = (place & 1);   // odd places are right column
 
     xOffset = right ? UI_SETTINGS_RIGHT_COL_X : UI_SETTINGS_LEFT_COL_X;
     yOffset = UI_SETTINGS_ROW_START + row * UI_SETTINGS_ROW_STEP;
+}
+
+// Offers a traditional column-based layout
+static inline void calcSettingPosColumnFirst(
+    uint8_t place,
+    uint8_t& xOffset,
+    uint8_t& yOffset) {
+    uint8_t withinCol = place;
+
+    if (place >= UI_SETTINGS_PER_COL) {
+        xOffset = UI_SETTINGS_RIGHT_COL_X;
+        withinCol -= UI_SETTINGS_PER_COL;
+    } else {
+        xOffset = UI_SETTINGS_LEFT_COL_X;
+    }
+    yOffset = UI_SETTINGS_ROW_START + withinCol * UI_SETTINGS_ROW_STEP;
+}
+
+// Let user choose menu navigation style
+// See: https://github.com/diqezit/ats20_ats_ex/issues/43#issuecomment-3183836389
+static void calcSettingPos(
+    uint8_t idx,
+    uint8_t& xOffset,
+    uint8_t& yOffset) {
+    uint8_t place = idx % UI_SETTINGS_PER_PAGE; // 0..5 on page
+
+    // 0=Row-first (default), 1=Column-first
+    if (g_Settings[NAV].param == 0) {
+        calcSettingPosRowFirst(place, xOffset, yOffset);
+    } else {
+        calcSettingPosColumnFirst(place, xOffset, yOffset);
+    }
 }
 
 // ==========================================
@@ -243,7 +285,8 @@ static void showModulation() {
 // user sees explicit mute instead of 0 value
 static inline void buildVolumeBuf(char* buf) {
     if (g_muteVolume == 0) {
-        convertToChar(buf, g_si4735.getCurrentVolume(), 2, 0, 0);
+        // reads from master g_volume - not the chip g_si4735! To compensate
+        convertToChar(buf, g_volume, 2, 0, 0);
     } else {
         buf[0] = ' ';
         buf[1] = 'M';
@@ -317,7 +360,9 @@ static void showSignalQuality() {
 #endif
         ) return;
 
-    if (g_signalQualityValue == UI_SIGNAL_NO_VALUE) {
+    // Clear if no RSSI data OR RSSI polling disabled in AM
+    if (g_signalQualityValue == UI_SIGNAL_NO_VALUE ||
+        (g_currentMode == AM && g_Settings[RSSI_AM_Off].param == 1)) {
         uiSignalClear();
     } else {
         uiRenderSignalValue(g_signalQualityValue, g_Settings[SMeter].param);

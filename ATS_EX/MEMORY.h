@@ -1,9 +1,23 @@
 #pragma once
 
-// ======================================================================
+// ====================================================================================
+//
 // Memory.h - EEPROM Management Subsystem
-// Handles saving and loading all persistent receiver state
-// ======================================================================
+//
+// This module handles all persistent receiver state by managing the EEPROM
+// It isolates the rest of the application from the details of memory layout
+// and raw read/write operations
+//
+// Includes logic to detect and prevent writes to worn-out EEPROM
+// This is critical for device longevity as EEPROM has a limited write cycle life
+// When wear is detected it flags the memory as bad and operates in a
+// read-only mode to keep the receiver functional
+//
+// Also manages data versioning. If the firmware is updated and the EEPROM
+// layout changes it will automatically reset settings to factory defaults
+// to prevent data corruption
+//
+// ====================================================================================
 
 // Global flag for EEPROM wear detection
 static bool g_eepromBad = false;

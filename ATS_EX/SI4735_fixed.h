@@ -96,14 +96,6 @@ private:
         }
     }
 
-    // Determines command type. Most lines use 0x16
-    // A small lookup table for rare 0x15 commands saves significant space
-    inline uint8_t getCommandType(uint16_t patch_line, uint16_t base,
-        const uint8_t* cmd_0x15_offsets, uint8_t& cmd_0x15_idx) {
-        return (base + pgm_read_byte_near(cmd_0x15_offsets + cmd_0x15_idx) == patch_line)
-            ? (cmd_0x15_idx++, 0x15) : 0x16;
-    }
-
     // Calculates parameters for special "cutoff" lines that have variable data lengths
     // This avoids storing padding zeros. A single byte from cutoff_nonzero_lengths encodes
     // both the data length and whether a secondary 0x15 line must follow
@@ -111,18 +103,22 @@ private:
         const uint8_t* cutoff_places_offsets,
         const uint8_t* cutoff_nonzero_lengths,
         uint8_t& cutoff_place_idx,
-        uint8_t& non_zero_bytes, bool& has_next_0x15) {
+        uint8_t& non_zero_bytes, uint8_t& num_zero_after_0x15) {
         if ((base + pgm_read_byte_near(cutoff_places_offsets + cutoff_place_idx)) == patch_line) {
-            non_zero_bytes = 1 + pgm_read_byte_near(cutoff_nonzero_lengths + cutoff_place_idx++);
+            non_zero_bytes = pgm_read_byte_near(cutoff_nonzero_lengths + cutoff_place_idx++);
 
             // This compacts two pieces of information into one byte:
-            // the length and a flag indicating a follow-up command
-            has_next_0x15 = non_zero_bytes < 100;
-            if (!has_next_0x15) non_zero_bytes -= 100;
+            // 1) the length 2) the number of zeros after a follow-up 0x15 command
+            if (non_zero_bytes < 100)   //Den
+              num_zero_after_0x15 = 2;  //Den
+            else {                      //Den
+              num_zero_after_0x15 = 1;  //Den
+              non_zero_bytes -= 100;    //Den
+            }                           //Den
 
         } else {
             non_zero_bytes = 8;
-            has_next_0x15 = false;
+            num_zero_after_0x15 = 0;
         }
     }
 
@@ -134,7 +130,7 @@ private:
         Wire.write(cmd);
 
         for (uint8_t i = 1; i < 8; i++) {
-            Wire.write((i >= start_idx && i < end_idx)
+            Wire.write((i > start_idx && i < end_idx)
                 ? pgm_read_byte_near(compressed_ssb_patch_content + patch_data_idx++)
                 : 0x00);
         }
@@ -151,25 +147,23 @@ private:
         const uint8_t* compressed_ssb_patch_content,
         const uint8_t* cutoff_places_offsets,
         const uint8_t* cutoff_nonzero_lengths,
-        const uint8_t* cmd_0x15_offsets,
         uint16_t& patch_data_idx,
-        uint8_t& cutoff_place_idx,
-        uint8_t& cmd_0x15_idx) {
+        uint8_t& cutoff_place_idx) {
 
         uint16_t base = getBaseForLine(patch_line);
-        uint8_t cmd = getCommandType(patch_line, base, cmd_0x15_offsets, cmd_0x15_idx);
+        uint8_t cmd = (patch_line == 0) ? 0x15 : 0x16;
 
         uint8_t non_zero_bytes;
-        bool has_next_0x15;
+        uint8_t num_zero_after_0x15;
         getCutoffParams(patch_line, base, cutoff_places_offsets, cutoff_nonzero_lengths,
-            cutoff_place_idx, non_zero_bytes, has_next_0x15);
+            cutoff_place_idx, non_zero_bytes, num_zero_after_0x15);
 
-        if (!sendPatchData(cmd, 1, non_zero_bytes, compressed_ssb_patch_content, patch_data_idx))
+        if (!sendPatchData(cmd, 0, non_zero_bytes, compressed_ssb_patch_content, patch_data_idx))
             return false;
 
-        if (has_next_0x15) {
+        if (num_zero_after_0x15) {
             patch_line++;
-            return sendPatchData(0x15, 3, 8, compressed_ssb_patch_content, patch_data_idx);
+            return sendPatchData(0x15, num_zero_after_0x15, 8, compressed_ssb_patch_content, patch_data_idx);
         }
 
         return true;
@@ -179,17 +173,15 @@ public:
     // Main entry point to upload the entire compressed SSB patch
     bool downloadCompressedPatch(const uint8_t* compressed_ssb_patch_content,
         const uint8_t* cutoff_places_offsets,
-        const uint8_t* cutoff_nonzero_lengths,
-        const uint8_t* cmd_0x15_offsets) {
+        const uint8_t* cutoff_nonzero_lengths) {
         uint16_t patch_data_idx = 0;
-        uint8_t cutoff_place_idx = 0, cmd_0x15_idx = 0;
+        uint8_t cutoff_place_idx = 0;
         const uint16_t ssb_patch_lines_count = 1105;
 
         for (uint16_t patch_line = 0; patch_line < ssb_patch_lines_count; patch_line++) {
             if (!processSinglePatchLine(patch_line, compressed_ssb_patch_content,
                 cutoff_places_offsets, cutoff_nonzero_lengths,
-                cmd_0x15_offsets, patch_data_idx,
-                cutoff_place_idx, cmd_0x15_idx)) {
+                patch_data_idx, cutoff_place_idx)) {
                 return false;
             }
         }

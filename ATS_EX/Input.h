@@ -2,10 +2,22 @@
 
 #include "Globals.h"
 
-// ======================================================================
-// Input.h - Input Handling Subsystem
-// Handles rotary encoder, button presses, and command mode logic.
-// ======================================================================
+// ====================================================================================
+//
+// Input.h - User Input Handling and Action Dispatcher
+//
+// This file translates physical user actions (button presses, encoder turns)
+// into logical commands for the receiver
+// It acts as the central hub that connects hardware inputs to the functions in RadioControl.h and UI.h
+//
+// Manages different input contexts
+// An encoder turn might change frequency adjust a setting or navigate a menu
+// depending on the current application state (e.g., `g_settingsActive`)
+//
+// Implements logic for short - long - double presses to maximize the utility
+// of limited physical buttons
+//
+// ====================================================================================
 
 // throttle for BAND long-press repeat to avoid too fast cycling
 // increase to slow down more (e.g. 240..320 ms gives ~2–4x slower)
@@ -191,7 +203,7 @@ static void processFavoritesMenuControls() {
 // and blocking the rest of the main loop.
 static inline bool handleCwViewGate() {
     if (!g_cwViewActive) return false;
-    
+
     // In CW mode, run the decoder task and stop further processing in the main loop
     cwViewTask();
     return true;

@@ -1216,3 +1216,59 @@ This version introduces the ability to save your favorite FM stations.
 		It's off by default, so if you prefer the old RSSI numbers, you don't have to change anything.
 	
 ------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v6.7**
+
+`ATS_EX.ino`, `Defines.h`, `Globals.h`, `Utils.h`, `UI.h`, `RadioControl.h`
+
+`(!) Note: Major Refactor`
+
+*   **[New] Per-Modulation Audio Settings (AVC, Soft Mute, AGC):**
+    *   Addresses the common issue of significant volume jumps when switching between AM and SSB/CW. 
+		This update introduces independent memory for key audio settings (`AVC`, `Soft Mute`, `AGC`) for `AM`, `LSB`, and `USB`
+    *   The `CW` mode intelligently inherits its settings from the active sideband (LSB or USB) 
+		ensuring audio consistency without needing separate profile
+    *   Now, when you adjust `AVC` in `LSB` mode, it is saved specifically for `LSB` and won't affect your settings for `AM`
+		Receiver automatically applies the correct audio profile when you change modulation
+	
+
+*   **[Optimized] Advanced SSB Patch Compression:** This advanced optimization was developed by @den3rats.
+    *   More efficient compression scheme for the SSB patch data saving an additional **60 bytes** of Flash mem.
+		Logic for identifying `0x15` commands is now encoded directly into the `cutoff_nonzero_lengths` array, 
+		eliminating the need for separate `cmd__0x15_offsets` table.
+	
+*   **[Improved] Settings Menu Organization:**
+    *   Settings have been regrouped thematically across the five pages for more logical and intuitive navigation. 
+	For example, all SSB/CW-specific options are now consolidated on a single page.
+
+    *   Settings menu now remembers the last page you were on. When you re-enter the menu, it will open on that page 
+	instead of defaulting to page 1, allowing for quicker adjustments.
+
+*   **[New] Configurable Menu Navigation:** 
+    *   Added a `NAV` setting (Page 4) to switch between an efficient row-first (default) and legacy column-first layout
+
+*   **[Architectural] Code Refactoring:** All Si4735 radio chip control logic has been extracted 
+	from `ATS_EX.ino` into a new `RadioControl.h` file. 
+	This creates a Hardware Abstraction Layer (HAL), making the code cleaner, more modular and easier to maintain.
+
+*   **[Reworked] AVC Control System:**
+    *   The AVC setting is now 0-10 scale instead of the previous technical 12-90 range.
+    *   A non-linear formula is used to map this scale to the hardware compensating for the chip response. 
+	This makes the adjustment feel much more intuitive.
+    *   The default level is set to 10 (max) to match the previous version (90) behavior.
+
+*   **[New] FM Volume Balancing:**
+    *   Addresses the long-standing issue of **FM mode being significantly louder** than AM/SSB.
+    *   The firmware now automatically applies a software volume offset when in FM mode
+		ensuring a **consistent listening level** when switching between bands.
+    *   This offset is now a fully user-configurable setting, **`FVA` (FM Volume Adjust)**, located on Page 5 of the menu.
+
+
+*   **[Reworked] BFO Systems:** 
+    *   Per-Band BFO Calibration: The BFO calibration is no longer a single global setting. 
+	It is now saved individually for each band, allowing for fine-tuning across frequencies.
+
+
+------------------------------------------------------------------------------------------------------------
+
