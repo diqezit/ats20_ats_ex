@@ -516,6 +516,114 @@ This procedure resets all settings, band states, and clears all saved favorites 
 
 ---
 
+### **Section 5: Experimental Features**
+
+#### **5.1. CW (Morse Code) Decoder** *(Experimental)*
+
+> **⚠️ IMPORTANT:** This feature requires hardware modification and disabling Favorites (`ENABLE_FAVORITES 0`) due to memory constraints (requires ~30KB flash).
+
+The firmware includes an experimental CW decoder using a fixed-point Goertzel algorithm for real-time Morse code to text conversion directly on the OLED display.
+
+**Technical Implementation:**
+- **Algorithm:** Narrowband Goertzel detector (N=128 samples)
+- **Reference:** Internal 1.1V ADC reference for improved weak signal detection
+- **Adaptive timing:** Automatic WPM tracking (5-60 WPM range)
+- **Display:** 6 lines of decoded text with automatic scrolling
+- **Input:** Analog pin A6 with AC coupling
+
+**Required Hardware Modification:**
+
+Connect speaker output to A6 with proper biasing:
+- **AC Coupling:** 2.2 µF capacitor in series with audio signal
+- **Bias Network:** 
+  - R1: 390 kΩ from +3.48V to A6 (470 kΩ also acceptable, provides ~0.5V bias)
+  - R2: 75 kΩ from A6 to GND
+  - This creates optimal DC bias for the 1.1V internal reference
+
+**Circuit Diagram:**
+![CW Decoder Circuit](https://github.com/user-attachments/assets/860369a8-2c26-4638-a11c-4a60ebe6d625)
+
+**Operation Guide:**
+
+1. **Enable in firmware:** Set `ENABLE_CW_DECODER 1` and `ENABLE_FAVORITES 0` in Defines.h before compiling
+2. **Setup:** 
+   - Switch to CW mode
+   - Set `CWP` (CW Pitch) in settings to match expected tone (600-700 Hz recommended)
+3. **Activate decoder:** Long-press `MODE` button to enter decoder view
+4. **Display shows:**
+   - Header: "CW DECODER" with live WPM reading
+   - Main area: Decoded text (auto-scrolls after 6 lines)
+5. **Exit:** Press any button to return to normal display
+
+**Performance Characteristics:**
+- **Optimal reception:** 600 Hz tone at 25-30 WPM
+- **Pitch options:** 500, 600, 700, 800 Hz (selectable via `CWP` setting)
+- **Adaptive tracking:** Automatically adjusts to speed variations
+- **Best results with:** 
+  - Stable signals (S5 or stronger)
+  - Narrow bandwidth filter (0.5-1.0 kHz)
+  - Minimal QRM/QRN
+
+**Known Limitations:**
+- Requires clean audio signal (affected by noise and fading)
+- May struggle with hand-sent code with irregular timing
+- Cannot decode overlapping signals
+
+**Alternative Solution:**
+For professional-grade decoding performance:
+- **Android App:** [Morse Expert by VE3NEA](https://ve3nea.github.io/MorseExpert/)
+- Provides superior algorithm, adjustable filters, and logging capabilities
+
+**Test Signal:** 
+For decoder testing at 600Hz, 30WPM try: `A A A A A / T T T T T / E E E E E / N A N A N A / PARIS PARIS PARIS`
+
+**Additional Technical Details:**
+
+**Signal Processing Chain:**
+- **ADC Sampling:** Continuous sampling at ~71.4 Hz block rate (14ms per block)
+- **DC Offset Tracking:** Adaptive high-pass filter with 256-sample time constant
+- **Goertzel Bins:** Pre-computed coefficients for bins 0-32 (Q14 fixed-point)
+- **Signal Detection:** Dual-filter envelope tracking:
+  - Fast envelope: Immediate response for tone detection
+  - Slow noise floor: 64-sample time constant for baseline estimation
+  - Hysteresis margin: Dynamic threshold with 3dB separation
+
+**Morse Timing Engine:**
+- **Dot length:** Adaptive from 2-6 blocks (28-84ms)
+- **Dash/Dot ratio:** ITU standard 3:1 with tolerance for hand-keying
+- **Letter gap:** 1.5× dot length
+- **Word gap:** 4.5× dot length
+- **Symbol timeout:** 140ms auto-flush for incomplete characters
+
+**Decoder Features:**
+- **Character set:** Full alphabet (A-Z), numbers (0-9), slash (/)
+- **Pattern matching:** 5-bit packed lookup table for efficient memory use
+- **Adaptive speed tracking:**
+  - Smoothing factor: 7/8 old + 1/8 new (prevents jitter)
+  - WPM display updates every 5 decoded symbols
+  - Speed range: 5-60 WPM with automatic adjustment
+
+**Memory Optimization:**
+- **Buffer size:** 128 samples (int16_t) for Goertzel processing
+- **Lookup table:** 36 bytes for Morse patterns (compressed format)
+- **State machine:** 24 bytes total for decoder state
+- **Display buffer:** Direct write to OLED (no frame buffer)
+
+**Debug Mode:** (When `DEBUG_CW 1`)
+- Serial output at 9600 baud showing:
+  - ADC range and DC offset
+  - Detected dots/dashes with timing
+  - Envelope and noise floor levels
+  - Real-time WPM calculations
+
+**Hardware Notes:**
+- **Why A6:** This pin has no digital functions, dedicated ADC input
+- **Voltage divider values:** Creates ~0.55V DC bias (center of 1.1V range)
+- **Capacitor value:** 2.2µF provides -3dB at ~7Hz (blocks DC, passes audio)
+- **Input impedance:** ~465kΩ (set by bias network)
+
+---
+
 If you encounter difficulties with the new versions, you can temporarily roll back and download the version you like best using:
 
 ```
