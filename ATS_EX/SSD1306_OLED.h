@@ -111,6 +111,12 @@ public:
     void init(int __attribute__((unused)) sda = 0, int __attribute__((unused)) scl = 0) {
         Wire.begin();
 
+        // Transfer Time (sec) = (Bytes * 9 bits/byte) / Clock Speed (Hz)
+        // 1024 bytes at 35kHz = 0.26 sec per full screen refresh
+        // reduce I2C speed for better stability on noisy power lines
+        // if instability persists try less aggressive 50000L (50 kHz)
+        Wire.setClock(35000L);
+
         beginCommand();
         for (uint8_t i = 0; i < sizeof(_oled_init); i++) {
             sendByte(pgm_read_byte(&_oled_init[i]));
@@ -205,6 +211,8 @@ public:
 
     static const SegDef segs[8] PROGMEM;
 
+    // =-=-=-=-=-=-=-=-= Low-level primitive drawing (buffer manipulation) =-=-=-=-=-=-=-=-=
+
     // Sets a single pixel in the local buffer (bitwise)
     void local_setPixel(unsigned char* buf, uint8_t curr_x, uint8_t curr_y, uint8_t pages) {
         uint8_t page = curr_y >> 3;
@@ -230,8 +238,10 @@ public:
         }
     }
 
-    // Partial update of a rectangular area (sends window commands and data)
-    // If data == NULL, fills with zeros (for clearing)
+    // =-=-=-=-=-=-=-=-= Mid-level data transfer =-=-=-=-=-=-=-=-=
+
+    // send rectangular window of data to display
+    // NULL data pointer clears the window to save flash
     void partialUpdate(uint8_t x, uint8_t y, uint8_t w, uint8_t h, const unsigned char* data) {
         beginCommand();
         sendByte(OLED_COLUMNADDR);
@@ -242,7 +252,7 @@ public:
         sendByte((y + h - 1) / 8);
         endTransm();
 
-        // Calculate number of pages and total length
+        // page count must be exact for transfer
         uint8_t pages = ((y + h - 1) / 8) - (y / 8) + 1;
         uint16_t len = (uint16_t)w * pages;
 
@@ -253,47 +263,80 @@ public:
         endTransm();
     }
 
-    // render one seven‑segment glyph into a small local buffer and push to the panel
-    // buffer geometry comes from SEVEN_SEG_* and SEG_* constants
-    // clear only the used slice and reuse static storage to keep stack small
+    // =-=-=-=-=-=-=-=-= Low-level helpers =-=-=-=-=-=-=-=-=
+
+    // clear only the part of the buffer that will be used
+    // prevents corrupting other parts of the static buffer
+    inline void prepareLocalBuffer(uint8_t* buf, uint8_t width) {
+        const uint16_t used_bytes = (uint16_t)width * SEG_PAGES;
+        // compile-time check prevents buffer overflow from bad constants
+        static_assert(SEVEN_SEG_DIGIT_WIDTH * SEG_PAGES <= SEG_BUF_SZ, "SEG_BUF_SZ is too small");
+        for (uint16_t i = 0; i < used_bytes; i++) {
+            buf[i] = 0;
+        }
+    }
+
+    // read segment definition from PROGMEM
+    // pass params by pointer to avoid stack overhead of returning a struct
+    inline void loadSegmentDef(uint8_t segIndex,
+        uint8_t* x, uint8_t* y,
+        uint8_t* len, uint8_t* isHoriz) {
+        const SegDef* seg_ptr = &segs[segIndex];
+        *x = pgm_read_byte((const uint8_t*)seg_ptr + offsetof(SegDef, x));
+        *y = pgm_read_byte((const uint8_t*)seg_ptr + offsetof(SegDef, y));
+        *len = pgm_read_byte((const uint8_t*)seg_ptr + offsetof(SegDef, len));
+        *isHoriz = pgm_read_byte((const uint8_t*)seg_ptr + offsetof(SegDef, isHoriz));
+    }
+
+    // draw a single segment into the buffer
+    // uses 2px thick lines for better visibility
+    inline void drawSegment(uint8_t* buf,
+        uint8_t x, uint8_t y,
+        uint8_t len, uint8_t isHoriz) {
+        if (isHoriz) {
+            draw_horizontal_line(buf, x, y, len, SEG_PAGES);
+        } else {
+            draw_vertical_line(buf, x, y, len, SEG_PAGES);
+        }
+    }
+
+    // =-=-=-=-=-=-=-=-= Mid-level helper =-=-=-=-=-=-=-=-=
+
+    // iterate over mask bits and draw all active segments
+    // mask mapping keeps glyph definitions compact in flash
+    inline void renderSegmentsToBuffer(uint8_t* buf, uint8_t mask) {
+        for (uint8_t b = 0; b < 8; b++) {
+            if (mask & (1 << b)) {
+                uint8_t s_x, s_y, s_len, isHoriz;
+                loadSegmentDef(b, &s_x, &s_y, &s_len, &isHoriz);
+                drawSegment(buf, s_x, s_y, s_len, isHoriz);
+            }
+        }
+    }
+
+    // =-=-=-=-=-=-=-=-= High-level orchestrator  =-=-=-=-=-=-=-=-=
+
+    // render one seven-segment glyph into local buffer and push to display
+    // split into helpers for clarity without flash size penalty
     void drawDigit(char c, int px, int py) {
         if ((c < '0' || c > '9') && (c != '.')) return;
 
-        // pick width for dot or full digit, height is fixed by design
+        // dot glyph is narrower than a full digit
         const uint8_t digitW = (c == '.') ? SEVEN_SEG_DOT_WIDTH : SEVEN_SEG_DIGIT_WIDTH;
-        const uint8_t digitH = SEVEN_SEG_DIGIT_HEIGHT;
-
-        // avoid VLA and heap - reuse
         static uint8_t localBuf[SEG_BUF_SZ];
 
-        // clear only the bytes we will send
-        const uint16_t used = (uint16_t)digitW * SEG_PAGES;
-        for (uint16_t i = 0; i < used; i++) localBuf[i] = 0;
+        // Clear buffer
+        prepareLocalBuffer(localBuf, digitW);
 
-        // pick segment mask for this glyph from PROGMEM
+        // Fetch mask for character
         uint8_t index = (c == '.') ? 10 : (c - '0');
         uint8_t mask = pgm_read_byte(&symbolMasks[index]);
 
-        // draw enabled segments into the local buffer
-        for (uint8_t b = 0; b < 8; b++) {
-            if (mask & (1 << b)) {
-                // read segment blueprint from PROGMEM
-                const SegDef* seg_ptr = &segs[b];
-                uint8_t s_x = pgm_read_byte((const uint8_t*)seg_ptr + offsetof(SegDef, x));
-                uint8_t s_y = pgm_read_byte((const uint8_t*)seg_ptr + offsetof(SegDef, y));
-                uint8_t s_len = pgm_read_byte((const uint8_t*)seg_ptr + offsetof(SegDef, len));
-                uint8_t isHoriz = pgm_read_byte((const uint8_t*)seg_ptr + offsetof(SegDef, isHoriz));
+        // Render segments
+        renderSegmentsToBuffer(localBuf, mask);
 
-                // 2 px thick strokes
-                if (isHoriz) {
-                    draw_horizontal_line(localBuf, s_x, s_y, s_len, SEG_PAGES);
-                } else {
-                    draw_vertical_line(localBuf, s_x, s_y, s_len, SEG_PAGES);
-                }
-            }
-        }
-
-        partialUpdate(px, py, digitW, digitH, localBuf); // push prepared window to display
+        // Push to panel
+        partialUpdate(px, py, digitW, SEVEN_SEG_DIGIT_HEIGHT, localBuf);
     }
 
     // ===== System Functions =====

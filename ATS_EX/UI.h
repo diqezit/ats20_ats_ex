@@ -1102,10 +1102,17 @@ void SettingParamToUI_Number(char* buf,
     buf[UI_SETTING_NUM_WIDTH] = '\0';
 }
 
-// convert internal value to compact UI string
-// special path first then numeric path
-static void SettingParamToUI(char* buf,
-    uint8_t idx) {
+// Convert setting param to UI text
+// Shows '---' for settings not active in current mode
+// Splits formatting path for special cases vs standard numbers
+static void SettingParamToUI(char* buf, uint8_t idx) {
+
+    // user expects to see inactive settings are disabled
+    if (!g_Settings[idx].is_active()) {
+        strcpy_P(buf, PSTR("---"));
+        return;
+    }
+
     int8_t  param = g_Settings[idx].param;
     uint8_t type = g_Settings[idx].type;
 

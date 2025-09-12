@@ -1281,3 +1281,21 @@ This version introduces the ability to save your favorite FM stations.
     *   Rewrote critical SSB frequency normalization logic (`normalizeSsbBeforeSwitch`) to improve stability when switching modes.
 
 ------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v6.7.2**
+
+*   **[Refactor] Mode-Dependent Settings Logic** Implemented a robust, data-driven system to manage setting availability based on the current radio mode. 
+	This prevents the adjustment of inapplicable settings (like AVC in FM) and visually indicates their inactive state (`---`) in the menu, 
+	improving clarity and preventing user error.
+
+*   **[Refactor] Drawing Functions in `SSD1306_OLED.h`** Decomposed `drawDigit` into inline helpers for clarity with 0-byte size change.
+
+*   **[Fix] AVC Zero Value Persistence** Corrected an initialization check that incorrectly treated a valid AVC setting of '0' as an uninitialized state. 
+	The logic now reliably distinguishes between a user-set '0' and an erased EEPROM byte (`-1`), ensuring the full 0-10 range persists correctly.
+
+*   **[Change] FM De-emphasis Default** Changed default FM de-emphasis from 75µs to 50µs for better compatibility 
+	with European and international broadcasting standards. Users in Americas can still switch to 75µs via the settings menu.
+
+
+------------------------------------------------------------------------------------------------------------

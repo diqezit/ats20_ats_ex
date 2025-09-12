@@ -273,6 +273,12 @@ static inline void handleSettingsSave();
 static inline void checkDisplayTimeout();
 static void handlePeriodicTasks();
 
+// --- Setting Applicability Checks Prototypes ---
+static inline bool isAlwaysActive();
+static inline bool isAMFamilyActive();
+static inline bool isSSBActive();
+static inline bool isFMActive();
+
 // =================================================================================================
 // Data Structures
 // =================================================================================================
@@ -290,6 +296,7 @@ struct SettingsItem {
     int8_t param;
     uint8_t type;
     void (*manipulateCallback)(int8_t);
+    bool (*is_active)();
 };
 
 // defines all properties of a frequency band
@@ -427,6 +434,15 @@ const ModeDefaults defaultModeSettings[MODE_CONTEXT_COUNT] = {
 // This array is loaded from and saved to EEPROM
 int8_t g_modeSettings[MODE_SETTINGS_COUNT][MODE_CONTEXT_COUNT];
 
+
+// --- Setting Applicability Checks ---
+// These helpers determine if a setting is relevant in the current radio mode.
+static inline bool isAlwaysActive() { return true; }
+static inline bool isAMFamilyActive() { return g_currentMode != FM; }
+static inline bool isSSBActive() { return isSSB(); }
+static inline bool isFMActive() { return g_currentMode == FM; }
+
+
 // -------------------------------------------------------------------------------------------------
 // General Settings
 // -------------------------------------------------------------------------------------------------
@@ -437,43 +453,43 @@ int8_t g_modeSettings[MODE_SETTINGS_COUNT][MODE_CONTEXT_COUNT];
 SettingsItem g_Settings[] =
 {
     // --- Page 1: Core Audio & RF ---
-    { "ATT", 0,  SettingType::ZeroAuto,   doAttenuation       },
-    { "AVC", 10, SettingType::Num,        doAvc               },
-    { "SQL", 0,  SettingType::Num,        doSquelch           },
-    { "SMA", 0,  SettingType::Num,        doSoftMute          },
-    { "SMT", 0,  SettingType::Num,        doSoftMuteThreshold },
-    { "ANB", 0,  SettingType::Switch,     doAMNoiseBlanker    },
+    { "ATT", 0,  SettingType::ZeroAuto,   doAttenuation,       isAlwaysActive },
+    { "AVC", 10, SettingType::Num,        doAvc,               isAMFamilyActive },
+    { "SQL", 0,  SettingType::Num,        doSquelch,           isAlwaysActive },
+    { "SMA", 0,  SettingType::Num,        doSoftMute,          isAMFamilyActive },
+    { "SMT", 0,  SettingType::Num,        doSoftMuteThreshold, isAMFamilyActive },
+    { "ANB", 0,  SettingType::Switch,     doAMNoiseBlanker,    isAMFamilyActive },
 
     // --- Page 2: SSB & CW ---
-    { "BFO", 0,  SettingType::Num,        doBFOCalibration    },
-    { "SSM", 1,  SettingType::Switch,     doSSBSoftMuteMode   },
-    { "SVC", 1,  SettingType::Switch,     doSSBAVC            },
-    { "COF", 0,  SettingType::SwitchAuto, doCutoffFilter      },
-    { "SYN", 0,  SettingType::Switch,     doSync              },
-    { "CWP", 2,  SettingType::Num,        doCWPitch           },
+    { "BFO", 0,  SettingType::Num,        doBFOCalibration,    isAMFamilyActive },
+    { "SSM", 1,  SettingType::Switch,     doSSBSoftMuteMode,   isSSBActive },
+    { "SVC", 1,  SettingType::Switch,     doSSBAVC,            isSSBActive },
+    { "COF", 0,  SettingType::SwitchAuto, doCutoffFilter,      isSSBActive },
+    { "SYN", 0,  SettingType::Switch,     doSync,              isSSBActive },
+    { "CWP", 2,  SettingType::Num,        doCWPitch,           isAMFamilyActive },
 
     // --- Page 3: FM & Advanced Audio ---
-    { "DE ", 1,  SettingType::Switch,     doDeEmp             },
-    { "FMP", 1,  SettingType::Switch,     doFMAudioProfile    },
-    { "FMO", 0,  SettingType::Switch,     doForceMono         },
-    { "FSA", 22, SettingType::Num,        doFmSoftMuteAtt     },
-    { "FST", 10, SettingType::Num,        doFmSoftMuteThr     },
-    { "SWA", 0,  SettingType::Num,        doSwAfcProfile      },
+    { "DE ", 0,  SettingType::Switch,     doDeEmp,             isFMActive },
+    { "FMP", 1,  SettingType::Switch,     doFMAudioProfile,    isFMActive },
+    { "FMO", 0,  SettingType::Switch,     doForceMono,         isFMActive },
+    { "FSA", 22, SettingType::Num,        doFmSoftMuteAtt,     isFMActive },
+    { "FST", 10, SettingType::Num,        doFmSoftMuteThr,     isFMActive },
+    { "SWA", 0,  SettingType::Num,        doSwAfcProfile,      isAMFamilyActive },
 
     // --- Page 4: Display & UI ---
-    { "SCR", 4,  SettingType::Num,        doBrightness        },
-    { "SPT", 0,  SettingType::Switch,     doSMeter            },
-    { "SWU", 0,  SettingType::Switch,     doSWUnits           },
-    { "DIS", 0,  SettingType::Switch,     doDisplayOff        },
-    { "RSI", 1,  SettingType::Switch,     doRSSIAMOff         },
-    { "NAV", 0,  SettingType::Switch,     doNavStyle          },
+    { "SCR", 4,  SettingType::Num,        doBrightness,        isAlwaysActive },
+    { "SPT", 0,  SettingType::Switch,     doSMeter,            isAlwaysActive },
+    { "SWU", 0,  SettingType::Switch,     doSWUnits,           isAMFamilyActive },
+    { "DIS", 0,  SettingType::Switch,     doDisplayOff,        isAlwaysActive },
+    { "RSI", 1,  SettingType::Switch,     doRSSIAMOff,         isAMFamilyActive },
+    { "NAV", 0,  SettingType::Switch,     doNavStyle,          isAlwaysActive },
 
     // --- Page 5: Hardware Configuration ---
-    { "CAP", 0,  SettingType::Switch,     doAntennaCapacitor  },
-    { "CPU", 0,  SettingType::Switch,     doCPUSpeed          },
-    { "BAP", 0,  SettingType::Switch,     doBatteryPinSelect  },
-    { "SCN", 1,  SettingType::Switch,     doScanSwitch        },
-    { "FVA", 0,  SettingType::Num,        doFmVolAdjust       },
+    { "CAP", 0,  SettingType::Switch,     doAntennaCapacitor,  isAlwaysActive },
+    { "CPU", 0,  SettingType::Switch,     doCPUSpeed,          isAlwaysActive },
+    { "BAP", 0,  SettingType::Switch,     doBatteryPinSelect,  isAlwaysActive },
+    { "SCN", 1,  SettingType::Switch,     doScanSwitch,        isAlwaysActive },
+    { "FVA", 0,  SettingType::Num,        doFmVolAdjust,       isAlwaysActive },
 };
 
 // defines the text conversion rules ONLY for settings of type 'Switch'

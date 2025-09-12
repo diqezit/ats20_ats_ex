@@ -53,7 +53,7 @@ constexpr auto EEPROM_FAVORITES_COUNT = 370;            // Size: 1   End: 370
 constexpr auto APP_VERSION = 67;
 
 // Centralizes user-facing strings on main screen
-#define APP_NAME_LINE1 F("ATS-20+ V6.7")
+#define APP_NAME_LINE1 F("ATS-20+ V6.7.2")
 
 // Behavior
 constexpr auto SAVE_ON_IDLE_TIMEOUT = 15000UL;          // 15 seconds
