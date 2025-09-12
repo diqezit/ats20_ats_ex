@@ -1025,28 +1025,37 @@ static void doFrequencyTuneSSB() {
 
 // =-=-=-=-=-=-=-=-= Mode switch helpers =-=-=-=-=-=-=-=-=
 
-// fold BFO remainder into kHz before leaving SSB/CW so carrier stays exact
+// fold bfo into frequency before mode switch
+// user expects tuned station to remain centered
+// keeps state valid during SSB to AM transition
 static inline void normalizeSsbBeforeSwitch(Band& band) {
     if (!isSSB()) return;
 
-    int32_t f = g_currentFrequency;
-    int16_t b = g_currentBFO;
+    // use 32bit math to prevent overflow with large frequencies
+    int32_t freq_khz = g_currentFrequency;
+    int32_t bfo_hz = g_currentBFO;
 
-    int16_t k = (b >= 0)
-        ? (b / HZ_PER_KHZ)
-        : -((-b + (HZ_PER_KHZ - 1)) / HZ_PER_KHZ);
+    // use absolute Hz in 32bit to prevent overflow and simplify math
+    int32_t total_freq_hz = (freq_khz * HZ_PER_KHZ) + bfo_hz;
 
-    f += k;
-    b -= k * HZ_PER_KHZ;
+    freq_khz = total_freq_hz / HZ_PER_KHZ;
+    bfo_hz = total_freq_hz % HZ_PER_KHZ;
 
-    const bool out_of_bounds = (f < band.minimumFreq || f > band.maximumFreq);
-    if (out_of_bounds) {
-        f = (f < band.minimumFreq) ? band.minimumFreq : band.maximumFreq;
-        b = 0;
+    // correct negative modulo to implement floor division
+    if (bfo_hz < 0) {
+        bfo_hz += HZ_PER_KHZ;
+        freq_khz--;
     }
 
-    g_currentFrequency = (uint16_t)f;
-    g_currentBFO = b;
+    // clamp to band edges to keep state valid before the mode switch
+    if (freq_khz < band.minimumFreq || freq_khz > band.maximumFreq) {
+        freq_khz = (freq_khz < band.minimumFreq) ? band.minimumFreq : band.maximumFreq;
+        // reset bfo when clamped to avoid ambiguous state
+        bfo_hz = 0;
+    }
+
+    g_currentFrequency = (uint16_t)freq_khz;
+    g_currentBFO = (int16_t)bfo_hz;
 }
 
 // cache BFO when leaving LSB/USB so fine tune restores on return
