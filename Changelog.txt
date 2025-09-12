@@ -1272,3 +1272,12 @@ This version introduces the ability to save your favorite FM stations.
 
 ------------------------------------------------------------------------------------------------------------
 
+
+### **MOD_NO_RDS v6.7.1**
+
+*   **[Fixed] UI / Font:** Restored the `+` character to the compact font set to ensure correct on-screen display.
+*   **[Optimized] Core Logic Refactoring:**
+    *   Improved the bandwidth control logic (`doBandwidth`).
+    *   Rewrote critical SSB frequency normalization logic (`normalizeSsbBeforeSwitch`) to improve stability when switching modes.
+
+------------------------------------------------------------------------------------------------------------

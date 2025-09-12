@@ -388,38 +388,37 @@ static void doVolume(int8_t v) {
     showVolume();
 }
 
-// handles bandwidth adjustment
-static void doBandwidth(uint8_t v) {
-
+// Handles bandwidth adjustment based on current modulation
+// Each mode has distinct hardware commands and bandwidth tables
+static inline void doBandwidth(uint8_t v) {
     if (g_currentMode == CW) return;
 
     Band& band = g_bandList[g_bandIndex];
 
-    // SSB mode
-    if (isSSB()) {
+    switch (g_currentMode) {
+    case LSB:
+    case USB:
         doSwitchLogic(band.bwIdxSSB, 0, MAX_INDEX(bw_ssb_map), v);
         g_si4735.setSSBAudioBandwidth(g_bwSSBIdx[band.bwIdxSSB]);
         updateSSBCutoffFilter();
+        break;
+
+    case AM:
+        doSwitchLogic(band.bwIdxAM, 0, MAX_INDEX(bw_am_map), v);
+        g_si4735.setBandwidth(g_bwAMIdx[band.bwIdxAM], 1);
+        break;
+
+    case FM:
+        // invert step because FM map is ordered in reverse
+        // this makes knob rotation feel consistent with other modes
+        doSwitchLogic(band.bwIdxFM, 0, MAX_INDEX(bw_fm_map), -v);
+        g_si4735.setFmBandwidth(band.bwIdxFM);
+        break;
+
+        // for any unexpected modes do nothing
+    default: break;
     }
-    // AM and FM modes
-    else {
-        const bool is_am = (g_currentMode == AM);
 
-        // pointer to an int8_t to target the correct index variable
-        // (bwIdxAM or bwIdxFM)
-        int8_t* idx = is_am ? (int8_t*)&band.bwIdxAM : (int8_t*)&band.bwIdxFM;
-        int8_t  max = is_am ? MAX_INDEX(bw_am_map) : MAX_INDEX(bw_fm_map);
-
-        int8_t step = is_am ? v : -v;
-
-        doSwitchLogic(*idx, 0, max, step);
-
-        // сall hardware func
-        if (is_am)
-            g_si4735.setBandwidth(g_bwAMIdx[*idx], 1);
-        else
-            g_si4735.setFmBandwidth(*idx);
-    }
     showBandwidth();
 }
 
