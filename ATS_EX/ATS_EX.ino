@@ -97,7 +97,10 @@ static inline void initModeSettingsDefaults(void) {
 void syncModeDependentSettings(bool load) {
     const uint8_t m = getModeContext();
 
-    if (load && g_modeSettings[MODE_SETTING_AVC][MODE_CONTEXT_AM] == 0)
+    // Correctly check for an uninitialized state
+    // Erased EEPROM is 0xFF which is -1 for int8_t
+    // This distinguishes it from the valid user setting of 0
+    if (load && g_modeSettings[MODE_SETTING_AVC][MODE_CONTEXT_AM] == -1)
         initModeSettingsDefaults();
 
     // Define operation for both loading and saving
@@ -492,14 +495,15 @@ void doSSBAVC(int8_t v) {
 // Higher values give more aggressive leveling making quiet stations louder
 // Maps simple user index (0-10) to non-linear hardware gain value (12-90)
 void doAvc(int8_t v) {
+    if (g_currentMode == FM) return;
+
     doSwitchLogic(g_Settings[AutoVolControl].param, AVC_MIN_INDEX, AVC_MAX_INDEX, v);
 
     persistModeSetting(MODE_SETTING_AVC, AutoVolControl);
 
-    if (g_currentMode != FM) {
-        uint8_t avcValue = getAvcValueFromIndex(g_Settings[AutoVolControl].param);
-        g_si4735.setAvcAmMaxGain(avcValue);
-    }
+    // re-apply value to hardware immediately
+    uint8_t avcValue = getAvcValueFromIndex(g_Settings[AutoVolControl].param);
+    g_si4735.setAvcAmMaxGain(avcValue);
 }
 
 //Settings: Sync switch

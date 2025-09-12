@@ -413,7 +413,7 @@ inline void updateSettingDisplay(uint8_t prev, uint8_t current) {
 
 // Navigate settings with wrap-around
 // update page if changed, else refresh only moved items
-static void navigateSettingsPage(int encoder_delta) {
+static void navigateSettingsPage(int16_t encoder_delta) {
     if (!encoder_delta) return;
 
     uint8_t prev = g_SettingSelected;
@@ -435,19 +435,21 @@ static void navigateSettingsPage(int encoder_delta) {
 
 // Dispatch encoder actions in settings menu
 // rotation navigates list or edits a value
-static inline void processEncoderForSettings(int encoder_delta) {
-    if (!g_SettingEditing) {
-        navigateSettingsPage(encoder_delta);
+static inline void processEncoderForSettings(int16_t encoder_delta) {
+    if (g_SettingEditing) {
+        // user expects inactive settings to be non-editable
+        if (g_Settings[g_SettingSelected].is_active()) {
+            g_Settings[g_SettingSelected].manipulateCallback(encoder_delta);
+            DrawSetting(g_SettingSelected, false);
+        }
     } else {
-        (*g_Settings[g_SettingSelected].manipulateCallback)(encoder_delta);
-        DrawSetting(g_SettingSelected, false);
-        delay(MIN_ELAPSED_TIME);
+        navigateSettingsPage(encoder_delta);
     }
 }
 
 // Dispatch encoder actions on main screen
 // encoder controls whichever command is active
-static inline bool processEncoderForCommands(int encoder_delta) {
+static inline bool processEncoderForCommands(int16_t encoder_delta) {
     switch (g_activeCommand) {
     case CMD_VOLUME:
         doVolume(encoder_delta);
@@ -472,9 +474,29 @@ static inline bool processEncoderForCommands(int encoder_delta) {
         } else {
             doFrequencyTune();
         }
-        return true;
+        return true; // frequency change is a tuning event
+    default: break;
     }
     return false;
+}
+
+// Main orchestrator for all encoder actions
+// Selects handler based on UI context (main vs settings)
+bool processEncoderActions(int16_t encoder_delta) {
+    noteUserActivity();
+
+    bool was_tuning_event = false;
+
+    wakeUpDisplayIfNeeded();
+
+    if (g_settingsActive) {
+        processEncoderForSettings(encoder_delta);
+    } else {
+        was_tuning_event = processEncoderForCommands(encoder_delta);
+    }
+
+    resetEepromDelay();
+    return was_tuning_event;
 }
 
 // ==========================================
@@ -572,25 +594,3 @@ void processButtonEvents() {
     }
 }
 
-// Main orchestrator for encoder actions
-// Decides context and calls the appropriate handler
-bool processEncoderActions(int16_t movement) {
-    if (movement) {
-        noteUserActivity();
-    } else if (g_activeCommand != CMD_NONE || g_settingsActive) {
-        g_lastAdjustmentTime = millis();
-    }
-
-    bool was_tuning_event = false;
-
-    wakeUpDisplayIfNeeded();
-
-    if (g_settingsActive) {
-        processEncoderForSettings(movement);
-    } else {
-        was_tuning_event = processEncoderForCommands(movement);
-    }
-
-    resetEepromDelay();
-    return was_tuning_event;
-}
