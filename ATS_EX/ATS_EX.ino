@@ -1,27 +1,33 @@
 // ----------------------------------------------------------------------
-// ATS_EX (Extended) Firmware for ATS-20 and ATS-20+ receivers.
-// Based on PU2CLR sources.
-// Inspired by closed-source swling.ru firmware.
-// For more information check README file in my github repository:
-// http://github.com/goshante/ats20_ats_ex
+// ATS_EX (Extended) Firmware for ATS-20 and ATS-20+ receivers
+// For more information, see the README at:
+// https://github.com/goshante/ats20_ats_ex
 // ----------------------------------------------------------------------
-// By Goshante
-// 02.2024
-// http://github.com/goshante
-// ----------------------------------------------------------------------
-// MOD_NO_RDS by diqezit
-// More info for this mod you can get below
+//
+// Main development by Goshante
+// https://github.com/goshante
+//
+// MOD_NO_RDS branch by diqezit
 // https://github.com/diqezit/ats20_ats_ex
-// ----------------------------------------------------------------------
-// Si4704/05/06/3x FM Receiver Programming:
-// – Hardware interface control (I2C signal mappings, GPIO functions)
-// – Software command set (register definitions, status reads/writes)
-// – Configuration workflows (tuning, volume, seek, power modes and more..)
-// Ref here https://www.skyworksinc.com/-/media/Skyworks/SL/documents/public/application-notes/AN332.pdf
-// ----------------------------------------------------------------------
-// Using the work of
-// https://github.com/esp32-si4732/ats-mini
-// https://github.com/G8PTN/ATS_MINI
+//
+// --- Acknowledgments & Credits ---
+//
+// This project is built upon the foundational work of:
+// - PU2CLR (https://github.com/pu2clr)
+//
+// Inspired by the work of:
+// - swling.ru (closed-source firmware)
+// - esp32-si4732/ats-mini (https://github.com/esp32-si4732/ats-mini)
+// - G8PTN/ATS_MINI (https://github.com/G8PTN/ATS_MINI)
+//
+// Special thanks for testing, ideas, and contributions to:
+// - d3n3rats
+// - jh4vaj
+//
+// --- Technical Reference ---
+// For in-depth Si473x programming details, see Skyworks AN332:
+// https://www.skyworksinc.com/-/media/Skyworks/SL/documents/public/application-notes/AN332.pdf
+//
 // ----------------------------------------------------------------------
 
 // To resolve the conflict of definitions(wire->microWire),
@@ -687,69 +693,80 @@ void doNavStyle(int8_t v) {
 }
 
 // ==========================================
-// ===== S-METER LOGIC ======================
+// ========== S-METER LOGIC =================
 // ==========================================
 
-// macro to calculate dB value over S9
-// avoids function call overhead for this tiny operation
-#define CALCULATE_S9_PLUS(s_ptr, over_ptr, index, base, limit) \
-    do { \
-        *(s_ptr) = 9; \
-        *(over_ptr) = ((index) < (limit)) ? ((index) - (base)) * 10 : 60; \
-    } while (0)
-
-// tiny tables so linear scan saves flash on avr
-// index selects bucket users see on screen
-static inline uint8_t firstGeIndex(uint8_t rssi, const uint8_t* thr, uint8_t n) {
+// linear scan saves flash on avr for small progmem tables
+// CREAD helper abstracts required pgm_read_byte call
+static uint8_t scanThreshold(
+    uint8_t rssi,
+    const uint8_t* thr,
+    uint8_t len) {
     uint8_t i = 0;
-    while (i < n && rssi > CREAD(thr, i)) ++i;
+    while (i < len && rssi > CREAD(thr, i)) ++i;
     return i;
 }
 
-// users expect classic hf s scale
-// thresholds match ui spec and field reports
-static inline void mapHF(uint8_t rssi, uint8_t* s, uint8_t* over) {
-    uint8_t i = firstGeIndex(rssi, THR_HF, LEN_HF);
-    if (i < 9) {
-        *s = i; *over = 0;
-    } else {
-        CALCULATE_S9_PLUS(s, over, i, 9, LEN_HF);
-    }
-}
-
-// fm needs different low end mapping users read squelch earlier
-// early buckets map to S3 S6 S7 S8 per spec
-static inline void mapFM(uint8_t rssi, uint8_t* s, uint8_t* over) {
-    uint8_t i = firstGeIndex(rssi, THR_FM, LEN_FM);
-    if (i < 4) {
-        *s = CREAD(FM_S4, i); *over = 0;
-    } else if (i < 5) {
-        *s = 9; *over = 0;
-    } else {
-        CALCULATE_S9_PLUS(s, over, i, 4, LEN_FM);
-    }
-}
-
-// ui shows Sx S9 or S9+ per radio convention
-// fixed 3 chars keep columns aligned on small lcd
-// blank on no value avoids stale reading on screen
-// split by mode matches user mental model
-void rssiToSLevel(char* buffer, uint8_t rssi) {
-    if (rssi == UI_SIGNAL_NO_VALUE) {
-        // avoid byte-by-byte clearing
-        *(uint16_t*)buffer = 0x2020;            // "  "
-        *(uint16_t*)(buffer + 2) = 0x0020;      // " \0"
+// map index to S-point based on receiver mode
+// fm uses custom low-end map for better squelch feel
+// hf follows classic S scale for SWL convention
+static inline void mapIdxToSAndPlus(
+    uint8_t idx,
+    uint8_t fm,
+    uint8_t* s,
+    uint8_t* plus) {
+    if (fm) {
+        if (idx < 4) {
+            *s = CREAD(FM_S4, idx);
+            *plus = 0;
+            return;         // fast path for weak fm
+        }
+        *s = 9;
+        *plus = (idx > 4);  // show S9+ only above index 4
         return;
     }
-    uint8_t s = 0, over = 0;
-    if (g_currentMode != FM) mapHF(rssi, &s, &over);
-    else                     mapFM(rssi, &s, &over);
+    if (idx < 9) {
+        *s = idx;
+        *plus = 0;
+        return;
+    }
+    *s = 9;
+    *plus = 1;              // classic S9+
+}
 
-    // each step above S9 means +10dB over reference
-    buffer[0] = 'S';
-    buffer[1] = (s < 9) ? ('0' + s) : '9';
-    buffer[2] = (s < 9 || over == 0) ? ' ' : '+';
-    buffer[3] = '\0';
+// format fixed-width string to keep UI columns aligned
+// ui shows a simple plus indicator not a numeric dB value
+static void formatSMeter(
+    char* buf,
+    uint8_t s,
+    uint8_t plus) {
+    buf[0] = 'S';
+    buf[1] = (s < 9) ? ('0' + s) : '9';
+    buf[2] = plus ? '+' : ' ';
+    buf[3] = '\0';
+}
+
+// orchestrate s-meter display from raw rssi value
+// blanks output on no signal to prevent stale readings
+// splits path for fm/hf to use mode-specific rules
+void rssiToSLevel(
+    char* buffer,
+    uint8_t rssi) {
+    if (rssi == UI_SIGNAL_NO_VALUE) {
+        // write "   \0" in one go
+        *((uint32_t*)buffer) = 0x00202020;
+        return;
+    }
+
+    uint8_t fm = (g_currentMode == FM);
+    const uint8_t* thr = fm ? THR_FM : THR_HF;
+    uint8_t len = fm ? LEN_FM : LEN_HF;
+
+    uint8_t idx = scanThreshold(rssi, thr, len);
+
+    uint8_t s, plus;
+    mapIdxToSAndPlus(idx, fm, &s, &plus);
+    formatSMeter(buffer, s, plus);
 }
 
 // ==========================================

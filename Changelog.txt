@@ -1299,3 +1299,18 @@ This version introduces the ability to save your favorite FM stations.
 
 
 ------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v6.7.3**
+
+`ATS_EX.ino`
+
+*   **[Refactor] S-Meter Subsystem Overhaul:** The core `rssiToSLevel` function was decomposed.
+	Eliminates duplicate code paths for HF and FM modes.
+
+*   **[Optimized] Flash Savings in S-Meter Logic:** Optimized the S-meter by removing the unnecessary calculation of numeric dB values over `S9`
+	Since the UI only ever displays a `+` symbol, this change saves critical Flash memory without altering the on-screen display or S-point thresholds
+	
+	
+	
+------------------------------------------------------------------------------------------------------------
