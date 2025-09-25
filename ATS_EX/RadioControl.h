@@ -1159,6 +1159,7 @@ static void doCWSwitch() {
     );
 
     updateBFO();
+    applyAgcSettings();
     showFrequency(true);
     updateStereoIndicator();
 }

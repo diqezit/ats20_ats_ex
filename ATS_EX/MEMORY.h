@@ -52,6 +52,7 @@ struct __attribute__((packed)) ReceiverHeader {
     uint8_t currentMode;
     int16_t currentBFO;
     uint8_t lastCWMode;
+    uint8_t lastSsbMode;  // save USB/LSB
 };
 
 // Band settings are bit-packed to save EEPROM space
@@ -212,6 +213,7 @@ static void saveAllReceiverInformation(bool full_save = true) {
     header.currentMode = g_currentMode;
     header.currentBFO = g_currentBFO;
     header.lastCWMode = g_lastCWMode;
+    header.lastSsbMode = g_lastSsbMode;
     eeprom_update_block(&header, (void*)EEPROM_HEADER_START, sizeof(header));
 
     saveBands(full_save);
@@ -275,6 +277,7 @@ static void readAllReceiverInformation() {
     g_currentMode = header.currentMode;
     g_currentBFO = header.currentBFO;
     g_lastCWMode = header.lastCWMode;
+    g_lastSsbMode = header.lastSsbMode;
 
     loadBands();
 
