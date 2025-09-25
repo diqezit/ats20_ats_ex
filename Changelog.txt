@@ -1314,3 +1314,23 @@ This version introduces the ability to save your favorite FM stations.
 	
 	
 ------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v6.8**
+
+`Memory.h`, `Defines.h`
+
+*   **[Fixed] SSB Mode Persistence:**
+    *   Fixed issue where USB/LSB selection was not saved to EEPROM and always defaulted to LSB after reboot
+    *   The receiver now correctly remembers whether you were using USB or LSB when switching from AM to SSB
+    *   Added `lastSsbMode` field to EEPROM storage structure to persist the sideband preference across power cycles
+
+`RadioControl.h`
+
+*   **[Fixed] CW Sideband Switch ATT Reset:**
+    *   Fixed issue where switching between LSB/USB in CW mode would reset ATT (attenuation) to AUTO despite correct visual display
+    *   The receiver now correctly applies the saved ATT setting for the new sideband context after CW sideband switch
+    *   Added `applyAgcSettings()` call in `doCWSwitch()` to restore hardware AGC state after re-tuning
+
+------------------------------------------------------------------------------------------------------------
+	

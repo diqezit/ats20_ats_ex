@@ -13,7 +13,7 @@
 // 0             | 1 B      | 1 B      | 0 B     | EEPROM_APP_ID_ADDRESS          | Custom ID to validate data
 // 1             | 1 B      | 1 B      | 0 B     | EEPROM_VERSION_ADDRESS         | Firmware version for compatibility
 //
-// 10 - 25       | 16 B     | 6 B      | 10 B    | EEPROM_HEADER_START            | Global state header
+// 10 - 25       | 16 B     | 7 B      | 9 B     | EEPROM_HEADER_START            | Global state header
 //
 // 26 - 193      | 168 B    | 168 B    | 0 B     | EEPROM_BANDS_START             | 28 bands state (28 * 6)
 //
@@ -35,14 +35,14 @@ constexpr auto EEPROM_VERSION_ADDRESS = 1;
 // A gap is reserved between blocks for future expansion
 //
 // BLOCK SIZES FOR CALCULATION:
-// ReceiverHeader:      6 bytes
+// ReceiverHeader:      7 bytes (volume + bandIndex + currentMode + currentBFO(2) + lastCWMode + lastSsbMode)
 // BandStatePacked:     6 bytes (x28 bands = 168 bytes)
 // Settings:            29 bytes (SETTINGS_MAX = 29 items * 1 byte each)
 // ModeSettings:        9 bytes (MODE_SETTINGS_COUNT * MODE_CONTEXT_COUNT = 3 * 3)
 // FavoriteStation:     5 bytes (x20 stations = 100 bytes)
 // FavoritesCount:      1 byte
 
-constexpr auto EEPROM_HEADER_START = 10;                // Size: 6   End: 15
+constexpr auto EEPROM_HEADER_START = 10;                // Size: 7   End: 16
 constexpr auto EEPROM_BANDS_START = 26;                 // Size: 168 End: 193
 constexpr auto EEPROM_SETTINGS_START = 204;             // Size: 29  End: 232
 constexpr auto EEPROM_MODE_SETTINGS_START = 243;        // Size: 9,  End: 251
@@ -50,10 +50,10 @@ constexpr auto EEPROM_FAVORITES_START = 261;            // Size: 100 End: 360
 constexpr auto EEPROM_FAVORITES_COUNT = 370;            // Size: 1   End: 370
 
 // Increment APP_VERSION to force EEPROM reset due to layout changes
-constexpr auto APP_VERSION = 67;
+constexpr auto APP_VERSION = 68;
 
 // Centralizes user-facing strings on main screen
-#define APP_NAME_LINE1 F("ATS-20+ V6.7.3")
+#define APP_NAME_LINE1 F("ATS-20+ V6.8")
 
 // Behavior
 constexpr auto SAVE_ON_IDLE_TIMEOUT = 15000UL;          // 15 seconds
