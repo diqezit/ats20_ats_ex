@@ -143,7 +143,7 @@ public:
         y0 = constrain(y0, 0, _maxRow);
         y1 = constrain(y1, 0, _maxRow);
         x0 = constrain(x0, 0, _maxX);
-        x1 = constrain(x1, 0, _maxX);
+        x1 = constrain(x1, 0, OLED_WIDTH);
         setWindow(x0, y0, x1, y1);
         beginData();
         for (int x = x0; x < x1; x++)

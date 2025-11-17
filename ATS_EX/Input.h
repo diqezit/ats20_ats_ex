@@ -29,15 +29,14 @@ static constexpr uint16_t BAND_LP_REPEAT_MS = 240;
 // ==========================================
 
 // Handle encoder rotation in interrupt
-// any turn cancels active seek for instant user control
+// No manual interrupts() call prevents Stack Overflow from nested ISRs during fast rotation
+// g_seekStop set on ANY change gives instant response, stopping seek even on contact bounce
 static void rotaryEncoder() {
     uint8_t encoderStatus = g_encoder.process();
-    if (!encoderStatus) return;
-
-    noInterrupts();
-    g_encoderCount += (encoderStatus == DIR_CW) ? 1 : -1;
     g_seekStop = true;
-    interrupts();
+    if (encoderStatus) {
+        g_encoderCount += (encoderStatus == DIR_CW) ? 1 : -1;
+    }
 }
 
 // Safely read encoder counts from interrupt and filter rapid turns into a single action
