@@ -77,7 +77,7 @@ static inline bool checkStopSeeking() {
 // Convert fixed-Hz window to 16-bit AFC register (clamped 1..0xFFFF)
 // add half-window for rounding so user windows map predictably
 static uint16_t swAfcRegFromHzK(uint32_t fk1000, uint16_t winHz) {
-    if (!winHz) return 1;
+    if (!winHz) return AM_AFC_SW_PULL_IN_RANGE_VAL;
     uint32_t v = (fk1000 + (winHz / 2)) / winHz;
     return (v > 0xFFFF) ? 0xFFFF : (uint16_t)v;
 }
@@ -104,21 +104,26 @@ static void applySwAfcProfileHz(uint16_t pullHz, uint16_t lockHz) {
 }
 
 // Entry: 0=OFF, 1=PPM, 2=Hz Normal, 3=Hz Aggressive
-// enable only on SW in AM so broadcast bands can auto-center without touching SSB/CW
+// Force default on non-SW bands to prevent state leakage; merge OFF/PPM to ensure chip reset
 static void applySwAfc() {
-    if (g_bandList[g_bandIndex].bandType != SW_BAND_TYPE || g_currentMode != AM) return;
+    if (g_currentMode != AM) return;
 
-    switch (g_Settings[SWAFC].param) {
-    case SW_AFC_PROFILE_PPM:
-        applySwAfcProfilePpm();
-        break;
+    uint8_t target = (g_bandList[g_bandIndex].bandType == SW_BAND_TYPE)
+        ? g_Settings[SWAFC].param
+        : SW_AFC_PROFILE_PPM;
+
+    switch (target) {
     case SW_AFC_PROFILE_HZ_NORMAL:
         applySwAfcProfileHz(SW_AFC_PULL_HZ_NORMAL, SW_AFC_LOCK_HZ_NORMAL);
         break;
+
     case SW_AFC_PROFILE_HZ_AGGR:
         applySwAfcProfileHz(SW_AFC_PULL_HZ_AGGR, SW_AFC_LOCK_HZ_AGGR);
         break;
-    default: break; // OFF
+
+    default: // Covers OFF (0) and PPM (1)
+        applySwAfcProfilePpm();
+        break;
     }
 }
 
@@ -228,6 +233,7 @@ static void updateSSBCutoffFilter() {
 // apply mute only on AM when RSSI drops below user threshold to hide weak noise
 static inline __attribute__((always_inline)) bool squelchShouldCut() {
     uint8_t lvl = g_Settings[SQL].param;
+    if (g_signalQualityValue == INVALID_RSSI_VALUE) return false;
     return (lvl && g_currentMode == AM && g_signalQualityValue < lvl);
 }
 
@@ -484,9 +490,12 @@ static void configureAMMode(uint16_t minFreq, uint16_t maxFreq) {
     g_si4735.setProperty(AM_SOFT_MUTE_SLOPE_PROP, AM_SOFT_MUTE_SLOPE_RECOMMENDED);
     applySoftMuteSettings(modeCtx);
 
-    // AGC settings first to stabilize audio level
-    int8_t att_val = g_modeSettings[MODE_SETTING_AGC][modeCtx];
-    setAgcHardware(att_val);
+
+    // AGC will be applied after full configuration via applyAgcSettings()
+
+    //// AGC settings first to stabilize audio level
+    //int8_t att_val = g_modeSettings[MODE_SETTING_AGC][modeCtx];
+    //setAgcHardware(att_val);
 }
 
 // Centralizes setup for properties shared between AM and SSB to avoid duplication
@@ -759,7 +768,7 @@ static inline uint16_t executeHardwareSeek() {
 
 // map found SW frequency to owning sub-band so limits, step and labels stay correct
 static inline void swMapSeekToBand(uint16_t f) {
-    for (uint8_t i = 2; i <= g_lastBand; ++i) {
+    for (uint8_t i = 2; i < g_lastBand; ++i) {
         const Band* current_band_ptr = &g_bandList[i];
         if (f >= current_band_ptr->minimumFreq &&
             f <= current_band_ptr->maximumFreq) {
@@ -907,9 +916,8 @@ static void doFrequencyTune() {
 
     // 32-bit integer is needed here for calculations to prevent underflow
     // on band edges
-    int32_t temp_freq = g_currentFrequency
-        + (int16_t)step
-        * encoder_delta;
+    int32_t temp_freq = (int32_t)g_currentFrequency
+        + (int32_t)step * (int32_t)encoder_delta;
 
     // > for the upper bound to include the maximum frequency value within the band
     bool needs_switch =
@@ -946,15 +954,6 @@ static void doFrequencyTune() {
 // centralize step pick so BFO delta follows user SSB step setting
 static inline int32_t ssbStepHz() {
     return (int32_t)g_tabStep[SSB_STEP_OFFSET + g_bandList[g_bandIndex].stepIdxSSB];
-}
-
-// after rollover guard against landing on FM band by accident
-// FM has no BFO so reset SSB state to sane defaults
-static inline void ssbGuardFmAfterRollover() {
-    if (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE) {
-        g_currentFrequency = g_bandList[g_bandIndex].currentFreq;
-        g_currentBFO = 0;
-    }
 }
 
 // update chip only if base kHz changed to avoid unnecessary I2C traffic
@@ -1012,15 +1011,15 @@ static void doFrequencyTuneSSB() {
     int32_t temp_bfo;
     uint16_t old_freq = g_currentFrequency;
 
-    if (ssbTunePrepare(temp_freq, temp_bfo)) {
-        ssbRolloverAndUpdate(temp_freq, temp_bfo, old_freq);
+    if (!ssbTunePrepare(temp_freq, temp_bfo)) return;
+    ssbRolloverAndUpdate(temp_freq, temp_bfo, old_freq);
 
-        // post-rollover sanity check
-        // its fixes invalid SSB to FM state transition (e.g 30000.00 to 1.45MHz etc.)
-        ssbGuardFmAfterRollover();
-
-        ssbTuneFinalize();
+    if (g_currentMode == FM) {
+        loadActiveStateFromBand();
+        return;
     }
+
+    ssbTuneFinalize();
 }
 
 // =-=-=-=-=-=-=-=-= Mode switch helpers =-=-=-=-=-=-=-=-=

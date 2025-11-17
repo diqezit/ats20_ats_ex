@@ -64,10 +64,11 @@ GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 // avoids ISR races and returns consumed delta in one shot
 inline int16_t getAndResetEncoderCount(volatile int16_t& counter) {
     int16_t value;
+    uint8_t oldSREG = SREG;
     cli();
     value = counter;
     counter -= value;
-    sei();
+    SREG = oldSREG;
     return value;
 }
 

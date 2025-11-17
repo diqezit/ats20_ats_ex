@@ -53,7 +53,7 @@ constexpr auto EEPROM_FAVORITES_COUNT = 370;            // Size: 1   End: 370
 constexpr auto APP_VERSION = 68;
 
 // Centralizes user-facing strings on main screen
-#define APP_NAME_LINE1 F("ATS-20+ V6.8")
+#define APP_NAME_LINE1 F("ATS-20+ V6.8.1")
 
 // Behavior
 constexpr auto SAVE_ON_IDLE_TIMEOUT = 15000UL;          // 15 seconds
@@ -115,7 +115,6 @@ constexpr auto MIN_SETFREQ_INTERVAL_MS = 25UL;
 #define ENABLE_FAVORITES 1                  // Set to 1 to use unified favorites, 0 to disable
 #define DISABLE_FM 0                        // not implemented yet
 
-#define ENABLE_ADVANCED_BATTERY_LOGIC 1     // Set to 1 to enable advanced battery logic, 0 to disable
 #define ENABLE_BATTERY_MONITOR 1            // Set to 1 to enable battery monitoring, 0 to disable
 
 // Debugging options - only for test purposes & port monotoring - see Utils.h

@@ -1333,4 +1333,43 @@ This version introduces the ability to save your favorite FM stations.
     *   Added `applyAgcSettings()` call in `doCWSwitch()` to restore hardware AGC state after re-tuning
 
 ------------------------------------------------------------------------------------------------------------
-	
+
+
+### **MOD_NO_RDS v6.8.1**
+
+`RadioControl.h`
+
+* **[Fixed] SSB to FM rollover stability (Critical):**
+  * Added safety check in `doFrequencyTuneSSB()` to prevent invalid BFO commands when switching to FM
+  * Enforced active state reload to fix frequency discontinuities ("phantom frequency") immediately after band switching
+  * Removed redundant `ssbGuardFmAfterRollover` logic to save flash memory
+
+* **[Fixed] SW AFC logic & state leakage:**
+  * Fixed "OFF" setting to properly reset hardware registers instead of doing nothing
+  * Forced default profile on non-SW bands to prevent aggressive AFC settings from persisting when switching to MW/LW
+  * Fixed safety check in `swAfcRegFromHzK` to return safe defaults instead of maximum window on error
+
+* **[Fixed] AM AGC duplication:**
+  * Removed redundant AGC apply inside `configureAMMode()`
+
+* **[Fixed] Encoder tuning overflow:**
+  * Updated `doFrequencyTune()` to use full 32-bit arithmetic for frequency accumulator
+
+`Input.h`
+
+* **[Optimized] Encoder ISR stability:**
+  * Removed unsafe `interrupts()` calls inside ISR to prevent Stack Overflow during fast rotation
+  * Improved seek cancellation responsiveness by detecting any pin change instead of waiting for a full step
+
+`GyverOLED.h`
+
+* **[Fixed] Screen clearing boundary:**
+  * Fixed off-by-one error in `clear()` function that prevented the last pixel column (127) from being erased
+
+`Battery.h`
+
+* **[Fixed] Battery indicator instability:**
+  * Increased filter suppression (1/16) and removed instant jump to eliminate reading jitter during OLED activity
+  
+------------------------------------------------------------------------------------------------------------
+

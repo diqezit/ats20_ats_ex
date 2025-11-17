@@ -77,7 +77,7 @@ static inline uint8_t calculateRawPercent(uint16_t adc_value) {
     return 0 + ((uint16_t)(adc_value - BATT_ADC_EMPTY) * PCT_DELTA_FINAL_DROP) / ADC_DELTA_FINAL_DROP;
 }
 
-#if ENABLE_ADVANCED_BATTERY_LOGIC
+// Persistent state variables for the filter
 static uint8_t g_percentChangeCounter = 0;
 static int16_t g_averageADC = -1;
 
@@ -85,36 +85,34 @@ static inline void applyPercentUpdate(uint8_t newPercent) {
     g_stableBatteryPercent = newPercent;
     g_percentChangeCounter = 0;
 }
-#endif
 
-// Update internal stable battery percentage
+// Update internal stable battery percentage with noise suppression
+// Immediate Init to prevent 0% or 100 glitches on startup
+// Low-Pass Filter (1/16) ssmooth voltage dips caused by OLED activity
+// Strict Hysteresis requires 10 stable samples to update UI (no menu jitter)
 static inline void updateStablePercent() {
     if (!g_voltagePinConnnected) return;
 
     int sample = analogRead(getBatteryPin());
 
-    if (sample <= 0) sample = BATT_ADC_EMPTY; // if disconnected
+    if (sample <= 0) sample = BATT_ADC_EMPTY;
 
-#if ENABLE_ADVANCED_BATTERY_LOGIC
-    if (g_averageADC == -1) g_averageADC = sample;
+    if (g_averageADC == -1) {
+        g_averageADC = sample;
+        applyPercentUpdate(calculateRawPercent(sample));
+        return;
+    }
 
-    // filter to prevent the displayed percentage from jumping around
-    g_averageADC = (7 * g_averageADC + sample) >> 3;
+    g_averageADC = (15 * g_averageADC + sample) >> 4;
 
     uint8_t currentRawPercent = calculateRawPercent(g_averageADC);
     int8_t diff = currentRawPercent - g_stableBatteryPercent;
 
-    // hysteresis to prevent flickering and handle normal discharge
     if (diff == 0) {
         g_percentChangeCounter = 0;
-    } else if (diff > 2 || diff < -2) {
-        applyPercentUpdate(currentRawPercent);
-    } else if (++g_percentChangeCounter >= 5) {
+    } else if (++g_percentChangeCounter >= 10) {
         applyPercentUpdate(currentRawPercent);
     }
-#else
-    g_stableBatteryPercent = calculateRawPercent(sample);
-#endif
 }
 
 // Public interface for the battery monitoring subsystem. Updates the internal
