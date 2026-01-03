@@ -33,7 +33,7 @@ static bool g_eepromBad = false;
 // Notify user that settings have been reset to defaults
 static void drawEepromResetMsg() {
     oled.clear();
-    oled.setCursor(40, 2);
+    oled.setCursor(28, 2);
     oled.print(g_eepromBad
         ? F("EEPROM WEAR")
         : F("EEPROM RESET"));

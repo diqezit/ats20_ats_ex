@@ -50,10 +50,10 @@ constexpr auto EEPROM_FAVORITES_START = 261;            // Size: 100 End: 360
 constexpr auto EEPROM_FAVORITES_COUNT = 370;            // Size: 1   End: 370
 
 // Increment APP_VERSION to force EEPROM reset due to layout changes
-constexpr auto APP_VERSION = 68;
+constexpr auto APP_VERSION = 69;
 
 // Centralizes user-facing strings on main screen
-#define APP_NAME_LINE1 F("ATS-20+ V6.8.1")
+#define APP_NAME_LINE1 F("ATS-20+ V6.9")
 
 // Behavior
 constexpr auto SAVE_ON_IDLE_TIMEOUT = 15000UL;          // 15 seconds

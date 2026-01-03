@@ -56,6 +56,8 @@ GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 #include "CW_decoder.h"
 #include "RadioControl.h"
 
+#include <util/atomic.h>
+
 // ==========================================
 // ===== CORE UTILITIES & STATE SYNC ========
 // ==========================================
@@ -84,9 +86,9 @@ static inline void noteUserActivity() {
 // Called once after an EEPROM reset to populate all contexts in RAM
 static inline void initModeSettingsDefaults(void) {
     for (uint8_t i = 0; i < MODE_CONTEXT_COUNT; i++) {
-        g_modeSettings[MODE_SETTING_AGC][i] = defaultModeSettings[i].agc;
-        g_modeSettings[MODE_SETTING_SOFT_MUTE][i] = defaultModeSettings[i].soft_mute;
-        g_modeSettings[MODE_SETTING_AVC][i] = defaultModeSettings[i].avc;
+        g_modeSettings[MODE_SETTING_AGC][i] = DEFAULT_MODE_SETTINGS.agc;
+        g_modeSettings[MODE_SETTING_SOFT_MUTE][i] = DEFAULT_MODE_SETTINGS.soft_mute;
+        g_modeSettings[MODE_SETTING_AVC][i] = DEFAULT_MODE_SETTINGS.avc;
     }
 }
 
@@ -125,10 +127,11 @@ void syncModeDependentSettings(bool load) {
 // Settings: CPU Frequency divider helper
 // touch prescaler atomically as required by AVR
 static void setCpuPrescaler(uint8_t prescaler) {
-    noInterrupts();
-    CLKPR = 0x80;
+    uint8_t oldSREG = SREG;
+    cli();
+    CLKPR = 0x80;        // CLKPCE
     CLKPR = prescaler;
-    interrupts();
+    SREG = oldSREG;
 }
 
 // ==========================================
@@ -342,7 +345,7 @@ void doStep(int8_t v) {
     case FM:
         // cast address of unsigned index to a signed pointer
         // tricks the type system allowing unified processing in doSwitchLogic
-        idx = (int8_t*)&band.stepIdxFM;
+        idx = &band.stepIdxFM;
         max = g_lastStepFM;
         table = (const int16_t*)g_tabStepFM;
         break;
@@ -350,7 +353,7 @@ void doStep(int8_t v) {
     case LSB:
     case USB:
     case CW: // CW shares the same step settings as SSB
-        idx = (int8_t*)&band.stepIdxSSB;
+        idx = &band.stepIdxSSB;
         max = SSB_STEPS_COUNT - 1;
         // for SSB/CW step is not sent to IC step register,
         // as tuning is done via BFO adjustments
@@ -358,7 +361,7 @@ void doStep(int8_t v) {
         break;
 
     default: // AM
-        idx = (int8_t*)&band.stepIdxAM;
+        idx = &band.stepIdxAM;
         max = IS_LW_MW(band.bandType) ? 3 : (AM_STEPS_COUNT - 1);
         table = (const int16_t*)g_tabStep;
         break;
@@ -368,8 +371,8 @@ void doStep(int8_t v) {
     // that can be correctly passed by reference to doSwitchLogic
     doSwitchLogic(*idx, 0, max, v);
 
-    // if step table was assigned (i.e., not for SSB/CW) update IC
-    if (table) g_si4735.setFrequencyStep((uint16_t)table[*idx]);
+    // frequency step to the SI4735 only in AM/FM modes (SSB/CW use BFO, no hardware step)
+    if (table) g_si4735.setFrequencyStep((uint16_t)table[(uint8_t)(*idx)]);
 
     showStep();
 }
@@ -827,9 +830,9 @@ bool applySafeEncoderDeltaAndTune() {
     int16_t safe = getAndResetEncoderCount(g_safeEncoderMovement);
     if (!safe) return false;
 
-    noInterrupts();
-    g_encoderCount += safe;
-    interrupts();
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+        g_encoderCount += safe;
+    }
 
     doFrequencyTune();
     return true;
@@ -837,6 +840,7 @@ bool applySafeEncoderDeltaAndTune() {
 
 // Handles the delayed frequency update for AM/FM to prevent flooding the chip
 static void handleDelayedFrequencyUpdate() {
+    if (autoDisplayOff) return;              // only ddep sleep mode
     if (!g_processFreqChange || isSSB()) return;
 
     if (applySafeEncoderDeltaAndTune()) return;
@@ -855,21 +859,23 @@ bool amRssiPollingAllowed(uint32_t now_ms) {
 }
 
 // Fetches signal quality (RSSI) using mode-specific commands
-// SSB/CW is unsupported by this patch query method
+// SSB/CW poll RSQ (0x43) and return RSSI (RESP4) after SSB patch is loaded
 static uint8_t getSignalQuality() {
     switch (g_currentMode) {
-    case FM:
-        g_si4735.getCurrentReceivedSignalQuality(1);
-        return g_si4735.getCurrentRSSI();
-
     case AM:
-        if (!amRssiPollingAllowed(millis())) return g_signalQualityValue;
-        // soft update prevents audio clicks
+        if (!amRssiPollingAllowed(millis()))
+            return g_signalQualityValue;
+
+        // click-free RSSI update (no RSQ poll to avoid audio artifacts)
         g_si4735.softAmRssiUpdate();
         return g_si4735.getReceivedSignalStrengthIndicator();
 
-    case LSB: case USB: case CW:
-    default: return INVALID_RSSI_VALUE;
+    case FM: case LSB: case USB: case CW:
+        g_si4735.getCurrentReceivedSignalQuality(1);
+        return g_si4735.getCurrentRSSI();
+
+    default:
+        return UI_SIGNAL_NO_VALUE;
     }
 }
 
@@ -1006,12 +1012,14 @@ static inline void checkDisplayTimeout() {
 
 // for all time-based tasks
 static void handlePeriodicTasks() {
-    handleSignalAndStereoUpdates();
+    if (g_displayOn) {
+        handleSignalAndStereoUpdates();
+#if ENABLE_BATTERY_MONITOR
+        updateAndShowBattery(false);
+#endif
+    }
     handleCommandTimeout();
     handleSettingsSave();
-#if ENABLE_BATTERY_MONITOR
-    updateAndShowBattery(false);
-#endif
 }
 
 // ==========================================
@@ -1027,7 +1035,7 @@ static inline void initHardwarePins() {
     PORTD |= (1 << ENCODER_PIN_A) | (1 << ENCODER_PIN_B);
 
     // get the correct pin for the initial connection check (lf in Battery.h)
-    g_voltagePinConnnected = (uint16_t)analogRead(getBatteryPin()) > ADC_CONNECTED_THRESHOLD;
+    g_voltagePinConnected = (uint16_t)analogRead(getBatteryPin()) > ADC_CONNECTED_THRESHOLD;
 }
 
 // Helper to initialize OLED display
@@ -1035,7 +1043,6 @@ static inline void initOLED() {
     oled.init();
     oled.clear();
     oled.setPower(true);
-    oled.setScale(1);
 }
 
 // Helper to handle EEPROM reset on button press

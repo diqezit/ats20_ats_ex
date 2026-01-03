@@ -37,10 +37,10 @@ static constexpr uint8_t  UI_FREQ_X_OFFSET_SSB_PX = 3;      // left offset SSB
 static constexpr uint8_t  UI_FREQ_X_OFFSET_AMFM_PX = 12;    // left offset AM/FM
 static constexpr uint8_t  UI_FREQ_MAIN_WIDTH_AMFM = 5;      // convertToChar width in AM/FM
 static constexpr uint8_t  UI_FREQ_BUF_LEN = 7;              // frequency display buffer
-static constexpr uint16_t UI_SSB_TAIL_WIDTH =
-(uint16_t)DIGIT_SPACING + SEVEN_SEG_DOT_WIDTH +
-(uint16_t)DIGIT_SPACING + SEVEN_SEG_DIGIT_WIDTH +
-(uint16_t)DIGIT_SPACING + SEVEN_SEG_DIGIT_WIDTH;            // ".dd" tail width
+static constexpr uint16_t UI_SSB_TAIL_WIDTH = 1 +
+    SEVEN_SEG_DOT_WIDTH + DIGIT_SPACING +
+    SEVEN_SEG_DIGIT_WIDTH + DIGIT_SPACING +
+    SEVEN_SEG_DIGIT_WIDTH;                                  // ".dd" tail width
 
 // Units label
 static constexpr uint8_t  UI_UNIT_X_PX = 109;
@@ -49,7 +49,7 @@ static constexpr uint8_t  UI_UNIT_ROW = 4;
 // Splash
 static constexpr uint8_t  UI_SPLASH_LINE1_X = 26;
 static constexpr uint8_t  UI_SPLASH_LINE1_ROW = 1;
-static constexpr uint8_t  UI_SPLASH_LINE2_X = 32;
+static constexpr uint8_t  UI_SPLASH_LINE2_X = 34;
 static constexpr uint8_t  UI_SPLASH_LINE2_ROW = 3;
 static constexpr uint8_t  UI_SPLASH_ANIM_ROW = 6;
 static constexpr uint8_t  UI_SPLASH_ANIM_STEPS = 21;
@@ -309,6 +309,8 @@ static void showVolume() {
 // show Soft Mute hint when DSP attenuates weak signals
 // explains faint audio without user guessing
 static void showRfHints() {
+    if (isSSB()) return;
+
     const uint8_t x = UI_VOLUME_X;
     const uint8_t row = UI_VOLUME_ROW + 2;
     if (row > 7) return;
@@ -316,7 +318,7 @@ static void showRfHints() {
     clearBox(x, (uint8_t)(row * UI_CHAR_H),
         (uint8_t)(2 * UI_CHAR_W), UI_CHAR_H);
 
-    if ((!isSSB()) && g_si4735.getCurrentSoftMuteIndicator()) {
+    if (g_si4735.getCurrentSoftMuteIndicator()) {
         oled.setCursor(x, row);
         oled.print(F("SM"));
     }
@@ -469,13 +471,8 @@ static inline uint16_t freqMainWidth(uint16_t khzBFO,
 
 // draw SSB tail ".dd" next to main block
 // keep spacing identical to main digits
-static int drawSSBTailDigits(int startX,
-    int pixelY,
-    uint16_t tailBFO) {
-    int curX = startX;
-
-    // center the dot between main and tail blocks
-    curX += DIGIT_SPACING;
+static int drawSSBTailDigits(int startX, int pixelY, uint16_t tailBFO) {
+    int curX = startX + 1;
 
     oled.drawDigit('.', curX, pixelY);
     curX += SEVEN_SEG_DOT_WIDTH + DIGIT_SPACING;

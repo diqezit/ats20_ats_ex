@@ -91,7 +91,7 @@ static inline void applyPercentUpdate(uint8_t newPercent) {
 // Low-Pass Filter (1/16) ssmooth voltage dips caused by OLED activity
 // Strict Hysteresis requires 10 stable samples to update UI (no menu jitter)
 static inline void updateStablePercent() {
-    if (!g_voltagePinConnnected) return;
+    if (!g_voltagePinConnected) return;
 
     int sample = analogRead(getBatteryPin());
 
@@ -118,7 +118,7 @@ static inline void updateStablePercent() {
 // Public interface for the battery monitoring subsystem. Updates the internal
 // state and shows it on the display if the timer has elapsed or if forced.
 void updateAndShowBattery(bool forceShow) {
-    if (!g_voltagePinConnnected) return;
+    if (!g_voltagePinConnected) return;
     updateStablePercent();
     static uint32_t lastChargeShow = 0;
     if ((millis() - lastChargeShow) > BATT_DISPLAY_UPDATE_INTERVAL_MS || forceShow) {

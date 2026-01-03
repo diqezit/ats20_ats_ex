@@ -97,14 +97,17 @@ static uint8_t volumeEvent(uint8_t event, uint8_t pin) {
 // Disable long press for most buttons
 // treat as short press to simplify user interaction
 static uint8_t simpleEvent(uint8_t event, uint8_t pin) {
-    if (pin != MODE_SWITCH
-        && pin != STEP_BUTTON
-        && pin != AGC_BUTTON
-        && pin != BANDWIDTH_BUTTON
-        && event == BUTTONEVENT_FIRSTLONGPRESS) {
-        return BUTTONEVENT_SHORTPRESS;
+    if (event != BUTTONEVENT_FIRSTLONGPRESS) return event;
+
+    switch (pin) {
+    case MODE_SWITCH:
+    case STEP_BUTTON:
+    case AGC_BUTTON:
+    case BANDWIDTH_BUTTON:
+        return event;                  // long press allowed
+    default:
+        return BUTTONEVENT_SHORTPRESS; // long press disabled
     }
-    return event;
 }
 
 // Allow continuous band cycling on long press only if a delay is configured
@@ -225,11 +228,11 @@ static void handleEncoderShortPress() {
         g_SettingEditing = !g_SettingEditing;
         DrawSetting(g_SettingSelected, true);
         noteUserActivity();
-        return;
+        return; 
     }
 
     (isSSB() || !g_Settings[ScanSwitch].param) ? switchCommand(CMD_STEP) : doSeek();
-}
+    }
 
 // BAND+ short press: in settings → next page; on main → switch to band command
 static void handleBandUpShortPress() {
@@ -253,15 +256,21 @@ static void handleBandDownShortPress() {
 // saves current volume for seamless restore
 static void handleVolumeDownShortPress() {
     RETURN_IF_SETTINGS_ACTIVE();
-    if (g_activeCommand != CMD_VOLUME) {
-        uint8_t vol = g_si4735.getCurrentVolume();
-        if (vol && !g_muteVolume) {
-            g_muteVolume = vol;
-            g_si4735.setVolume(0);
-        } else if (g_muteVolume) {
-            g_si4735.setVolume(g_muteVolume);
-            g_muteVolume = 0;
-        }
+    if (g_activeCommand == CMD_VOLUME) return;
+
+    // if currently muted (we have stored previous volume) restore it
+    if (g_muteVolume) {
+        g_si4735.setVolume(g_muteVolume);
+        g_muteVolume = 0;
+        showVolume();
+        return;
+    }
+
+    // if not muted - read current volume once and mute only if it non-zero
+    uint8_t vol = g_si4735.getCurrentVolume();
+    if (vol) {
+        g_muteVolume = vol;
+        g_si4735.setVolume(0);
         showVolume();
     }
 }
@@ -314,11 +323,23 @@ static void handleBandwidthLongDone() {
 #endif
         ) return;
 
-    if (g_currentMode == LSB || g_currentMode == USB) {
-        g_currentMode = (g_currentMode == LSB) ? USB : LSB;
+    switch (g_currentMode) {
+    case LSB:
+        g_currentMode = USB;
         applyBandConfiguration();
-    } else if (g_currentMode == CW) {
+        break;
+
+    case USB:
+        g_currentMode = LSB;
+        applyBandConfiguration();
+        break;
+
+    case CW:
         doCWSwitch();
+        break;
+
+    default:
+        break;
     }
 }
 
