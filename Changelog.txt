@@ -1373,3 +1373,64 @@ This version introduces the ability to save your favorite FM stations.
   
 ------------------------------------------------------------------------------------------------------------
 
+
+### **MOD_NO_RDS v6.9**
+
+`ATS_EX.ino`, `Defines.h`, `Input.h`, `Globals.h`, `RadioControl.h`, `SI4735_fixed.h`, `SSD1306_OLED.h`
+
+* **[Improved] Band Map Rework (Seamless Coverage, 32 bands):**
+  * Expanded band table from 28 to 32 entries with continuous LW/MW/SW coverage
+  * Added dedicated HAM sub-bands: **60m amateur (60H)**, **30m**, **20m**
+  * Fine-grained SW segmentation removes gaps and makes band switching more predictable
+
+* **[Fixed] Band Defaults Safety:**
+  * Corrected out-of-range `current_freq` defaults for SW bands to ensure the stored last frequency always starts within `[min_freq..max_freq]`
+  * Prevents edge-case tuning glitches when entering a band whose saved/default frequency was outside its limits
+
+* **[Refactor] Input Handling Cleanup:**
+  * Reworked `simpleEvent()` long-press filtering into `switch(pin)` whitelist (only selected buttons keep long-press / others downgrade to short press)
+  * Minor structural cleanup in several button handlers to reduce nesting and make behavior easier to audit
+
+* **[Improved] Volume/Mute UX:**
+  * Optimized the Volume-Down short press handler to restore mute state without unnecessary chip volume reads
+  * Reduced redundant I2C interactions in the mute/unmute path, keeping UI response snappy
+
+* **[Optimized] Flash Footprint Micro-Savings (Critical 32KB Fit):**
+  * Applied small guard clause refactors (early returns) and simplified mode-branching where it reduced generated code
+  * Changed several `const` globals to `static constexpr` to eliminate unnecessary data storage
+  * Minor reductions in button handler logic helped recover a few dozen bytes of Flash headroom in tight builds
+
+* **[Improved] Display-Off / Activity Behavior:**
+  * Ensured display wake path correctly marks user activity when the screen was turned off by timeout, keeping menu timeouts and auto-sleep behavior consistent
+
+* **[Optimized] Safe Stop-Seeking Callback:**
+  * Refactored `checkStopSeeking()` critical section to preserve/restore `SREG` instead of calling `interrupts()` unconditionally
+  * Prevents rare edge cases where the seek callback could accidentally re-enable interrupts from a nested/atomic context while seek is running
+
+* **[Fixed] RSSI Polling in SSB/CW Modes:**
+  * Enabled RSSI updates for LSB/USB/CW by polling RSQ (0x43) via the library path in `getSignalQuality()`
+  * Prevented the `RSSI always 0 / invalid` behavior in SSB/CW when RSSI display is enabled in Settings
+
+* **[Optimized] SSD1306_OLED.h Display Driver v1.8:**
+  * Removed unused `setScale()` function and `_scaleX`, `_scaleY`, `_maxY` variables
+  * Replaced `constrain()` calls with inline `OLED_CLAMP` macro to reduce function call overhead
+  * Unified `beginData()`, `beginCommand()`, `beginOneCommand()` via single `beginTransmMode()` helper
+  * Replaced manual buffer clear loop with `memset()` in `prepareLocalBuffer()`
+  * Optimized `clear(x,y,x1,y1)` to use single `while` loop instead of nested `for` loops
+  * Simplified `getFont()` return logic with ternary operator
+
+* **[Fixed] UI + Globals correctness:**
+  * `g_voltagePinConnnected` → `g_voltagePinConnected`
+  * `g_savedSsbBfo[28]` → `g_savedSsbBfo[g_bandCount]`
+  * `g_bandCount` updated to **32**
+  * Small fixes in UI
+
+* **[Improved] Stable boot state:**
+  * Explicit initialization of key runtime globals (flags/timers/counters) to avoid random power-up state
+
+* **[Refactor] Defaults cleanup (no logic/EEPROM changes):**
+  * `BD`/`BM` macros for repeated band defaults + `#undef BD/#undef BM`
+  * Consolidated identical `defaultModeSettings[]` into a single `DEFAULT_MODE_SETTINGS`; `initModeSettingsDefaults()` uses it (EEPROM format and sync logic unchanged)
+  
+------------------------------------------------------------------------------------------------------------
+

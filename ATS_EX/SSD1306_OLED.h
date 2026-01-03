@@ -10,7 +10,7 @@
     (!) Minimal features for only main functionality with ATS_EX receiver
 
     Manual generation of segments 14x32 resolution (7-segment display) use SSD1306 minimal library
-    By diqezit v1.7
+    By diqezit v1.8
     Charset: '.', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
 
     My repos: https://github.com/diqezit/TestDisplay
@@ -26,8 +26,10 @@
     - Display controls: flipH, flipV, invertDisplay
     - Partial clear with arguments (kept only full clear and custom partial)
     - Dynamic buffer and related flags
-    - Unused variables: _mode, _lastChar, _println, _getn, etc.
+    - Unused variables: _mode, _lastChar, _println, _getn, _scaleX, _scaleY, _maxY, etc.
     - Simplified write: only scale=1, ASCII, no shifts or modes
+    - Removed setScale() function (unused)
+    - Removed delayMicroseconds(2) from endTransm() (I2C 35kHz is slow enough)
 
 */
 
@@ -79,6 +81,8 @@ constexpr uint8_t SEVEN_SEG_DOT_WIDTH = 4;
 #define OLED_NORMALDISPLAY 0xA6
 
 #define BUFSIZE_128x64 (128 * 64 / 8)
+
+#define OLED_CLAMP(val, minv, maxv) ((val) < (minv) ? (minv) : ((val) > (maxv) ? (maxv) : (val)))
 
 // Initialization list
 static const uint8_t _oled_init[] PROGMEM = {
@@ -140,15 +144,14 @@ public:
         y1++;
         y0 >>= 3;
         y1 = (y1 - 1) >> 3;
-        y0 = constrain(y0, 0, _maxRow);
-        y1 = constrain(y1, 0, _maxRow);
-        x0 = constrain(x0, 0, _maxX);
-        x1 = constrain(x1, 0, OLED_WIDTH);
+        y0 = OLED_CLAMP(y0, 0, _maxRow);
+        y1 = OLED_CLAMP(y1, 0, _maxRow);
+        x0 = OLED_CLAMP(x0, 0, _maxX);
+        x1 = OLED_CLAMP(x1, 0, OLED_WIDTH);
         setWindow(x0, y0, x1, y1);
         beginData();
-        for (int x = x0; x < x1; x++)
-            for (int y = y0; y < y1 + 1; y++)
-                sendByte(0);
+        uint16_t bytes = (uint16_t)(x1 - x0) * (y1 - y0 + 1);
+        while (bytes--) sendByte(0);
         endTransm();
         setCursorXY(_x, _y);
     }
@@ -162,15 +165,14 @@ public:
     // ===== Printing Functions =====
     // Outputs single ASCII character with inversion support
     virtual size_t write(uint8_t data) {
-        int newX = _x + 6;                      // Assume font width 6
-        if (newX > _maxX) return 1;             // Skip if beyond screen
+        if (_x + 6 > _maxX) return 1;           // Skip if beyond screen
 
         beginData();
         for (uint8_t col = 0; col < 6; col++) {
             uint8_t bits = getFont(data, col);
             if (_invState) bits = ~bits;
-            sendByte(bits);                     // Direct output (no shift)
-            _x += 1;
+            sendByte(bits);
+            _x++;
         }
         endTransm();
         return 1;
@@ -184,14 +186,6 @@ public:
         _x = x;
         _y = y;
         setWindow(x, (y >> 3), _maxX, (y >> 3));  // Simplified window for single row (scale=1)
-    }
-
-    // Limits font scaling to 1 (higher values constrained) and updates cursor
-    void setScale(uint8_t scale) {
-        scale = constrain(scale, 1, 1);
-        _scaleX = scale;
-        _scaleY = scale * 8;
-        setCursorXY(_x, _y);
     }
 
     // Toggles text inversion mode for white-on-black or black-on-white rendering
@@ -243,22 +237,24 @@ public:
     // send rectangular window of data to display
     // NULL data pointer clears the window to save flash
     void partialUpdate(uint8_t x, uint8_t y, uint8_t w, uint8_t h, const unsigned char* data) {
+        uint8_t startPage = y >> 3;
+        uint8_t endPage = (y + h - 1) >> 3;
+
         beginCommand();
         sendByte(OLED_COLUMNADDR);
         sendByte(x);
         sendByte(x + w - 1);
         sendByte(OLED_PAGEADDR);
-        sendByte(y / 8);
-        sendByte((y + h - 1) / 8);
+        sendByte(startPage);
+        sendByte(endPage);
         endTransm();
 
-        // page count must be exact for transfer
-        uint8_t pages = ((y + h - 1) / 8) - (y / 8) + 1;
+        uint8_t pages = endPage - startPage + 1;
         uint16_t len = (uint16_t)w * pages;
 
         beginData();
         for (uint16_t i = 0; i < len; i++) {
-            sendByte(data != NULL ? data[i] : 0x00);
+            sendByte(data ? data[i] : 0x00);
         }
         endTransm();
     }
@@ -271,9 +267,7 @@ public:
         const uint16_t used_bytes = (uint16_t)width * SEG_PAGES;
         // compile-time check prevents buffer overflow from bad constants
         static_assert(SEVEN_SEG_DIGIT_WIDTH * SEG_PAGES <= SEG_BUF_SZ, "SEG_BUF_SZ is too small");
-        for (uint16_t i = 0; i < used_bytes; i++) {
-            buf[i] = 0;
-        }
+        memset(buf, 0, used_bytes);
     }
 
     // read segment definition from PROGMEM
@@ -319,7 +313,10 @@ public:
     // render one seven-segment glyph into local buffer and push to display
     // split into helpers for clarity without flash size penalty
     void drawDigit(char c, int px, int py) {
-        if ((c < '0' || c > '9') && (c != '.')) return;
+        uint8_t index;
+        if (c == '.') index = 10;
+        else if (c >= '0' && c <= '9') index = c - '0';
+        else return;
 
         // dot glyph is narrower than a full digit
         const uint8_t digitW = (c == '.') ? SEVEN_SEG_DOT_WIDTH : SEVEN_SEG_DIGIT_WIDTH;
@@ -329,7 +326,6 @@ public:
         prepareLocalBuffer(localBuf, digitW);
 
         // Fetch mask for character
-        uint8_t index = (c == '.') ? 10 : (c - '0');
         uint8_t mask = pgm_read_byte(&symbolMasks[index]);
 
         // Render segments
@@ -379,65 +375,52 @@ public:
     void setWindow(int x0, int y0, int x1, int y1) {
         beginCommand();
         sendByte(OLED_COLUMNADDR);
-        sendByte(constrain(x0, 0, _maxX));
-        sendByte(constrain(x1, 0, _maxX));
+        sendByte(OLED_CLAMP(x0, 0, _maxX));
+        sendByte(OLED_CLAMP(x1, 0, _maxX));
         sendByte(OLED_PAGEADDR);
-        sendByte(constrain(y0, 0, _maxRow));
-        sendByte(constrain(y1, 0, _maxRow));
+        sendByte(OLED_CLAMP(y0, 0, _maxRow));
+        sendByte(OLED_CLAMP(y1, 0, _maxRow));
         endTransm();
     }
 
     // Starts I2C transmission in data mode
-    void beginData() {
-        Wire.beginTransmission(_address);
-        Wire.write(OLED_DATA_MODE);
-    }
+    void beginData() { beginTransmMode(OLED_DATA_MODE); }
 
     // Starts I2C transmission in command mode
-    void beginCommand() {
-        Wire.beginTransmission(_address);
-        Wire.write(OLED_COMMAND_MODE);
-    }
+    void beginCommand() { beginTransmMode(OLED_COMMAND_MODE); }
 
     // Starts I2C transmission for single command
-    void beginOneCommand() {
-        Wire.beginTransmission(_address);
-        Wire.write(OLED_ONE_COMMAND_MODE);
-    }
+    void beginOneCommand() { beginTransmMode(OLED_ONE_COMMAND_MODE); }
 
-    // Ends I2C transmission and resets write counter with short delay
+    // Ends I2C transmission and resets write counter
+    // No delay needed - I2C is slow enough for display timing
     void endTransm() {
         Wire.endTransmission();
         _writes = 0;
-        delayMicroseconds(2);
     }
 
     // retrieves font column byte using a lookup table for a compact font map
     uint8_t getFont(uint8_t font, uint8_t row) {
         if (font < 32 || font > 126) return 0;
-
-        // find real index in table
         uint8_t index = pgm_read_byte(&(_charLookup[font - 32]));
-
-        // if the index is 0xFF - char is not in our font map
-        if (index == 0xFF) return 0;
-
-        // font data from the compact map using real index
-        return pgm_read_byte(&(_charMap_min[index][row]));
+        return (index == 0xFF) ? 0 : pgm_read_byte(&(_charMap_min[index][row]));
     }
 
     // ===== Variables and Constants =====
     const uint8_t _address = 0x3C;
     const uint8_t _maxRow = 8 - 1;
-    const uint8_t _maxY = 64 - 1;
     const uint8_t _maxX = OLED_WIDTH - 1;
 
     bool _invState = 0;
-    uint8_t _scaleX = 1, _scaleY = 8;
     int _x = 0, _y = 0;
     uint8_t _writes = 0;
 
 private:
+    void beginTransmMode(uint8_t mode) {
+        Wire.beginTransmission(_address);
+        Wire.write(mode);
+    }
+
     // derived constants for seven-seg drawing and transfers
     static constexpr uint8_t SEG_PAGES = (SEVEN_SEG_DIGIT_HEIGHT + 7) / 8;
     static constexpr uint8_t SEG_MAX_W = SEVEN_SEG_DIGIT_WIDTH;

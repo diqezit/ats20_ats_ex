@@ -61,14 +61,19 @@ inline static __attribute__((always_inline)) bool encBtnPressedRaw() {
     return !(PINC & (1 << (ENCODER_BUTTON - 14)));
 }
 
-// callback polled by seek process, sets stop flag on any user action
-// single critical section avoids torn reads while ISR may toggle the flag
+// callback polled by seek process
+// latches stop on encoder button press and returns stop state
+// uses SREG save/restore so we dont accidentally force-enable interrupts (unlike interrupts())
 static inline bool checkStopSeeking() {
-    noInterrupts();
-    bool pressed = encBtnPressedRaw();
-    if (pressed) g_seekStop = true;
-    bool stop = g_seekStop;
-    interrupts();
+    uint8_t oldSREG = SREG;
+    cli();
+
+    if (encBtnPressedRaw())
+        g_seekStop = 1;
+
+    uint8_t stop = g_seekStop;
+
+    SREG = oldSREG;
     return stop;
 }
 

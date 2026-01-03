@@ -27,10 +27,6 @@ const uint8_t g_SettingsMaxPages = 5;       // pages number in settings menu
 const uint8_t MAX_FAVORITES = 20;
 #endif
 
-const uint8_t g_bandCount = 28;             // Number of bands for seamless coverage
-const uint8_t g_lastBand = g_bandCount - 1;
-
-
 // =================================================================================================
 // Enumerations
 // =================================================================================================
@@ -341,32 +337,32 @@ struct SwitchMapEntry {
 // System State & Flags
 // -------------------------------------------------------------------------------------------------
 long g_storeTime = millis();
-bool g_voltagePinConnnected;
-bool g_ssbLoaded;
-bool g_stereoStatus;
-bool autoDisplayOff;
+bool g_voltagePinConnected = false;
+bool g_ssbLoaded = false;
+bool g_stereoStatus = false;
+bool autoDisplayOff = false;
 bool g_squelchCutoff = false;
 bool g_displayOn = true;
-volatile bool g_seekStop;               // violatile important here!
-uint32_t g_lastAdjustmentTime;
-uint16_t g_lastUserActivityTime;        // time of the last user frequency change (IN SECONDS)
-bool g_stateIsDirty;                    // indicate if the state needs saving on idle
+volatile bool g_seekStop = false;       // volatile important here!
+uint32_t g_lastAdjustmentTime = 0;
+uint16_t g_lastUserActivityTime = 0;    // time of the last user frequency change (IN SECONDS)
+bool g_stateIsDirty = false;            // indicate if the state needs saving on idle
 
 // -------------------------------------------------------------------------------------------------
 // UI & Command State
 // -------------------------------------------------------------------------------------------------
-volatile CommandMode g_activeCommand;
-bool g_settingsActive;
-bool g_settingsDirty;
-int8_t g_SettingSelected;
+volatile CommandMode g_activeCommand = CMD_NONE;
+bool g_settingsActive = false;
+bool g_settingsDirty = false;
+int8_t g_SettingSelected = 0;
 int8_t g_SettingsPage = 1;
-bool g_SettingEditing;
+bool g_SettingEditing = false;
 
 #if ENABLE_FAVORITES
-bool g_favoritesActive;
-bool g_favoritesDirty;
-uint8_t g_favoriteSelected;
-uint8_t g_totalFavorites;
+bool g_favoritesActive = false;
+bool g_favoritesDirty = false;
+uint8_t g_favoriteSelected = 0;
+uint8_t g_totalFavorites = 0;
 #endif
 
 #if ENABLE_CW_DECODER
@@ -376,33 +372,39 @@ bool g_cwViewActive = false;
 // -------------------------------------------------------------------------------------------------
 // Radio State
 // -------------------------------------------------------------------------------------------------
-uint8_t g_signalQualityValue = 255;     // Unified value for RSSI (all modes). 255 = invalidated.
-uint32_t g_lastRSSIUpdate;
-uint8_t g_muteVolume;
+
+// Number of bands for seamless coverage - msut array size for Band g_bandList[g_bandCount] be consistent
+const uint8_t g_bandCount = 32;
+
+
+const uint8_t g_lastBand = g_bandCount - 1;
+uint8_t g_signalQualityValue = 255;     // Unified value for RSSI (all modes) where is 255 invalidated
+uint32_t g_lastRSSIUpdate = 0;
+uint8_t g_muteVolume = 0;
 uint8_t g_volume = DEFAULT_VOLUME;
 volatile uint8_t g_currentMode = FM;
-int g_currentBFO;
-int16_t g_savedSsbBfo[28] = { 0 };      // cache of the last SSB BFO for each band (RAM, without EEPROM)
-extern uint8_t g_stableBatteryPercent;  // store table percentage for display
-uint8_t g_lastSsbMode = LSB;            // last used sideband (LSB or USB)
-uint8_t g_lastCWMode = LSB;             // last used CW sideband (LSB/USB)
+int16_t g_currentBFO = 0;
+int16_t g_savedSsbBfo[g_bandCount] = { 0 };  // cache of the last SSB BFO for each band (RAM, without EEPROM)
+extern uint8_t g_stableBatteryPercent;       // store table percentage for display
+uint8_t g_lastSsbMode = LSB;                 // last used sideband (LSB or USB)
+uint8_t g_lastCWMode = LSB;                  // last used CW sideband (LSB/USB)
 
 //Frequency tracking
-uint16_t g_currentFrequency;
-uint16_t g_previousFrequency;
-uint16_t g_lastSavedFrequency;
+uint16_t g_currentFrequency = 0;
+uint16_t g_previousFrequency = 0;
+uint16_t g_lastSavedFrequency = 0;
 uint8_t g_seekDirection = 1;
 
 //Special logic for fast and responsive frequency surfing
-uint32_t g_lastFreqChange;
-bool g_processFreqChange;
-uint32_t g_lastSetFreqTime;
+uint32_t g_lastFreqChange = 0;
+bool g_processFreqChange = false;
+uint32_t g_lastSetFreqTime = 0;
 
 // -------------------------------------------------------------------------------------------------
 // Encoder & Buttons
 // -------------------------------------------------------------------------------------------------
-volatile int16_t g_encoderCount;
-volatile int16_t g_safeEncoderMovement;
+volatile int16_t g_encoderCount = 0;
+volatile int16_t g_safeEncoderMovement = 0;
 
 SimpleButton  btn_Bandwidth(BANDWIDTH_BUTTON);
 SimpleButton  btn_BandUp(BAND_BUTTON);
@@ -421,13 +423,9 @@ SI4735_fixed g_si4735;
 // Mode-Dependent Settings
 // -------------------------------------------------------------------------------------------------
 // Source for default values, centralized here
-const ModeDefaults defaultModeSettings[MODE_CONTEXT_COUNT] = {
-    // [MODE_CONTEXT_AM]
-    {.agc = 0, .soft_mute = 0, .avc = 10 },  // index 10 = max level (90)
-    // [MODE_CONTEXT_LSB]
-    {.agc = 0, .soft_mute = 0, .avc = 10 },
-    // [MODE_CONTEXT_USB]
-    {.agc = 0, .soft_mute = 0, .avc = 10 }
+// All contexts use identical defaults
+static constexpr ModeDefaults DEFAULT_MODE_SETTINGS = {
+    .agc = 0, .soft_mute = 0, .avc = 10  // index 10 = max level (90)
 };
 
 // "Live State" storage for mode-dependent settings
@@ -546,40 +544,67 @@ constexpr uint16_t SW_MAX_FREQ = 30000;
 // we use an index to track the current band. band index 1 is mw.
 int8_t g_bandIndex = 1;
 
-// array single source of truth for all bands
+// Default step/bandwidth/bfo values for band initialization
+// stepIdxAM, stepIdxSSB, stepIdxFM, bwIdxAM, bwIdxSSB, bwIdxFM, bfoCal
+#define BD  1, 4, 1, 4, 4, 0, 0   // SW/FM bands (stepIdx=1 → 5 kHz step)
+#define BM  2, 4, 1, 4, 4, 0, 0   // LW/MW bands (stepIdx=2 → 9 kHz step)
+
+// Array single source of truth for all bands
+// name, minFreq, maxFreq, bandType, defaultFreq, [step/bw/bfo defaults]
 Band g_bandList[g_bandCount] = {
-    // name,         min_freq,  max_freq, band_type,    current_freq, stepAM, stepSSB, stepFM, bwAM, bwSSB, bwFM, bfoCal
-    { PACK_STR4("LW  "),   150,       521, LW_BAND_TYPE,   300,        2,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("MW  "),   522,      1710, MW_BAND_TYPE,   522,        2,      4,       1,      4,    4,     0,   0 },
-    // --- SW sub bands ---
-    { PACK_STR4("SW  "),  1710,      1810, SW_BAND_TYPE,  1750,        1,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("160m"),  1810,      2000, SW_BAND_TYPE,  1850,        1,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("SW  "),  2000,      2300, SW_BAND_TYPE,  2150,        1,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("120m"),  2300,      2500, SW_BAND_TYPE,  2400,        1,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("SW  "),  2500,      3200, SW_BAND_TYPE,  2800,        1,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("90m "),  3200,      3400, SW_BAND_TYPE,  3300,        1,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("SW  "),  3400,      3500, SW_BAND_TYPE,  3450,        1,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("80m "),  3500,      3900, SW_BAND_TYPE,  3700,        1,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("75m "),  3900,      4000, SW_BAND_TYPE,  3950,        1,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("SW  "),  4000,      4750, SW_BAND_TYPE,  4400,        1,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("60m "),  4750,      5060, SW_BAND_TYPE,  4850,        1,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("SW  "),  5060,      5900, SW_BAND_TYPE,  5500,        1,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("49m "),  5900,      6200, SW_BAND_TYPE,  6000,        1,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("SW  "),  6200,      7000, SW_BAND_TYPE,  6500,        1,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("40m "),  7000,      7200, SW_BAND_TYPE,  7100,        1,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("41m "),  7200,      9400, SW_BAND_TYPE,  7450,        1,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("31m "),  9400,      9900, SW_BAND_TYPE,  9600,        1,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("SW  "),  9900,     11600, SW_BAND_TYPE, 11000,        1,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("25m "), 11600,     12100, SW_BAND_TYPE, 11975,        1,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("22m "), 12100,     13870, SW_BAND_TYPE, 13700,        1,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("19m "), 13870,     15800, SW_BAND_TYPE, 15300,        1,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("16m "), 15800,     18100, SW_BAND_TYPE, 17700,        1,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("15m "), 18100,     21850, SW_BAND_TYPE, 21600,        1,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("13m "), 21850,     26100, SW_BAND_TYPE, 25800,        1,      4,       1,      4,    4,     0,   0 },
-    { PACK_STR4("11m "), 26100,     30000, SW_BAND_TYPE, 27500,        1,      4,       1,      4,    4,     0,   0 },
-    // --- FM ---
-    { PACK_STR4("    "),  6400,     10800, FM_BAND_TYPE,  8400,        1,      4,       1,      4,    4,     0,   0 }
+    //        name           min      max   type           freq   step/bw/bfo
+    // --- LW/MW bands ---
+    { PACK_STR4("LW  "),      150,     521, LW_BAND_TYPE,   300, BM },
+    { PACK_STR4("MW  "),      522,    1710, MW_BAND_TYPE,   522, BM },
+
+    // --- SW broadcast & amateur bands ---
+    { PACK_STR4("SW  "),     1711,    1799, SW_BAND_TYPE,  1750, BD },
+    { PACK_STR4("160m"),     1800,    1999, SW_BAND_TYPE,  1850, BD },  // 160m amateur
+
+    { PACK_STR4("SW  "),     2000,    2495, SW_BAND_TYPE,  2400, BD },
+    { PACK_STR4("SW  "),     2496,    3399, SW_BAND_TYPE,  2800, BD },
+
+    { PACK_STR4("80m "),     3400,    3999, SW_BAND_TYPE,  3700, BD },  // 80m amateur
+    { PACK_STR4("75m "),     4000,    4749, SW_BAND_TYPE,  4500, BD },  // 75m broadcast
+    { PACK_STR4("60m "),     4750,    5059, SW_BAND_TYPE,  4850, BD },  // 60m broadcast
+
+    { PACK_STR4("SW  "),     5060,    5350, SW_BAND_TYPE,  5200, BD },
+    { PACK_STR4("60H "),     5351,    5367, SW_BAND_TYPE,  5357, BD },  // 60m amateur
+    { PACK_STR4("SW  "),     5368,    5899, SW_BAND_TYPE,  5500, BD },
+
+    { PACK_STR4("49m "),     5900,    6199, SW_BAND_TYPE,  6000, BD },  // 49m broadcast
+    { PACK_STR4("41m "),     6200,    7299, SW_BAND_TYPE,  7100, BD },  // 41m broadcast
+    { PACK_STR4("40m "),     7300,    7599, SW_BAND_TYPE,  7400, BD },  // 40m amateur
+    { PACK_STR4("31m "),     7600,    9899, SW_BAND_TYPE,  9500, BD },  // 31m broadcast
+
+    { PACK_STR4("25m "),     9900,   10099, SW_BAND_TYPE, 10000, BD },
+    { PACK_STR4("30m "),    10100,   10150, SW_BAND_TYPE, 10136, BD },  // 30m amateur
+    { PACK_STR4("25m "),    10151,   11599, SW_BAND_TYPE, 11000, BD },
+
+    { PACK_STR4("22m "),    11600,   13569, SW_BAND_TYPE, 12500, BD },  // 22m broadcast
+
+    { PACK_STR4("19m "),    13570,   13869, SW_BAND_TYPE, 13700, BD },  // 19m broadcast
+    { PACK_STR4("16m "),    13870,   13999, SW_BAND_TYPE, 13950, BD },  // 16m broadcast
+
+    { PACK_STR4("20m "),    14000,   14350, SW_BAND_TYPE, 14200, BD },  // 20m amateur
+    { PACK_STR4("16m "),    14351,   15099, SW_BAND_TYPE, 15000, BD },  // 16m broadcast
+
+    { PACK_STR4("15m "),    15100,   17899, SW_BAND_TYPE, 17500, BD },  // 15m amateur
+    { PACK_STR4("13m "),    17900,   21449, SW_BAND_TYPE, 21200, BD },  // 13m broadcast
+
+    { PACK_STR4("11m "),    21450,   21849, SW_BAND_TYPE, 21600, BD },  // 11m broadcast
+    { PACK_STR4("SW  "),    21850,   24889, SW_BAND_TYPE, 23000, BD },  // SW
+
+    { PACK_STR4("12m "),    24890,   26099, SW_BAND_TYPE, 25600, BD },  // 12m amateur
+    { PACK_STR4("CB  "),    26100,   27860, SW_BAND_TYPE, 27200, BD },  // CB radio
+    { PACK_STR4("10m "),    27861,   30000, SW_BAND_TYPE, 28500, BD },  // 10m amateur
+
+    // --- FM broadcast band ---
+    { PACK_STR4("    "),     6400,   10800, FM_BAND_TYPE,  8400, BD }
 };
+
+#undef BD
+#undef BM
 
 // -------------------------------------------------------------------------------------------------
 // Bandwidth Tables
