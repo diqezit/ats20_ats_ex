@@ -1,8 +1,14 @@
 #pragma once
+// ====================================================================================
+//
+// Globals.h
+//
+// Central runtime state + data tables
+// 
+// ====================================================================================
 
-// =================================================================================================
-// Macros & Constants
-// =================================================================================================
+#include "Arduino.h"
+#include <avr/pgmspace.h>
 
 // helper to check if the band type
 // used to limit max AM step index as larger steps (like 9/10kHz)
@@ -27,11 +33,12 @@ const uint8_t g_SettingsMaxPages = 5;       // pages number in settings menu
 const uint8_t MAX_FAVORITES = 20;
 #endif
 
+#include "Settings.h"
+
 // =================================================================================================
-// Enumerations
+// Enums
 // =================================================================================================
 
-// NEW ENUM for Command Mode
 enum CommandMode : uint8_t {
     CMD_NONE,
     CMD_VOLUME,
@@ -39,71 +46,6 @@ enum CommandMode : uint8_t {
     CMD_BW,
     CMD_BAND,
     CMD_SLEEP
-};
-
-// Enum for convenient access to mode-dependent settings
-enum ModeSettingType {
-    MODE_SETTING_AGC,
-    MODE_SETTING_SOFT_MUTE,
-    MODE_SETTING_AVC,
-    MODE_SETTINGS_COUNT // Counter for use in loops
-};
-
-enum ModeContext {
-    MODE_CONTEXT_AM,
-    MODE_CONTEXT_LSB,
-    MODE_CONTEXT_USB,
-    MODE_CONTEXT_COUNT = 3  // Only 3 contexts since CW inherits from LSB/USB
-};
-
-enum SettingType {
-    ZeroAuto,
-    Num,
-    Switch,
-    SwitchAuto
-};
-
-enum SettingsIndex {
-    // --- Page 1: Core Audio & RF ---
-    ATT,            // ATT - Attenuation / AGC
-    AutoVolControl, // AVC - Automatic Volume Control
-    SQL,            // SQL - Squelch
-    SoftMute,       // SM  - AM Soft Mute Attenuation
-    SoftMuteThr,    // SMT - AM Soft Mute Threshold
-    AMNoiseBlanker, // ANB - AM Noise Blanker
-
-    // --- Page 2: SSB & CW ---
-    BFO,            // BFO - BFO Calibration
-    SSM,            // SSM - SSB Soft Mute
-    SVC,            // SVC - SSB AVC Switch
-    CutoffFilter,   // COF - SSB Cutoff Filter
-    Sync,           // SYN - SSB Sync (DSP AFC)
-    CWPitch,        // CWP - CW Pitch
-
-    // --- Page 3: FM & Advanced Audio ---
-    DeEmp,          // DE  - FM De-Emphasis
-    FMAudioProfile, // FMP - FM Audio Profile (Speaker EQ)
-    ForceMono,      // FMO - Force Mono Reception
-    FmSmAtt,        // FSA - FM Soft Mute Attenuation
-    FmSmThr,        // FST - FM Soft Mute Threshold
-    SWAFC,          // SWA - SW AFC (AM on SW bands)
-
-    // --- Page 4: Display & UI ---
-    Brightness,     // SCR - Screen Brightness
-    SMeter,         // SPT - S-Point / RSSI Display
-    SWUnits,        // SWU - SW Units (kHz/MHz)
-    DisplayOff,     // DIS - Display Off Timeout
-    RSSI_AM_Off,    // RSI - Disable RSSI polling in AM
-    NAV,            // NAV - Settings Navigation Style
-
-    // --- Page 5: Hardware Configuration ---
-    AntennaCap,     // CAP - Antenna Capacitor
-    CPUSpeed,       // CPU - CPU Speed
-    BATT_PIN,       // BAP - Battery Pin Select
-    ScanSwitch,     // SCN - Scan Button Behavior
-    FmVolAdjust,    // FVA - FM Volume Adjust
-
-    SETTINGS_MAX
 };
 
 enum BandType : uint8_t {
@@ -122,23 +64,20 @@ enum Modulations : uint8_t {
 };
 
 // =================================================================================================
-// Function Prototypes
+// Prototypes (cross-module visibility)
 // =================================================================================================
 
 #if DEBUG_MODE
-// --- Debugging ---
 void initDebugUART();
 void debugPrint_P(const char* str);
 void debugPrintNum(int16_t num);
 #endif
 
-// --- Memory & State Sync ---
 void syncActiveStateToBand();
 void loadActiveStateFromBand();
 void syncModeDependentSettings(bool load);
 static inline void initModeSettingsDefaults(void);
 
-// --- Core Utilities & Helpers ---
 static inline void noteUserActivity();
 static void setCpuPrescaler(uint8_t prescaler);
 static inline uint16_t freqDelta16(uint16_t, uint16_t);
@@ -155,9 +94,9 @@ static inline void persistModeSetting(ModeSettingType, SettingsIndex);
 static inline uint8_t settingsPageStart(uint8_t page);
 static inline void settingsEnter();
 static inline void settingsExitAndSave();
+
 static bool isSSB();
 
-// --- Input Handling ---
 inline int16_t getAndResetEncoderCount(volatile int16_t& counter);
 bool processEncoderActions(int16_t movement);
 void processButtonEvents();
@@ -168,7 +107,6 @@ static void switchCommand(CommandMode mode);
 static void resetCommandMode();
 static void wakeUpDisplayIfNeeded();
 
-// --- Direct Radio Control Actions ---
 static void doSeek();
 static void cycleAmSsbCwModes();
 static void doFrequencyTuneSSB();
@@ -179,7 +117,8 @@ static void doBandwidth(uint8_t v);
 static void bandSwitch(bool up, bool loadStoredFreq = true);
 static void doCWSwitch();
 
-// --- Favorites Handling ---
+void applyI2CSpeed();
+
 #if ENABLE_FAVORITES
 static inline bool favoriteExists(uint16_t f, uint8_t m);
 static inline void compactFavoritesFrom(uint8_t start);
@@ -194,7 +133,6 @@ static void loadFavorites();
 void tuneToSelectedFavorite();
 #endif
 
-// --- UI Drawing ---
 static void DrawSetting(uint8_t idx, bool full);
 #if ENABLE_FAVORITES
 static void showFavorites(bool force_redraw = false);
@@ -216,7 +154,6 @@ static void showChargeOnDisplay();
 static void showFrequencySeek(uint16_t freq);
 static void refreshCommandIndicators();
 
-// --- CW Decoder hooks ---
 #if ENABLE_CW_DECODER
 static void handleVolumeDownShortPress();
 static void cwViewEnter();
@@ -224,87 +161,27 @@ static void cwViewExit();
 static inline void cwViewTask();
 #endif
 
-// --- Settings Handlers (Callbacks for the settings menu) ---
-void doAttenuation(int8_t v);
-void doSoftMute(int8_t v);
-void doSoftMuteThreshold(int8_t v);
-void doBrightness(int8_t v);
-void doSSBAVC(int8_t v = 0);
-void doAvc(int8_t v);
-void doSync(int8_t v = 0);
-void doDeEmp(int8_t v = 0);
-void doSWUnits(int8_t v = 0);
-void doSSBSoftMuteMode(int8_t v = 0);
-void doCutoffFilter(int8_t v);
-void doCPUSpeed(int8_t v = 0);
-void doBFOCalibration(int8_t v);
-void doCWPitch(int8_t v);
-void doSwAfcProfile(int8_t v);
-void doScanSwitch(int8_t v = 0);
-void doRSSIAMOff(int8_t v = 0);
-void doAntennaCapacitor(int8_t v = 0);
-void doDisplayOff(int8_t v = 0);
-void doFMAudioProfile(int8_t v = 0);
-void doAMNoiseBlanker(int8_t v = 0);
-void doForceMono(int8_t v = 0);
-void doBatteryPinSelect(int8_t v = 0);
-void doSquelch(int8_t v);
-void doFmSoftMuteAtt(int8_t v);
-void doFmSoftMuteThr(int8_t v);
-void doFmVolAdjust(int8_t v);
-void doSMeter(int8_t v = 0);
-void doNavStyle(int8_t v = 0);
-
-// --- High-Level Configuration & System ---
 static void applyBandConfiguration(bool extraSSBReset = false);
 static void setAmpState(bool on);
 static void applyBrightness();
 static void loadSSBPatch();
-static void resetEepromDelay();
 
-// --- Periodic & Timed Tasks ---
 static inline void handleSignalAndStereoUpdates();
 static inline void handleCommandTimeout();
 static inline void handleSettingsSave();
 static inline void checkDisplayTimeout();
 static void handlePeriodicTasks();
 
-// --- Setting Applicability Checks Prototypes ---
-static inline bool isAlwaysActive();
-static inline bool isAMFamilyActive();
-static inline bool isSSBActive();
-static inline bool isFMActive();
-
 // =================================================================================================
-// Data Structures
+// Core data structures (non-settings)
 // =================================================================================================
 
-// "Source of Truth" for default values
-// This is an immutable template for resetting settings
-struct ModeDefaults {
-    const int8_t agc;       // Default for Attenuation/AGC
-    const int8_t soft_mute; // Default for Soft Mute
-    const int8_t avc;       // Default for AVC Max Gain
-};
-
-struct SettingsItem {
-    char name[4];
-    int8_t param;
-    uint8_t type;
-    void (*manipulateCallback)(int8_t);
-    bool (*is_active)();
-};
-
-// defines all properties of a frequency band
-// this unified structure is the core of the new elegant architecture
 struct Band {
-    // --- constant data, defined at compile time ---
     char name[4];
     uint16_t minimumFreq;
     uint16_t maximumFreq;
     BandType bandType;
 
-    // --- variable state, loaded/saved to eeprom ---
     uint16_t currentFreq;
     int8_t stepIdxAM;
     int8_t stepIdxSSB;
@@ -316,42 +193,34 @@ struct Band {
 };
 
 #if ENABLE_FAVORITES
-struct FavoriteStation {
+struct __attribute__((packed)) FavoriteStation {
     uint16_t frequency;
     uint8_t  modulation;
     int16_t  bfo;
 };
 #endif
 
-// Defines how a setting's parameter is converted into a text index
-struct SwitchMapEntry {
-    uint8_t baseIndex;
-    bool inverted;                  // if true, the parameter is subtracted from the base index
-};
-
 // =================================================================================================
-// Global Variables & Data Tables
+// Runtime flags/state
 // =================================================================================================
 
-// -------------------------------------------------------------------------------------------------
-// System State & Flags
-// -------------------------------------------------------------------------------------------------
-long g_storeTime = millis();
 bool g_voltagePinConnected = false;
 bool g_ssbLoaded = false;
 bool g_stereoStatus = false;
 bool autoDisplayOff = false;
 bool g_squelchCutoff = false;
 bool g_displayOn = true;
-volatile bool g_seekStop = false;       // volatile important here!
-uint32_t g_lastAdjustmentTime = 0;
-uint16_t g_lastUserActivityTime = 0;    // time of the last user frequency change (IN SECONDS)
-bool g_stateIsDirty = false;            // indicate if the state needs saving on idle
 
-// -------------------------------------------------------------------------------------------------
-// UI & Command State
-// -------------------------------------------------------------------------------------------------
+// Used by seek callback / interrupt-driven stop logic
+volatile bool g_seekStop = false;
+
+uint32_t g_lastAdjustmentTime = 0;
+uint16_t g_lastUserActivityTime = 0;  // seconds
+bool g_stateIsDirty = false;
+
+// UI / menu state
 volatile CommandMode g_activeCommand = CMD_NONE;
+
 bool g_settingsActive = false;
 bool g_settingsDirty = false;
 int8_t g_SettingSelected = 0;
@@ -369,40 +238,42 @@ uint8_t g_totalFavorites = 0;
 bool g_cwViewActive = false;
 #endif
 
-// -------------------------------------------------------------------------------------------------
-// Radio State
-// -------------------------------------------------------------------------------------------------
+// =================================================================================================
+// Radio state
+// =================================================================================================
 
-// Number of bands for seamless coverage - msut array size for Band g_bandList[g_bandCount] be consistent
-const uint8_t g_bandCount = 32;
-
-
+// Number of bands for seamless coverage - array size for Band g_bandList[g_bandCount] must be consistent
+const uint8_t g_bandCount = 36;
 const uint8_t g_lastBand = g_bandCount - 1;
-uint8_t g_signalQualityValue = 255;     // Unified value for RSSI (all modes) where is 255 invalidated
+
+uint8_t g_signalQualityValue = 255;
 uint32_t g_lastRSSIUpdate = 0;
+
 uint8_t g_muteVolume = 0;
 uint8_t g_volume = DEFAULT_VOLUME;
+
 volatile uint8_t g_currentMode = FM;
 int16_t g_currentBFO = 0;
-int16_t g_savedSsbBfo[g_bandCount] = { 0 };  // cache of the last SSB BFO for each band (RAM, without EEPROM)
-extern uint8_t g_stableBatteryPercent;       // store table percentage for display
-uint8_t g_lastSsbMode = LSB;                 // last used sideband (LSB or USB)
-uint8_t g_lastCWMode = LSB;                  // last used CW sideband (LSB/USB)
 
-//Frequency tracking
+int16_t g_savedSsbBfo[g_bandCount] = { 0 };
+extern uint8_t g_stableBatteryPercent;
+
+uint8_t g_lastSsbMode = LSB;
+uint8_t g_lastCWMode = LSB;
+
 uint16_t g_currentFrequency = 0;
 uint16_t g_previousFrequency = 0;
 uint16_t g_lastSavedFrequency = 0;
 uint8_t g_seekDirection = 1;
 
-//Special logic for fast and responsive frequency surfing
 uint32_t g_lastFreqChange = 0;
 bool g_processFreqChange = false;
 uint32_t g_lastSetFreqTime = 0;
 
-// -------------------------------------------------------------------------------------------------
-// Encoder & Buttons
-// -------------------------------------------------------------------------------------------------
+// =================================================================================================
+// Encoder + buttons + radio object
+// =================================================================================================
+
 volatile int16_t g_encoderCount = 0;
 volatile int16_t g_safeEncoderMovement = 0;
 
@@ -419,129 +290,15 @@ SimpleButton  btn_Mode(MODE_SWITCH);
 Rotary g_encoder = Rotary(ENCODER_PIN_A, ENCODER_PIN_B);
 SI4735_fixed g_si4735;
 
-// -------------------------------------------------------------------------------------------------
-// Mode-Dependent Settings
-// -------------------------------------------------------------------------------------------------
-// Source for default values, centralized here
-// All contexts use identical defaults
-static constexpr ModeDefaults DEFAULT_MODE_SETTINGS = {
-    .agc = 0, .soft_mute = 0, .avc = 10  // index 10 = max level (90)
-};
+// =================================================================================================
+// Bands map
+// =================================================================================================
 
-// "Live State" storage for mode-dependent settings
-// This array is loaded from and saved to EEPROM
-int8_t g_modeSettings[MODE_SETTINGS_COUNT][MODE_CONTEXT_COUNT];
-
-
-// --- Setting Applicability Checks ---
-// These helpers determine if a setting is relevant in the current radio mode.
-static inline bool isAlwaysActive() { return true; }
-static inline bool isAMFamilyActive() { return g_currentMode != FM; }
-static inline bool isSSBActive() { return isSSB(); }
-static inline bool isFMActive() { return g_currentMode == FM; }
-
-
-// -------------------------------------------------------------------------------------------------
-// General Settings
-// -------------------------------------------------------------------------------------------------
-// "UI Buffer" - A temporary buffer for the settings UI, stored in RAM
-// It holds the live state of settings while the user is in the menu
-// This buffer is populated from g_modeSettings upon entering the menu
-// The initial values here are defaults and will be overwritten
-SettingsItem g_Settings[] =
-{
-    // --- Page 1: Core Audio & RF ---
-    { "ATT", 0,  SettingType::ZeroAuto,   doAttenuation,       isAlwaysActive },
-    { "AVC", 10, SettingType::Num,        doAvc,               isAMFamilyActive },
-    { "SQL", 0,  SettingType::Num,        doSquelch,           isAlwaysActive },
-    { "SMA", 0,  SettingType::Num,        doSoftMute,          isAMFamilyActive },
-    { "SMT", 0,  SettingType::Num,        doSoftMuteThreshold, isAMFamilyActive },
-    { "ANB", 0,  SettingType::Switch,     doAMNoiseBlanker,    isAMFamilyActive },
-
-    // --- Page 2: SSB & CW ---
-    { "BFO", 0,  SettingType::Num,        doBFOCalibration,    isAMFamilyActive },
-    { "SSM", 1,  SettingType::Switch,     doSSBSoftMuteMode,   isSSBActive },
-    { "SVC", 1,  SettingType::Switch,     doSSBAVC,            isSSBActive },
-    { "COF", 0,  SettingType::SwitchAuto, doCutoffFilter,      isSSBActive },
-    { "SYN", 0,  SettingType::Switch,     doSync,              isSSBActive },
-    { "CWP", 2,  SettingType::Num,        doCWPitch,           isAMFamilyActive },
-
-    // --- Page 3: FM & Advanced Audio ---
-    { "DE ", 0,  SettingType::Switch,     doDeEmp,             isFMActive },
-    { "FMP", 1,  SettingType::Switch,     doFMAudioProfile,    isFMActive },
-    { "FMO", 0,  SettingType::Switch,     doForceMono,         isFMActive },
-    { "FSA", 22, SettingType::Num,        doFmSoftMuteAtt,     isFMActive },
-    { "FST", 10, SettingType::Num,        doFmSoftMuteThr,     isFMActive },
-    { "SWA", 0,  SettingType::Num,        doSwAfcProfile,      isAMFamilyActive },
-
-    // --- Page 4: Display & UI ---
-    { "SCR", 4,  SettingType::Num,        doBrightness,        isAlwaysActive },
-    { "SPT", 0,  SettingType::Switch,     doSMeter,            isAlwaysActive },
-    { "SWU", 0,  SettingType::Switch,     doSWUnits,           isAMFamilyActive },
-    { "DIS", 0,  SettingType::Switch,     doDisplayOff,        isAlwaysActive },
-    { "RSI", 1,  SettingType::Switch,     doRSSIAMOff,         isAMFamilyActive },
-    { "NAV", 0,  SettingType::Switch,     doNavStyle,          isAlwaysActive },
-
-    // --- Page 5: Hardware Configuration ---
-    { "CAP", 0,  SettingType::Switch,     doAntennaCapacitor,  isAlwaysActive },
-    { "CPU", 0,  SettingType::Switch,     doCPUSpeed,          isAlwaysActive },
-    { "BAP", 0,  SettingType::Switch,     doBatteryPinSelect,  isAlwaysActive },
-    { "SCN", 1,  SettingType::Switch,     doScanSwitch,        isAlwaysActive },
-    { "FVA", 0,  SettingType::Num,        doFmVolAdjust,       isAlwaysActive },
-};
-
-// defines the text conversion rules ONLY for settings of type 'Switch'
-// it is indexed here by the SettingsIndex enum
-const PROGMEM SwitchMapEntry switch_setting_map[] = {
-    // --- Page 1: Core Audio & RF ---
-    [ATT] = {0, false},
-    [AutoVolControl] = {0, false},
-    [SQL] = {0, false},
-    [SoftMute] = {0, false},
-    [SoftMuteThr] = {0, false},
-    [AMNoiseBlanker] = {1, false},
-
-    // --- Page 2: SSB & CW ---
-    [BFO] = {0, false},
-    [SSM] = {7, false},
-    [SVC] = {2, true},
-    [CutoffFilter] = {0, false},
-    [Sync] = {2, true},
-    [CWPitch] = {0, false},
-
-    // --- Page 3: FM & Advanced Audio ---
-    [DeEmp] = {3, false},
-    [FMAudioProfile] = {1, false},
-    [ForceMono] = {2, true},
-    [FmSmAtt] = {0, false},
-    [FmSmThr] = {0, false},
-    [SWAFC] = {2, true},
-
-    // --- Page 4: Display & UI ---
-    [Brightness] = {0, false},
-    [SMeter] = {2, true},
-    [SWUnits] = {5, false},
-    [DisplayOff] = {0, false},
-    [RSSI_AM_Off] = {1, true},
-    [NAV] = {15, false},
-
-    // --- Page 5: Hardware Configuration ---
-    [AntennaCap] = {1, false},
-    [CPUSpeed] = {9, false},
-    [BATT_PIN] = {0, false},
-    [ScanSwitch] = {2, true},
-    [FmVolAdjust] = {0, false},
-};
-
-// -------------------------------------------------------------------------------------------------
-// Band Definitions
-// -------------------------------------------------------------------------------------------------
-
-// SW sub band limits for seek
+// SW scan limits (seek uses wider limits than a single sub-band)
 constexpr uint16_t SW_MIN_FREQ = 1710;
 constexpr uint16_t SW_MAX_FREQ = 30000;
 
-// we use an index to track the current band. band index 1 is mw.
+// to track the current band where is 1 = MW
 int8_t g_bandIndex = 1;
 
 // Default step/bandwidth/bfo values for band initialization
@@ -561,8 +318,11 @@ Band g_bandList[g_bandCount] = {
     { PACK_STR4("SW  "),     1711,    1799, SW_BAND_TYPE,  1750, BD },
     { PACK_STR4("160m"),     1800,    1999, SW_BAND_TYPE,  1850, BD },  // 160m amateur
 
-    { PACK_STR4("SW  "),     2000,    2495, SW_BAND_TYPE,  2400, BD },
-    { PACK_STR4("SW  "),     2496,    3399, SW_BAND_TYPE,  2800, BD },
+    { PACK_STR4("SW  "),     2000,    2299, SW_BAND_TYPE,  2100, BD },
+    { PACK_STR4("120m"),     2300,    2495, SW_BAND_TYPE,  2400, BD },  // 120m broadcast
+
+    { PACK_STR4("SW  "),     2496,    3199, SW_BAND_TYPE,  2800, BD },
+    { PACK_STR4("90m "),     3200,    3399, SW_BAND_TYPE,  3300, BD },  // 90m broadcast
 
     { PACK_STR4("80m "),     3400,    3999, SW_BAND_TYPE,  3700, BD },  // 80m amateur
     { PACK_STR4("75m "),     4000,    4749, SW_BAND_TYPE,  4500, BD },  // 75m broadcast
@@ -590,7 +350,10 @@ Band g_bandList[g_bandCount] = {
     { PACK_STR4("16m "),    14351,   15099, SW_BAND_TYPE, 15000, BD },  // 16m broadcast
 
     { PACK_STR4("15m "),    15100,   17899, SW_BAND_TYPE, 17500, BD },  // 15m amateur
-    { PACK_STR4("13m "),    17900,   21449, SW_BAND_TYPE, 21200, BD },  // 13m broadcast
+
+    { PACK_STR4("13L "),    17900,   18067, SW_BAND_TYPE, 17950, BD },
+    { PACK_STR4("17m "),    18068,   18168, SW_BAND_TYPE, 18100, BD },  // 17m amateur
+    { PACK_STR4("13H "),    18169,   21449, SW_BAND_TYPE, 21200, BD },
 
     { PACK_STR4("11m "),    21450,   21849, SW_BAND_TYPE, 21600, BD },  // 11m broadcast
     { PACK_STR4("SW  "),    21850,   24889, SW_BAND_TYPE, 23000, BD },  // SW
@@ -606,9 +369,9 @@ Band g_bandList[g_bandCount] = {
 #undef BD
 #undef BM
 
-// -------------------------------------------------------------------------------------------------
-// Bandwidth Tables
-// -------------------------------------------------------------------------------------------------
+// =================================================================================================
+// Bandwidth tables (PROGMEM)
+// =================================================================================================
 
 // single PROGMEM block of null-terminated UI labels
 const char bw_all_data[] PROGMEM =
@@ -630,9 +393,9 @@ const uint8_t g_bwSSBMaxIdx = 5;
 const uint8_t g_maxFilterAM = 6;
 const uint8_t g_bwAMIdx[] = { 4, 5, 3, 6, 2, 1, 0 };
 
-// -------------------------------------------------------------------------------------------------
-// S‑Meter mapping + constants and PROGMEM helpers
-// -------------------------------------------------------------------------------------------------
+// =================================================================================================
+// S-meter tables
+// =================================================================================================
 
 // dBuV thresholds for S0 through S9+50 on HF
 static const uint8_t THR_HF[] PROGMEM = { 1,2,3,4,10,16,22,28,34,44,54,64,74,84,94 };
@@ -648,9 +411,9 @@ static inline uint8_t CREAD(const uint8_t* p, uint8_t i) {
     return pgm_read_byte(&p[i]);
 }
 
-// -------------------------------------------------------------------------------------------------
-// Tuning Step Tables
-// -------------------------------------------------------------------------------------------------
+// =================================================================================================
+// Step tables (PROGMEM + RAM)
+// =================================================================================================
 
 // step strings padded to 4 chars to reduce mem usage
 static const char step_lookup_table[][7] PROGMEM = {
@@ -672,26 +435,13 @@ int g_tabStep[] =
     // SSB steps converted to Hz for seamless integration (1k, 5k, 9k, 10k)
     1000, 5000, 9000, 10000
 };
+
 const uint8_t AM_STEPS_COUNT = 7;
 const uint8_t SSB_STEPS_COUNT = 9;
 const uint8_t SSB_STEP_OFFSET = 7;
 
 int8_t g_tabStepFM[] = { 5, 10, 100 };
 const int8_t g_lastStepFM = (sizeof(g_tabStepFM) / sizeof(int8_t)) - 1;
-
-// Pitch options for CW reception in Hz
-const uint16_t cw_pitch_options_hz[] PROGMEM = { 500, 600, 700, 800 };
-
-// -------------------------------------------------------------------------------------------------
-// UI Text & Other Data
-// -------------------------------------------------------------------------------------------------
-// used by SettingParamToUI function to convert parameter values to display strings
-const char PROGMEM paramTexts[][4] = {
-  "AUT", " ON", "OFF", " 50", " 75", "kHz", "MHz",
-  "RSS", "SNR", "100", "50%",
-  "10m", "15m", "30m", "60m",
-  "ROW", "COL"
-};
 
 // Timeout values in seconds for the display-off feature, indexed by the setting parameter
 const uint16_t T[5] PROGMEM = { 0, 600, 900, 1800, 3600 };
@@ -701,3 +451,12 @@ extern const char g_bandModeDesc[][4];
 #if ENABLE_FAVORITES
 FavoriteStation g_favorites[MAX_FAVORITES];
 #endif
+
+// =================================================================================================
+// Settings applicability predicates (used by Settings logic)
+// =================================================================================================
+
+static inline bool isAlwaysActive() { return true; }
+static inline bool isAMFamilyActive() { return g_currentMode != FM; }
+static inline bool isSSBActive() { return isSSB(); }
+static inline bool isFMActive() { return g_currentMode == FM; }

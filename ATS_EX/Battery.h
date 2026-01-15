@@ -29,7 +29,7 @@ const char BATT_PIN_NAME_DEFAULT[]  PROGMEM = " A2"; // <-- Change " A2" to your
 // this ONLY place that needs to be changed!
 // setting parameter stored in EEPROM is 0 for the default pin (A2) and 1 for the alternative (A1)
 static inline uint8_t getBatteryPin() {
-    return (g_Settings[BATT_PIN].param == 1) ?
+    return (getSettingParam(BATT_PIN) == 1) ?
         A1 // <------------ Change here for the alternative pin (e.g., " A4")
         :
         A2 // <------------ Change here for the default     pin (e.g., " A0")
@@ -93,7 +93,7 @@ static inline void applyPercentUpdate(uint8_t newPercent) {
 static inline void updateStablePercent() {
     if (!g_voltagePinConnected) return;
 
-    int sample = analogRead(getBatteryPin());
+    int sample = (int)adcReadAx(getBatteryPin());
 
     if (sample <= 0) sample = BATT_ADC_EMPTY;
 

@@ -60,19 +60,19 @@ uint8_t SimpleButton::checkEvent( uint8_t (*eventHandler)(uint8_t eventId, uint8
 #define BUTTONEVENT_SHORTPRESS          1         // Shortpress-Event detected!
 #define BUTTONEVENT_2PRESS              5
 #define BUTTONEVENT_FIRSTLONGPRESS      3         // Button is longpressed (Longpress just started)
-#define BUTTONEVENT_LONGPRESS           7         // Button is still longpressed (event will be generated every x ms as defined by 
- // BUTTONTIME_LONGPRESSREPEAT (see below), if the  SimpleButton::event() is called 
+#define BUTTONEVENT_LONGPRESS           7         // Button is still longpressed (event will be generated every x ms as defined by
+ // BUTTONTIME_LONGPRESSREPEAT (see below), if the  SimpleButton::event() is called
  // often enough.
  // The application self must do something if longer period is needed (i. e. like
  //  delaying calls to ::event() or react on only every other event to achieve 400ms)
 #define BUTTONEVENT_LONGPRESSDONE      11         // Button is released after longpress. The application must not treat this event
                                                   // as if the button is still pressed but either use it for some cleanup (if needed)
                                                   // or simply ignore it.
-#define BUTTON_PRESSED                  8         // No event, but the button is pressed (so either a BUTTONEVENT_SHORTPRESS or 
+#define BUTTON_PRESSED                  8         // No event, but the button is pressed (so either a BUTTONEVENT_SHORTPRESS or
                                                   // any of the longpress-Events might follow but time for this is not yet due).
 
-#define BUTTONEVENT_ISLONGPRESS(x)      (3 == (x & 3))                                                  
-#define BUTTONEVENT_ISDONE(x)           (8 == (x & 8))                                                  
+#define BUTTONEVENT_ISLONGPRESS(x)      (3 == (x & 3))
+#define BUTTONEVENT_ISDONE(x)           (8 == (x & 8))
 
 #define BUTTONTIME_PRESSDEBOUNCE      0*16   // How long to debounce falling slope of pin (in ms), i. e. Button going to pressed
                                              // Zero is probably fine, if the button does not generate noise on changes (oscillates
@@ -87,8 +87,13 @@ public:
     uint8_t checkEvent(uint8_t(*_event)(uint8_t event, uint8_t pin) = NULL);
 private:
     uint16_t _PinDebounceState;
+
+    // cached pin input register + bit mask (optimization)
+    volatile uint8_t* _pinReg;
+    uint8_t _pinMask;
+
     // The data is stored as Bitfield:
-    //   - b15..b10 (6 bit): pin number 
+    //   - b15..b10 (6 bit): pin number
     //   -  b9.. b4 (6 bit): timestamp (in units of 16ms) to remember last state change in checkEvent
     //   -  b3.. b0 (4 bit): current state of checkEvent
 };

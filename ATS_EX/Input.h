@@ -57,7 +57,7 @@ void updateEncoderState() {
 static inline void setDisplayPower(bool on) {
     g_displayOn = on;
     if (on) {
-        setCpuPrescaler(g_Settings[SettingsIndex::CPUSpeed].param);
+        setCpuPrescaler(getSettingParam(CPUSpeed));
         oled.setPower(true);
     } else {
         setCpuPrescaler(1);         // 8 MHz for responsive handler
@@ -152,7 +152,7 @@ static inline void exitFavoritesMenu() {
     g_favoritesActive = false;
     g_lastAdjustmentTime = 0; // Reset auto-exit timer
     oled.clear();
-    showStatus();
+    showStatus(true);
 }
 
 // Handle encoder rotation for favorites list with circular navigation
@@ -228,11 +228,11 @@ static void handleEncoderShortPress() {
         g_SettingEditing = !g_SettingEditing;
         DrawSetting(g_SettingSelected, true);
         noteUserActivity();
-        return; 
+        return;
     }
 
-    (isSSB() || !g_Settings[ScanSwitch].param) ? switchCommand(CMD_STEP) : doSeek();
-    }
+    (isSSB() || !getSettingParam(ScanSwitch)) ? switchCommand(CMD_STEP) : doSeek();
+}
 
 // BAND+ short press: in settings → next page; on main → switch to band command
 static void handleBandUpShortPress() {
@@ -260,16 +260,15 @@ static void handleVolumeDownShortPress() {
 
     // if currently muted (we have stored previous volume) restore it
     if (g_muteVolume) {
-        g_si4735.setVolume(g_muteVolume);
         g_muteVolume = 0;
+        applyCompensatedVolume();
         showVolume();
         return;
     }
 
-    // if not muted - read current volume once and mute only if it non-zero
-    uint8_t vol = g_si4735.getCurrentVolume();
-    if (vol) {
-        g_muteVolume = vol;
+    // if not muted - store USER volume (not chip volume) and mute
+    if (g_volume) {
+        g_muteVolume = g_volume;
         g_si4735.setVolume(0);
         showVolume();
     }
@@ -458,8 +457,8 @@ static void navigateSettingsPage(int16_t encoder_delta) {
 static inline void processEncoderForSettings(int16_t encoder_delta) {
     if (g_SettingEditing) {
         // user expects inactive settings to be non-editable
-        if (g_Settings[g_SettingSelected].is_active()) {
-            g_Settings[g_SettingSelected].manipulateCallback(encoder_delta);
+        if (isSettingActive(g_SettingSelected)) {
+            callSettingCallback(g_SettingSelected, encoder_delta);
             DrawSetting(g_SettingSelected, false);
         }
     } else {
@@ -515,7 +514,6 @@ bool processEncoderActions(int16_t encoder_delta) {
         was_tuning_event = processEncoderForCommands(encoder_delta);
     }
 
-    resetEepromDelay();
     return was_tuning_event;
 }
 

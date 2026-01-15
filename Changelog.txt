@@ -1434,3 +1434,140 @@ This version introduces the ability to save your favorite FM stations.
   
 ------------------------------------------------------------------------------------------------------------
 
+
+### **MOD_NO_RDS v7.0**
+
+`Memory.h`, `RadioControl.h`, `Utils.h`, `UI.h`, `ATS_EX.ino`, `SimpleButton.h`, `SimpleButton.cpp`, `Defines.h`, `Globals.h`, `SSD1306_OLED.h`, `CustomFonts.h`
+
+---
+
+* **[Fixed] EEPROM Safety (SSB Mode Clamp):**
+  * Added a safety clamp for `g_lastSsbMode` after loading `ReceiverHeader` from EEPROM (**only LSB/USB are allowed**)
+  * Protects **AM → SSB** switching from corrupted EEPROM values (like `0xFF`) that could cause invalid mode/UI indexing
+
+* **[Fixed] EEPROM Safety (Brightness + DisplayOff clamps):**
+  * Added clamps after loading settings from EEPROM to keep `Brightness` within **0..9** (prevents LUT out-of-bounds) and `DisplayOff` within **0..4** (prevents `T[]` out-of-bounds)
+  * Eliminates rare crashes/undefined behavior on erased or corrupted EEPROM (e.g. `0xFF` values)
+
+* **[Fixed] Favorites EEPROM Data Validation:**
+  * Added a clamp for `FavoriteStation.modulation` while loading favorites from EEPROM (**must be 0..4**)
+  * Prevents corrupted favorites from showing wrong mode labels and from applying invalid modes during `tuneToSelectedFavorite()`
+
+* **[Fixed] Favorites selection stability (no OOB, no empty pages):**
+  * Hardened favorites list maintenance by preventing underflow in `compactFavoritesFrom()` and forcing `g_favoriteSelected = 0` after `loadFavorites()`
+  * Added selection sanitization in `showFavorites()` to avoid "blank page" rendering when selection is out of range
+
+* **[Fixed] EEPROM Safety (Favorites save clamp):**
+  * Added a local clamp in favorites saving to prevent EEPROM out-of-range writes if `g_totalFavorites` is ever corrupted in RAM
+
+* **[Fixed] Seek Result Persistence:**
+  * Updated `finalizeSeekUpdate()` in `RadioControl.h` to mark state dirty after seek
+  * Ensures the found station will be saved by the normal **save-on-idle** logic (so it won't be lost after power-off)
+
+* **[Fixed] EEPROM Reset Defaults (AVC = 10 for SSB contexts):**
+  * Fixed factory-reset path to initialize **ALL** mode contexts (AM/LSB/USB) via `initModeSettingsDefaults()`
+  * Prevents the old bug where only the current context was initialized and **LSB/USB AVC could stay at 0**, making SSB audio too quiet after EEPROM reset
+
+* **[Fixed] Per-band BFO calibration persistence (EEPROM):**
+  * Previously BFO calibration could appear "per-band" in the menu, but after reboot it could reset or behave globally because only the global settings block was persisted
+  * Added `bfoCal` to `BandStatePacked` (**6 bytes per band state**) and now store/load it per band from EEPROM
+  * Calibration is applied immediately in SSB/CW, including when switching bands (so each band keeps its own correct offset)
+
+* **[Fixed] FM volume compensation consistency (EEPROM):**
+  * Save user volume (`g_volume`) to EEPROM to avoid FM compensation corrupting persisted volume
+
+---
+
+* **[Optimized] Removed Legacy EEPROM Delay Stub (Flash Savings):**
+  * Removed the obsolete `resetEepromDelay()` stub (old `g_storeTime` logic, only forced `g_previousFrequency = 0`)
+  * Real EEPROM saving behavior stays the same (still based on `g_lastUserActivityTime` + `g_stateIsDirty`), just less confusing and slightly smaller
+
+* **[Optimized] UI Micro-Refactor (Flash Savings, No Behavior Change):**
+  * Reworked `stereoIndicatorChar()` and `showStep()` to use `switch`-based mode branching while keeping the same UI behavior
+  * Helps squeeze the build into 32KB Flash without changing what the user sees
+
+* **[Optimized] Button handling: faster polling + Flash savings (no behavior change):**
+  * `SimpleButton` caches the correct `PINx` register pointer and bit mask (`_pinReg`, `_pinMask`) so `checkEvent()` doesn't re-calculate port/bit every call
+  * `pin` extraction (`_PinDebounceState >> 10`) is now done only when a callback is actually called (lazy), reducing work in the common "no press" path
+  * Button debounce and event timing logic is unchanged; only the internal fast-path was optimized
+
+* **[Optimized] SSD1306_OLED.h — Seven-seg tables (Flash Savings, No Behavior Change):**
+  * Replaced template static members (`symbolMasks`, `segs`) with global `static const PROGMEM` tables to avoid template static overhead
+  * Flattened segment table into a 32-byte array and simplified segment fetch logic using a pointer stride (`ptr += 4`)
+  * Added compile-time “editing helpers” for users without affecting the binary size:
+    * `OLED_SEG_A..OLED_SEG_DOT` bit macros for readable digit masks
+    * `OLED_SEG4(x,y,len,h)` macro for readable segment list entries
+  * Build result after this change: **Program size 30596 bytes** (≈ **124 bytes free**), RAM unchanged
+
+* **[Optimized] SSD1306_OLED.h v1.9 — Flash & RAM savings (~36 bytes Flash, ~2 bytes RAM):**
+  * Removed `delayMicroseconds(2)` from `endTransm()` — I2C bus timing is already sufficient at 77 kHz
+  * Simplified segment definition reads using `memcpy_P()` (earlier step before final table refactor)
+  * Streamlined `getFont()` — removed redundant `col >= FONT_COLS` check (caller guarantees valid range)
+  * Removed unused `OLED_ONE_DATA_MODE` define
+  * Changed `_maxRow` and `_maxX` from instance constants to `static constexpr` (saves RAM per instance)
+
+* **[Optimized] CustomFonts.h — Compact 5-column font storage (~49 bytes Flash):**
+  * Font glyphs in `_charMap_min[][]` now store **5 columns** instead of 6 (the 6th spacing column was always `0x00`)
+  * The spacing column is generated at runtime in `write()` — supports inversion correctly (`0xFF` when inverted)
+  * Updated `getFont()` to work with `FONT_COLS = 5`
+  * Total savings: **49 bytes** (49 glyphs × 1 byte each)
+
+* **[Optimized] Encoder interrupts: removed `attachInterrupt()` (Flash savings, no behavior change):**
+  * Replaced Arduino `attachInterrupt()` with direct AVR external interrupts **INT0/INT1** (Nano **D2/D3**) to avoid pulling in `WInterrupts.c` from Arduino core
+  * Added `ISR(INT0_vect)` / `ISR(INT1_vect)` that call `rotaryEncoder()` (defined in `Input.h`)
+  * Result: build fits easier into 32KB flash (≈ **88 bytes** saved in this build), encoder behavior unchanged
+
+* **[Optimized] Rotary.cpp: faster pin sampling (no behavior change):**
+  * Simplified encoder pin read to a single shift+mask:
+    * `uint8_t pinstate = (PIND >> 2) & 0x03;  // PD2->bit0, PD3->bit1`
+  * No logic changes, only fewer instructions in the hot path (ISR-driven polling)
+
+* **[Optimized] SSD1306_OLED.h — Removed Arduino `Print` dependency (Flash savings):**
+  * `GyverOLED` no longer inherits from `Print` (avoids pulling `Print.cpp` and related C++ ABI code)
+  * Implemented minimal local `print()` overloads used by the UI (`char`, `const char*`, `F("...")`, integer types)
+
+* **[Optimized] SSD1306_OLED.h — Removed libc `utoa/ultoa` dependency (extra Flash savings):**
+  * Replaced `utoa()/ultoa()`-based number printing with local integer-to-text conversion
+  * Avoids pulling `utoa_ncheck.o` and `strrev.o` from avr-libc
+
+---
+
+* **[Refactor] SSB Sync handler cleanup (No Behavior Change):**
+  * Updated `doSync()` (`ATS_EX.ino`) to use `switch` branching for LSB/USB, while keeping the original "no Sync in CW" rule
+  * Makes the mode-specific logic easier to read and maintain
+
+* **[Refactor] EEPROM band state pack/unpack cleanup (no behavior change):**
+  * Simplified band state packing by introducing local `PACK4`/`UNPACK_LO`/`UNPACK_HI` macros in `Memory.h`
+  * Replaced hardcoded clamp limits with existing project constants (`g_bwSSBMaxIdx`, `g_maxFilterAM`, `AM_STEPS_COUNT`, `SSB_STEPS_COUNT`, `g_lastStepFM`, etc.)
+  * Centralized EEPROM address math into local `uint16_t addr` variables for bands and favorites
+
+* **[Refactor] Settings.h — unified settings storage + access API:**
+  * Introduced `g_SettingsMeta[]` (**PROGMEM**) as the single source of truth for each setting:
+    * 3-char name, default value, UI type, callback, “isActive” predicate
+  * Introduced `g_SettingsParams[]` (**RAM**) as the single mutable settings buffer used by the menu and runtime logic
+  * Added a small, consistent Settings API (used everywhere instead of direct array access):
+    * `getSettingParam()` / `setSettingParam()` — read/write setting value
+    * `settingRef()` — reference access for in-place modifiers (e.g., `doSwitchLogic(settingRef(X), ...)`)
+  * Added PROGMEM helper accessors to keep call safe:
+    * `getSettingName()`, `getSettingType()`, `getSettingDefault()`
+    * `callSettingCallback()`, `isSettingActive()`
+  * Added `initSettingsDefaults()` to correctly populate `g_SettingsParams[]` from PROGMEM defaults after EEPROM reset/invalid EEPROM
+
+
+---
+
+* **[Changed] OLED I2C speed (fixed, no menu option):**
+  * I2C bus speed is now fixed via `I2C_BASE_HZ` (default **77 kHz**) and applied by `applyI2CSpeed()` with CPU prescaler compensation
+  * SSB patch upload still switches to fast I2C temporarily (500 kHz request) and restores the fixed bus speed afterward
+
+* **[Changed] Expanded band table (36 bands) + updated EEPROM map:**
+  * Expanded **SW broadcast & amateur** band segmentation to **36 total bands** (LW/MW and FM behavior unchanged)
+  * Updated EEPROM layout to store **36 band states** (`36 * 6B = 216B`) and shifted subsequent blocks accordingly
+  * Bumped `APP_VERSION` to force EEPROM reset due to layout change
+
+* **[Added] Compile-time EEPROM layout guards:**
+  * Added `static_assert` checks in `Memory.h` to catch EEPROM map/struct packing regressions at compile time (block overlaps, packing changes, band count bounds, EEPROM size limit)
+  * Ensures the updated EEPROM layout stays consistent when changing `g_bandCount`, structs, or block addresses
+  
+------------------------------------------------------------------------------------------------------------
+

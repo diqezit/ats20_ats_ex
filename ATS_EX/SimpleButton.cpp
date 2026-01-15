@@ -2,7 +2,7 @@
 #include "SimpleButton.h"
 
 
-#define BUTTONSTATE_IDLE          0           // Button not pressed (initial state) 
+#define BUTTONSTATE_IDLE          0           // Button not pressed (initial state)
 // DO NOT CHANGE!!! BUTTONSTATE_IDLE must always be defined as 0 (Zero)!
 #define BUTTONSTATE_DEBOUNCE      1           // Button press detected, waiting for debounce
 #define BUTTONSTATE_RELEASE       2           // Button was released again
@@ -19,17 +19,52 @@
 
 
 SimpleButton::SimpleButton(uint8_t pin) {
-    //pinMode(pin, INPUT_PULLUP);
+    // Fast GPIO init (saves Flash vs pinMode on AVR):
+    // - configure as INPUT
+    // - enable internal pull-up (button drives pin LOW when pressed)
+    //
+    // Also cache the PINx register address + bit mask once here
+    // This removes per-call port branching and runtime bit shifting in checkEvent()
+
+    // Arduino Uno / ATmega328P pin mapping used here:
+    //   0..7   -> PORTD / PIND  (PD0..PD7)
+    //   8..13  -> PORTB / PINB  (PB0..PB5)
+    //   14..19 -> PORTC / PINC  (PC0..PC5)  [A0..A5]
+
     if (pin < 8) {
-        DDRD &= ~(1 << pin);
-        PORTD |= (1 << pin);
+        // Digital pins D0..D7 (PORTD)
+        DDRD &= ~(1 << pin);    // input
+        PORTD |= (1 << pin);    // pull-up on
+
+        _pinReg = &PIND;                // cached input register
+        _pinMask = (uint8_t)(1 << pin); // cached bit mask
     } else if (pin < 14) {
-        DDRB &= ~(1 << (pin - 8));
-        PORTB |= (1 << (pin - 8));
+        // Digital pins D8..D13 (PORTB)
+        uint8_t bit = (uint8_t)(pin - 8);
+
+        DDRB &= ~(1 << bit);    // input
+        PORTB |= (1 << bit);    // pull-up on
+
+        _pinReg = &PINB;
+        _pinMask = (uint8_t)(1 << bit);
     } else {
-        DDRC &= ~(1 << (pin - 14));
-        PORTC |= (1 << (pin - 14));
+        // Analog pins A0..A5 as digital 14..19 (PORTC)
+        uint8_t bit = (uint8_t)(pin - 14);
+
+        DDRC &= ~(1 << bit);    // input
+        PORTC |= (1 << bit);    // pull-up on
+
+        _pinReg = &PINC;
+        _pinMask = (uint8_t)(1 << bit);
     }
+
+    // Store the Arduino pin number inside the packed state word.
+    // _PinDebounceState layout (16-bit):
+    //   b15..b10: pin number (0..63)
+    //   b9..b4  : debounce timestamp (units of 16ms)
+    //   b3..b0  : FSM state (0..15)
+    //
+    // debounce+state start at 0 => IDLE state, timestamp=0
     _PinDebounceState = ((uint16_t)pin << 10);
 }
 
@@ -39,16 +74,10 @@ uint8_t SimpleButton::checkEvent(uint8_t(*_event)(uint8_t event, uint8_t pin)) {
     uint16_t timeNow = millis() & 0x3f0;
     uint16_t state = _PinDebounceState & 0xf;
     uint16_t debounce = _PinDebounceState & 0x3f0;
-    uint8_t pin = _PinDebounceState >> 10;
     uint8_t pinState;
     uint16_t elapsed;
 
-    if (pin < 8)
-        pinState = (PIND & (1 << pin)) ? HIGH : LOW;
-    else if (pin < 14)
-        pinState = (PINB & (1 << (pin - 8))) ? HIGH : LOW;
-    else
-        pinState = (PINC & (1 << (pin - 14))) ? HIGH : LOW;
+    pinState = ((*_pinReg & _pinMask) ? HIGH : LOW);
 
     if (timeNow < debounce)
         timeNow = timeNow + 0x400;
@@ -118,8 +147,11 @@ uint8_t SimpleButton::checkEvent(uint8_t(*_event)(uint8_t event, uint8_t pin)) {
     _PinDebounceState = (_PinDebounceState & 0xfc00) | (debounce & 0x3f0) | state;
 
     if (ret) {
-        if (_event)
+        if (_event) {
+            // Lazy pin extract due pin number is only needed for callback events (Packed in b15..b10)
+            uint8_t pin = (uint8_t)(_PinDebounceState >> 10);
             ret = _event(ret, pin);
+        }
     } else {
         if (state > BUTTONSTATE_RELEASE)
             ret = BUTTON_PRESSED;

@@ -101,6 +101,31 @@ static constexpr uint8_t CW_VIEW_ROW_FIRST = 2;
 static constexpr uint8_t CW_VIEW_ROW_LAST = 7;
 static constexpr uint8_t CW_VIEW_ROWS = CW_VIEW_ROW_LAST - CW_VIEW_ROW_FIRST + 1;
 
+// --- Fast ADC for CW (no analogRead / analogReference) ---
+static inline void cwAdcInit_Internal1V1_A6() {
+    // Reference = INTERNAL 1.1V (REFS1:REFS0 = 11)
+    // Channel = ADC6 (A6)
+    uint8_t ch = (uint8_t)(CW_ADC_PIN - A0);   // A6-A0 = 6
+
+    ADMUX = _BV(REFS1) | _BV(REFS0) | (ch & 0x07);
+
+    // Enable ADC, prescaler /128 (16MHz -> 125kHz ADC clock)
+    ADCSRA = _BV(ADEN) | _BV(ADPS2) | _BV(ADPS1) | _BV(ADPS0);
+
+    delay(AdcConfig::SETTLE_MS);
+
+    // dummy conversion after ref change
+    ADCSRA |= _BV(ADSC);
+    while (ADCSRA & _BV(ADSC)) {}
+    (void)ADC;
+}
+
+static inline uint16_t cwAdcRead() {
+    ADCSRA |= _BV(ADSC);
+    while (ADCSRA & _BV(ADSC)) {}
+    return ADC;
+}
+
 // ======================================================================
 // ===== ALGORITHM CONFIGURATION STRUCTURES ============================
 // ======================================================================
@@ -405,9 +430,7 @@ static inline void cwViewPut(char c) {
 
 // Internal 1.1V reference gives better precision than 5V for weak CW signals
 static inline void adcSetInternalVref() {
-    analogReference(INTERNAL);
-    delay(AdcConfig::SETTLE_MS);
-    (void)analogRead(CW_ADC_PIN); // dummy read after ref change
+    cwAdcInit_Internal1V1_A6();
 }
 
 // Speaker output has DC component that varies with radio settings
@@ -419,11 +442,10 @@ static inline int16_t acCoupleSignal(uint16_t adcValue) {
 
 // Initial DC offset estimation prevents startup transients
 static inline void adcSeedDcOffset() {
-    g_dcOffset = analogRead(CW_ADC_PIN);
+    g_dcOffset = cwAdcRead();
     for (uint8_t i = 0; i < AdcConfig::DC_SEED_ITER; i++) {
-        uint16_t sample = analogRead(CW_ADC_PIN);
-        g_dcOffset += ((int32_t)sample - g_dcOffset)
-            >> AdcConfig::DC_SEED_SHIFT;
+        uint16_t sample = cwAdcRead();
+        g_dcOffset += ((int32_t)sample - g_dcOffset) >> AdcConfig::DC_SEED_SHIFT;
     }
 }
 
@@ -500,7 +522,7 @@ static uint8_t fillBufferAndValidate() {
     uint16_t minVal = 1023, maxVal = 0;
 
     for (uint8_t i = 0; i < GoertzelConfig::N; i++) {
-        uint16_t sample = analogRead(CW_ADC_PIN);
+        uint16_t sample = cwAdcRead();
         if (sample < minVal) minVal = sample;
         if (sample > maxVal) maxVal = sample;
         g_acBuffer[i] = acCoupleSignal(sample);

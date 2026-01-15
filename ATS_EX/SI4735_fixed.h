@@ -191,22 +191,6 @@ public:
     }
 #endif
 
-    // soft update of the AM RSSI
-    // instead of a disruptive setFrequency() for push and update status - this uses the dedicated AM_RSQ_STATUS (0x43)
-    // command via the base library getter
-    // This command designed for polling signal quality without interrupting the audio path//
-    void softAmRssiUpdate() {
-
-        // base lib store 0x43 response in separate `currentRqsStatus` buff eer
-        getCurrentReceivedSignalQuality(0);
-
-        // copy result back to main `currentStatus` buffer
-        //   makes the fresh RSSI value compatible with the standard getReceivedSignalStrengthIndicator() method,
-        // which expects data in the format of a TUNE_STATUS (0x42) response
-        // per  AN332 - RSSI is at the same offset (RESP4) in both responses
-        currentStatus.raw[4] = currentRqsStatus.raw[4];
-    }
-
     // Configures FM stereo decoder for forced mono or automatic blend mode
     // This single function replaces separate On/Off methods to save flash mem
     void setFmStereoMode(bool force_mono) {
@@ -233,5 +217,105 @@ public:
 
             sendProperty(addr, force_mono ? monoVal : autoVal);
         }
+    }
+
+    // test purposes
+    // 
+    // -----------------------------------------------------------------------------
+    // Fast SI4735 reset + setup without Arduino pinMode()/digitalWrite()
+    // 1) Reduce Flash usage (avoid pulling wiring_digital.c.o when possible)
+    // 2) Keep reset timing exactly like the original library
+    //
+    // Notes:
+    // - This implementation is hard-wired for ATmega328P + RESET_PIN = D12
+    // - D12 on ATmega328P is port B, bit 4 (PB4)
+    // - If you move RESET_PIN to another Arduino pin, you must change the port/bit
+    // -----------------------------------------------------------------------------
+
+    static inline void resetFastD12() {
+        // D12 = PB4 on ATmega328P
+        // DDRB controls direction, PORTB controls output level
+
+        DDRB |= _BV(4);      // set PB4 as OUTPUT
+        delay(10);
+
+        PORTB &= ~_BV(4);    // drive RESET LOW
+        delay(10);
+
+        PORTB |= _BV(4);     // drive RESET HIGH
+        delay(10);
+    }
+
+    // -----------------------------------------------------------------------------
+    // Override setup(resetPin, defaultFunction) to avoid base class reset(),
+    // which uses pinMode()/digitalWrite()
+    //
+    // defaultFunction:
+    // - 0 = FM
+    // - 1 = AM (LW/MW/SW)
+    // -----------------------------------------------------------------------------
+    void setup(uint8_t resetPin, uint8_t defaultFunction) {
+        Wire.begin();
+
+        this->resetPin = resetPin;
+
+        // Configure POWER_UP arguments exactly as intended by the original library:
+        // CTSIEN   = 0 (no CTS interrupt)
+        // GPO2OEN  = 0 (GPO2 disabled)
+        // PATCH    = 0 (normal boot)
+        // XOSCEN   = XOSCEN_CRYSTAL (use 32.768 kHz crystal)
+        // FUNC     = defaultFunction (0=FM, 1=AM)
+        // OPMODE   = SI473X_ANALOG_AUDIO (analog LOUT/ROUT)
+        setPowerUp(
+            0,                    // CTSIEN
+            0,                    // GPO2OEN
+            0,                    // PATCH
+            XOSCEN_CRYSTAL,       // XOSCEN
+            defaultFunction,      // FUNC (0=FM, 1=AM)
+            SI473X_ANALOG_AUDIO   // OPMODE
+        );
+
+        // Hardware reset without pinMode()/digitalWrite()
+        // Assumes resetPin is D12 (PB4)
+        resetFastD12();
+
+        radioPowerUp();
+        setVolume(30);       // library default
+        getFirmware();       // cache firmware info
+        delay(250);          // legacy settle delay
+    }
+
+    // -----------------------------------------------------------------------------
+    // Override getDeviceI2CAddress(resetPin) to avoid base class reset(),
+    // which uses pinMode()/digitalWrite()
+    // Scans both possible SI47xx I2C addresses (0x11 and 0x63)
+    // -----------------------------------------------------------------------------
+    int16_t getDeviceI2CAddress(uint8_t resetPin) {
+        this->resetPin = resetPin;
+
+        // Hardware reset without pinMode()/digitalWrite()
+        // Assumes resetPin is D12 (PB4)
+        resetFastD12();
+
+        Wire.begin();
+
+        // Check 0x11 (SEN low)
+        Wire.beginTransmission(SI473X_ADDR_SEN_LOW);
+        int16_t error = Wire.endTransmission();
+        if (error == 0) {
+            setDeviceI2CAddress(0);
+            return SI473X_ADDR_SEN_LOW;
+        }
+
+        // Check 0x63 (SEN high)
+        Wire.beginTransmission(SI473X_ADDR_SEN_HIGH);
+        error = Wire.endTransmission();
+        if (error == 0) {
+            setDeviceI2CAddress(1);
+            return SI473X_ADDR_SEN_HIGH;
+        }
+
+        // Not found
+        return 0;
     }
 };

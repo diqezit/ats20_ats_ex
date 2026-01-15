@@ -52,11 +52,15 @@ GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 #include "Memory.h"
 #include "Battery.h"
 #include "Input.h"
+#include <avr/interrupt.h>
 #include "UI.h"
 #include "CW_decoder.h"
 #include "RadioControl.h"
 
 #include <util/atomic.h>
+
+ISR(INT0_vect) { rotaryEncoder(); }  // D2
+ISR(INT1_vect) { rotaryEncoder(); }  // D3
 
 // ==========================================
 // ===== CORE UTILITIES & STATE SYNC ========
@@ -100,7 +104,7 @@ static inline void initModeSettingsDefaults(void) {
     APPLY(SoftMute,       MODE_SETTING_SOFT_MUTE) \
     APPLY(AutoVolControl, MODE_SETTING_AVC)
 
-// Syncs mode-dependent settings between UI buffer (g_Settings)
+// Syncs mode-dependent settings between UI buffer (g_SettingsParams)
 // and persistent storage (g_modeSettings)
 // The 'load' flag is used inside the X-Macro expansion to set the data flow direction
 void syncModeDependentSettings(bool load) {
@@ -115,8 +119,8 @@ void syncModeDependentSettings(bool load) {
     // Define operation for both loading and saving
     // preprocessor will expand this for each item in the map
 #define SYNC_OPERATION(ui_idx, stored_idx) \
-        if (load) { g_Settings[ui_idx].param = g_modeSettings[stored_idx][m]; } \
-        else      { g_modeSettings[stored_idx][m] = g_Settings[ui_idx].param; }
+        if (load) { setSettingParam(ui_idx, g_modeSettings[stored_idx][m]); } \
+        else      { g_modeSettings[stored_idx][m] = getSettingParam(ui_idx); }
 
     // Expand the map once to generate all sync operations
     MODE_SETTINGS_MAP(SYNC_OPERATION)
@@ -132,6 +136,21 @@ static void setCpuPrescaler(uint8_t prescaler) {
     CLKPR = 0x80;        // CLKPCE
     CLKPR = prescaler;
     SREG = oldSREG;
+
+    applyI2CSpeed();     // keep I2C SCL stable after CLKPR change
+}
+
+// Applies fixed I2C clock with CPU prescaler compensation
+// Wire.setClock() assumes F_CPU=16 MHz; when CLKPR divides the CPU clock,
+// we scale the requested I2C rate by (1 << CLKPR) to keep the *real* SCL ~constant
+void applyI2CSpeed() {
+    uint8_t p = CLKPR & 0x0F;
+
+    uint32_t req = I2C_BASE_HZ;     // default 77 kHz real at 16 MHz
+    if (p == 1) req <<= 1;          // 8 MHz request 154 kHz -> real stays 77 kHz
+    if (p >= 2) req = 35000UL << p; // 4/2 MHz keep real SCL >= 35 kHz
+
+    Wire.setClock(req);
 }
 
 // ==========================================
@@ -151,13 +170,12 @@ inline static __attribute__((always_inline))
 void settingsEnter() {
     syncModeDependentSettings(true);
 
-    // Load current band BFO calibration
-    // into the temporary UI setting
-    g_Settings[BFO].param = g_bandList[g_bandIndex].bfoCal;
+    // Load current band BFO calibration into UI buffer (per-band calibration)
+    setSettingParam(BFO, g_bandList[g_bandIndex].bfoCal);
 
     if (g_SettingsPage == 0 || g_SettingsPage > g_SettingsMaxPages)
         g_SettingsPage = 1; // safeguard
-    
+
     showSettingsTitle();
     g_SettingSelected = settingsPageStart(g_SettingsPage);
     g_SettingEditing = false;
@@ -178,7 +196,7 @@ void settingsExitAndSave() {
 inline static __attribute__((always_inline))
 void persistModeSetting(ModeSettingType type, SettingsIndex index) {
     ModeContext m = getModeContext();
-    g_modeSettings[type][m] = g_Settings[index].param;
+    g_modeSettings[type][m] = getSettingParam(index);
 }
 
 #if ENABLE_FAVORITES
@@ -195,7 +213,7 @@ bool favoriteExists(uint16_t f, uint8_t m) {
 // compact list after removal
 inline static __attribute__((always_inline))
 void compactFavoritesFrom(uint8_t start) {
-    for (uint8_t i = start; i < g_totalFavorites - 1; i++) {
+    for (uint8_t i = start; (uint8_t)(i + 1) < g_totalFavorites; i++) {
         g_favorites[i] = g_favorites[i + 1];
     }
 }
@@ -203,7 +221,12 @@ void compactFavoritesFrom(uint8_t start) {
 // keep selection valid after delete
 inline static __attribute__((always_inline))
 void fixFavoriteSelectionAfterDelete() {
-    if (g_totalFavorites && g_favoriteSelected >= g_totalFavorites) {
+    if (g_totalFavorites == 0) {
+        g_favoriteSelected = 0;
+        return;
+    }
+
+    if (g_favoriteSelected >= g_totalFavorites) {
         g_favoriteSelected = g_totalFavorites - 1;
     }
 }
@@ -304,7 +327,10 @@ void tuneToSelectedFavorite() {
 
     // Update global state to match favorite station target
     g_currentMode = fav.modulation;
-    g_ssbLoaded = isSSB();
+
+    // LSB/USB/CW are 1..3, FM is 4, AM is 0
+    bool wantSSB = (fav.modulation > AM && fav.modulation < FM);
+    g_ssbLoaded = wantSSB;
 
     uint8_t targetBand = findBandForFavorite(fav);
 
@@ -321,7 +347,7 @@ void tuneToSelectedFavorite() {
         favoriteNeedsFullReset(
             previousBandType,
             g_bandList[g_bandIndex].bandType,
-            g_ssbLoaded,
+            wantSSB,
             ssbWasLoaded
         );
 
@@ -381,7 +407,7 @@ void doStep(int8_t v) {
 // Apply a user-set offset for consistent volume feel
 static void applyCompensatedVolume() {
     if (g_currentMode == FM) {
-        int8_t offset = g_Settings[FmVolAdjust].param;
+        int8_t offset = getSettingParam(FmVolAdjust);
         g_si4735.setVolume(constrain(g_volume - offset, 0, 63));
     } else {
         g_si4735.setVolume(g_volume);
@@ -438,7 +464,7 @@ static inline void doBandwidth(uint8_t v) {
 // Settings: FM Volume Adjust
 // Fine-tunes the software volume reduction for FM mode to match AM/SSB levels
 void doFmVolAdjust(int8_t v) {
-    doSwitchLogic(g_Settings[FmVolAdjust].param, 0, 15, v);
+    doSwitchLogic(settingRef(FmVolAdjust), 0, 15, v);
     if (g_currentMode == FM) applyCompensatedVolume();
 }
 
@@ -449,9 +475,9 @@ void doFmVolAdjust(int8_t v) {
 // (by increasing attenuation)
 void doAttenuation(int8_t v) {
     uint8_t max_att_value = (g_currentMode == FM) ? MAX_ATTENUATION_FM_DB : MAX_ATTENUATION_AM_DB;
-    doSwitchLogic(g_Settings[ATT].param, 0, max_att_value, v);
+    doSwitchLogic(settingRef(ATT), 0, max_att_value, v);
 
-    setAgcHardware(g_Settings[ATT].param);
+    setAgcHardware(getSettingParam(ATT));
     persistModeSetting(MODE_SETTING_AGC, ATT);
 }
 
@@ -460,13 +486,13 @@ void doAttenuation(int8_t v) {
 // A higher value means stronger muting, making the receiver almost silent on noisy frequencies
 // Setting it to 0 - disables soft mute feature
 void doSoftMute(int8_t v) {
-    doSwitchLogic(g_Settings[SoftMute].param, 0, SOFT_MUTE_MAX_ATTENUATION, v);
+    doSwitchLogic(settingRef(SoftMute), 0, SOFT_MUTE_MAX_ATTENUATION, v);
 
     // persist per modulation (AM, LSB, USB, CW)
     persistModeSetting(MODE_SETTING_SOFT_MUTE, SoftMute);
 
     if (g_currentMode != FM)
-        g_si4735.setAmSoftMuteMaxAttenuation(g_Settings[SoftMute].param);
+        g_si4735.setAmSoftMuteMaxAttenuation(getSettingParam(SoftMute));
 }
 
 // Settings: Soft Mute Threshold
@@ -474,19 +500,19 @@ void doSoftMute(int8_t v) {
 // It sets a minimum signal quality (SNR) threshold
 // If the signal drops below this level, the audio will be muted by the amount set in 'SMA'
 void doSoftMuteThreshold(int8_t v) {
-    doSwitchLogic(g_Settings[SoftMuteThr].param, 0, SOFT_MUTE_MAX_SNR_THRESHOLD, v);
+    doSwitchLogic(settingRef(SoftMuteThr), 0, SOFT_MUTE_MAX_SNR_THRESHOLD, v);
     if (!g_si4735.isCurrentTuneFM())
-        g_si4735.setAMSoftMuteSnrThreshold(g_Settings[SoftMuteThr].param);
+        g_si4735.setAMSoftMuteSnrThreshold(getSettingParam(SoftMuteThr));
 }
 
 //Settings: Brightness
 void doBrightness(int8_t v) {
-    int8_t new_setting = g_Settings[Brightness].param + v;
+    int8_t new_setting = getSettingParam(Brightness) + v;
 
     // clamp the value of to the [0, 9]
     new_setting = constrain(new_setting, 0, BRIGHTNESS_MAX_LEVEL);
 
-    g_Settings[Brightness].param = new_setting;
+    setSettingParam(Brightness, new_setting);
     applyBrightness();
 }
 
@@ -494,7 +520,7 @@ void doBrightness(int8_t v) {
 void doSSBAVC(int8_t v) {
     toggleSetting(SVC);
     if (isSSB()) {
-        g_si4735.setSSBAutomaticVolumeControl(g_Settings[SVC].param);
+        g_si4735.setSSBAutomaticVolumeControl(getSettingParam(SVC));
         applyBandConfiguration(true);
     }
 }
@@ -507,12 +533,12 @@ void doSSBAVC(int8_t v) {
 void doAvc(int8_t v) {
     if (g_currentMode == FM) return;
 
-    doSwitchLogic(g_Settings[AutoVolControl].param, AVC_MIN_INDEX, AVC_MAX_INDEX, v);
+    doSwitchLogic(settingRef(AutoVolControl), AVC_MIN_INDEX, AVC_MAX_INDEX, v);
 
     persistModeSetting(MODE_SETTING_AVC, AutoVolControl);
 
     // re-apply value to hardware immediately
-    uint8_t avcValue = getAvcValueFromIndex(g_Settings[AutoVolControl].param);
+    uint8_t avcValue = getAvcValueFromIndex(getSettingParam(AutoVolControl));
     g_si4735.setAvcAmMaxGain(avcValue);
 }
 
@@ -523,11 +549,17 @@ void doSync(int8_t v) {
 
     toggleSetting(Sync);
 
-    if (isSSB()) {
-        uint8_t p = g_Settings[Sync].param; // p ∈ {0,1}
+    switch (g_currentMode) {
+    case LSB:
+    case USB: {
+        uint8_t p = getSettingParam(Sync); // p ∈ {0,1}
         g_si4735.setSSBDspAfc(1 - p);
         g_si4735.setSSBAvcDivider(3 * p);
         applyBandConfiguration(true);
+        break;
+    }
+    default:
+        break;
     }
 }
 
@@ -538,7 +570,7 @@ void doSync(int8_t v) {
 void doDeEmp(int8_t v) {
     toggleSetting(DeEmp);
     if (g_currentMode == FM)
-        g_si4735.setFMDeEmphasis(g_Settings[DeEmp].param + 1);
+        g_si4735.setFMDeEmphasis(getSettingParam(DeEmp) + 1);
 }
 
 //Settings: SW Units
@@ -550,12 +582,12 @@ void doSWUnits(int8_t v) {
 void doSSBSoftMuteMode(int8_t v) {
     toggleSetting(SSM);
     if (isSSB())
-        g_si4735.setSSBSoftMute(g_Settings[SSM].param);
+        g_si4735.setSSBSoftMute(getSettingParam(SSM));
 }
 
 //Settings: SSB Cutoff filter
 void doCutoffFilter(int8_t v) {
-    doSwitchLogic(g_Settings[CutoffFilter].param, 0, CUTOFF_FILTER_MAX_VALUE, v);
+    doSwitchLogic(settingRef(CutoffFilter), 0, CUTOFF_FILTER_MAX_VALUE, v);
 
     if (isSSB())
         updateSSBCutoffFilter();
@@ -564,7 +596,7 @@ void doCutoffFilter(int8_t v) {
 //Settings: CPU Frequency divider
 void doCPUSpeed(int8_t v) {
     toggleSetting(CPUSpeed);
-    setCpuPrescaler(g_Settings[CPUSpeed].param);
+    setCpuPrescaler(getSettingParam(CPUSpeed));
 }
 
 // Settings: BFO Offset calibration
@@ -575,10 +607,11 @@ void doBFOCalibration(int8_t v) {
 
     // Expanded range to -25..+25. With a x100 multiplier in updateBFO(),
     // this provides a +/- 2.5kHz calibration range in 100Hz step
-    doSwitchLogic(g_Settings[BFO].param, BFO_CALIBRATION_MIN, BFO_CALIBRATION_MAX, v);
+    doSwitchLogic(settingRef(BFO), BFO_CALIBRATION_MIN, BFO_CALIBRATION_MAX, v);
 
-    // Write the temporary UI value to the current band persistent field
-    g_bandList[g_bandIndex].bfoCal = g_Settings[BFO].param;
+    // Per-band BFO calibration: store in current band
+    g_bandList[g_bandIndex].bfoCal = getSettingParam(BFO);
+
     markStateAsDirty();
 
     if (isSSB()) updateBFO();
@@ -590,9 +623,10 @@ void doScanSwitch(int8_t v) {
 }
 
 // Settings: CW Pitch
-// Selects the audible tone frequency for CW reception
+// 5..8 meaning 500..800 Hz
 void doCWPitch(int8_t v) {
-    doSwitchLogic(g_Settings[CWPitch].param, 0, MAX_INDEX(cw_pitch_options_hz), v);
+    doSwitchLogic(settingRef(CWPitch), 5, 8, v);
+    markStateAsDirty();
     if (g_currentMode == CW) updateBFO();
 }
 
@@ -613,7 +647,7 @@ void doRSSIAMOff(int8_t v) {
 
 //Settings: Display timeout switch
 void doDisplayOff(int8_t v) {
-    doSwitchLogic(g_Settings[DisplayOff].param, 0, DISPLAY_OFF_TIMER_MAX_LEVEL, v);
+    doSwitchLogic(settingRef(DisplayOff), 0, DISPLAY_OFF_TIMER_MAX_LEVEL, v);
 }
 
 // Settings: FM Audio Profile (Speaker EQ)
@@ -643,9 +677,9 @@ void doAMNoiseBlanker(int8_t v) {
 // As a safety measure if the squelch is manually disabled (set to 0) while it is actively muting the audio,
 // this function immediately un-mutes receiver
 void doSquelch(int8_t v) {
-    doSwitchLogic(g_Settings[SQL].param, 0, SQUELCH_MAX_LEVEL, v);
+    doSwitchLogic(settingRef(SQL), 0, SQUELCH_MAX_LEVEL, v);
 
-    if (g_Settings[SQL].param == 0 && g_squelchCutoff) {
+    if (getSettingParam(SQL) == 0 && g_squelchCutoff) {
         g_si4735.setAudioMute(false);
         g_squelchCutoff = false;
     }
@@ -656,9 +690,9 @@ void doSquelch(int8_t v) {
 // Higher values result in a deeper, more noticeable mute
 // Range: 0 (disabled) to 31 (max)
 void doFmSoftMuteAtt(int8_t v) {
-    doSwitchLogic(g_Settings[FmSmAtt].param, 0, FM_SOFT_MUTE_MAX_ATTN_LEVEL, v);
+    doSwitchLogic(settingRef(FmSmAtt), 0, FM_SOFT_MUTE_MAX_ATTN_LEVEL, v);
     if (g_currentMode == FM)
-        g_si4735.setProperty(FM_PROP_SOFTMUTE_MAX_ATTN_ADDR, g_Settings[FmSmAtt].param);
+        g_si4735.setProperty(FM_PROP_SOFTMUTE_MAX_ATTN_ADDR, getSettingParam(FmSmAtt));
 }
 
 // Settings: FM Soft Mute Threshold (FST)
@@ -666,15 +700,15 @@ void doFmSoftMuteAtt(int8_t v) {
 // If SNR drops below this, soft mute engages. Higher values are more aggressive
 // Range: 0 to 15
 void doFmSoftMuteThr(int8_t v) {
-    doSwitchLogic(g_Settings[FmSmThr].param, 0, FM_SOFT_MUTE_MAX_SNR_LEVEL, v);
+    doSwitchLogic(settingRef(FmSmThr), 0, FM_SOFT_MUTE_MAX_SNR_LEVEL, v);
     if (g_currentMode == FM)
-        g_si4735.setProperty(FM_PROP_SOFTMUTE_SNR_THRESH_ADDR, g_Settings[FmSmThr].param);
+        g_si4735.setProperty(FM_PROP_SOFTMUTE_SNR_THRESH_ADDR, getSettingParam(FmSmThr));
 }
 
 // Settings: Toggle handler for SW AFC menu item (SWA)
 // 0=OFF, 1=PPM, 2=Hz Normal, 3=Hz Aggressive
 void doSwAfcProfile(int8_t v) {
-    doSwitchLogic(g_Settings[SWAFC].param,
+    doSwitchLogic(settingRef(SWAFC),
         SW_AFC_PROFILE_OFF,
         SW_AFC_PROFILE_HZ_AGGR,
         v);
@@ -853,7 +887,7 @@ static void handleDelayedFrequencyUpdate() {
 // skip AM polling when disabled or right after user action to avoid clicks
 inline static __attribute__((always_inline))
 bool amRssiPollingAllowed(uint32_t now_ms) {
-    if (g_Settings[RSSI_AM_Off].param == 1) return false;
+    if (getSettingParam(RSSI_AM_Off) == 1) return false;
     uint16_t now_s = (uint16_t)(now_ms / 1000);
     return (uint16_t)(now_s - g_lastUserActivityTime) >= 1;
 }
@@ -866,9 +900,8 @@ static uint8_t getSignalQuality() {
         if (!amRssiPollingAllowed(millis()))
             return g_signalQualityValue;
 
-        // click-free RSSI update (no RSQ poll to avoid audio artifacts)
-        g_si4735.softAmRssiUpdate();
-        return g_si4735.getReceivedSignalStrengthIndicator();
+        g_si4735.getCurrentReceivedSignalQuality(0);  // AM_RSQ_STATUS (0x43)
+        return g_si4735.getCurrentRSSI();             // RSSI 
 
     case FM: case LSB: case USB: case CW:
         g_si4735.getCurrentReceivedSignalQuality(1);
@@ -987,20 +1020,19 @@ uint16_t displayTimeoutS(uint8_t p) {
     return pgm_read_word(&T[p]);
 }
 
-// enter deep sleep for display to extend battery life
+// Enter low-power mode turn off OLED, reduce CPU multiplier
 inline static __attribute__((always_inline)) void engageDisplaySleep() {
+    if (!g_displayOn) return;
     g_displayOn = false;
-    // on auto-timeout engage deep power save mode at 2 MHz to maximize battery life
-    setCpuPrescaler(CPU_PRESCALER_DEEP_SLEEP); // 3 = 2 MHz , 2 = 4 MHz , 1 = 8 MHz
-    oled.setPower(false);
     autoDisplayOff = true;
+    oled.setPower(false);
+    setCpuPrescaler(CPU_PRESCALER_DEEP_SLEEP);
 }
-
 
 // Handles auto display-off timer
 // tracks time in seconds to keep math in 16-bit
 static inline void checkDisplayTimeout() {
-    uint8_t p = g_Settings[DisplayOff].param;
+    uint8_t p = (uint8_t)getSettingParam(DisplayOff);
 
     if (!g_displayOn || p == 0) return;
 
@@ -1035,7 +1067,7 @@ static inline void initHardwarePins() {
     PORTD |= (1 << ENCODER_PIN_A) | (1 << ENCODER_PIN_B);
 
     // get the correct pin for the initial connection check (lf in Battery.h)
-    g_voltagePinConnected = (uint16_t)analogRead(getBatteryPin()) > ADC_CONNECTED_THRESHOLD;
+    g_voltagePinConnected = (uint16_t)adcReadAx(getBatteryPin()) > ADC_CONNECTED_THRESHOLD;
 }
 
 // Helper to initialize OLED display
@@ -1065,8 +1097,12 @@ static inline void handleEEPROMReset() {
 
 // Helper to initialize interrupts and Si4735 chip
 static inline void initSi4735() {
-    attachInterrupt(digitalPinToInterrupt(ENCODER_PIN_A), rotaryEncoder, CHANGE);
-    attachInterrupt(digitalPinToInterrupt(ENCODER_PIN_B), rotaryEncoder, CHANGE);
+
+    // Setup rotary encoder interrupts on D2(INT0) and D3(INT1) without (saves flash) arduino lib attachInterrupt()
+    // clear any pending interrupt flags then enable INT0/INT1
+    EICRA = (EICRA & ~(_BV(ISC01) | _BV(ISC11))) | _BV(ISC00) | _BV(ISC10); // INT0/INT1: trigger on CHANGE
+    EIFR = _BV(INTF0) | _BV(INTF1);                                         // clear pending flags
+    EIMSK |= _BV(INT0) | _BV(INT1);                                         // enable INT0 + INT1
 
     g_si4735.getDeviceI2CAddress(RESET_PIN);
     g_si4735.setup(RESET_PIN, MW_BAND_TYPE);
@@ -1077,21 +1113,15 @@ static inline void initSi4735() {
 
 // Helper to load receiver configuration from EEPROM
 static inline void loadReceiverConfig() {
-    // Load configuration from EEPROM or initialize with defaults
     readAllReceiverInformation();
-
-#if ENABLE_FAVORITES
-    loadFavorites();
-#endif
 }
 
 // Helper to apply initial configuration and show status
 static inline void applyInitialConfiguration() {
-    setCpuPrescaler(g_Settings[SettingsIndex::CPUSpeed].param);
+    setCpuPrescaler(getSettingParam(CPUSpeed));
 
     applyBandConfiguration(false);
     g_currentFrequency = g_si4735.getFrequency();
-    g_si4735.setVolume(g_volume);
 
     oled.clear();
     showStatus();
