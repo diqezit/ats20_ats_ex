@@ -69,7 +69,7 @@ Rotary::Rotary(char _pin1, char _pin2) {
 
 unsigned char Rotary::process() {
     // Grab state of input pins
-    unsigned char pinstate = ((PIND & (1 << 3)) >> 2) | ((PIND & (1 << 2)) >> 2);
+    uint8_t pinstate = (PIND >> 2) & 0x03;   // PD2->bit0, PD3->bit1
     // Determine new state from the pins and state table
     state = ttable[state & 0xf][pinstate];
     // Return emit bits, ie the generated event

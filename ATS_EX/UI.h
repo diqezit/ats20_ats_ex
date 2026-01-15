@@ -38,18 +38,17 @@ static constexpr uint8_t  UI_FREQ_X_OFFSET_AMFM_PX = 12;    // left offset AM/FM
 static constexpr uint8_t  UI_FREQ_MAIN_WIDTH_AMFM = 5;      // convertToChar width in AM/FM
 static constexpr uint8_t  UI_FREQ_BUF_LEN = 7;              // frequency display buffer
 static constexpr uint16_t UI_SSB_TAIL_WIDTH = 1 +
-    SEVEN_SEG_DOT_WIDTH + DIGIT_SPACING +
-    SEVEN_SEG_DIGIT_WIDTH + DIGIT_SPACING +
-    SEVEN_SEG_DIGIT_WIDTH;                                  // ".dd" tail width
+SEVEN_SEG_DOT_WIDTH + DIGIT_SPACING +
+SEVEN_SEG_DIGIT_WIDTH + DIGIT_SPACING +
+SEVEN_SEG_DIGIT_WIDTH;                                  // ".dd" tail width
 
 // Units label
 static constexpr uint8_t  UI_UNIT_X_PX = 109;
-static constexpr uint8_t  UI_UNIT_ROW = 4;
 
 // Splash
 static constexpr uint8_t  UI_SPLASH_LINE1_X = 26;
 static constexpr uint8_t  UI_SPLASH_LINE1_ROW = 1;
-static constexpr uint8_t  UI_SPLASH_LINE2_X = 34;
+static constexpr uint8_t  UI_SPLASH_LINE2_X = 46;
 static constexpr uint8_t  UI_SPLASH_LINE2_ROW = 3;
 static constexpr uint8_t  UI_SPLASH_ANIM_ROW = 6;
 static constexpr uint8_t  UI_SPLASH_ANIM_STEPS = 21;
@@ -80,7 +79,6 @@ static constexpr char     UI_RSSI_SEPARATOR = '|';
 
 static constexpr uint8_t  UI_BATT_X = 108;
 static constexpr uint8_t  UI_BATT_ROW = 7;
-static constexpr uint8_t  UI_BATT_MAX_PERCENT = 100;
 
 static constexpr uint8_t  UI_STEP_LABEL_X = 34;
 static constexpr uint8_t  UI_STEP_LABEL_ROW = 0;
@@ -102,7 +100,6 @@ static constexpr uint8_t  UI_FAV_PAGE_CLEAR_ROWS = 7;
 static constexpr uint8_t  UI_FAV_HEADER_TITLE_WIDTH = 16;                         // "DEL:BW FAVORITES"
 static constexpr uint8_t  UI_FAV_EMPTY_LIST_ROW = 4;
 static constexpr uint8_t  UI_FAV_EMPTY_LIST_X = 36;
-static constexpr uint8_t  UI_FAV_FM_PADDING_SPACES = 0;                            // not used for right-align strategy
 
 // Frequency right-align helpers for favorites
 static constexpr uint8_t  UI_FAV_PREFIX_COLS = 4;                                  // ">NN " prefix
@@ -129,6 +126,18 @@ static constexpr uint8_t  UI_BAND_NAME_LEN = 4;
 static constexpr uint8_t  UI_MODE_ABBR_LEN = 4;                  // "AM ", "LSB", ...
 
 extern GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
+
+#define UI_FORMAT_HUNDREDS3_IF(targetIdx)                      \
+    do {                                                       \
+        if (idx == (targetIdx)) {                              \
+            /* CWPitch is stored as 5..8 (meaning 500..800 Hz) */ \
+            buf[0] = (char)('0' + (uint8_t)param);             \
+            buf[1] = '0';                                      \
+            buf[2] = '0';                                      \
+            buf[3] = '\0';                                     \
+            return;                                            \
+        }                                                      \
+    } while (0)
 
 const char g_bandModeDesc[][UI_MODE_ABBR_LEN] = { "AM ", "LSB", "USB", "CW ", "FM " };
 
@@ -201,7 +210,7 @@ static void calcSettingPos(
     uint8_t place = idx % UI_SETTINGS_PER_PAGE; // 0..5 on page
 
     // 0=Row-first (default), 1=Column-first
-    if (g_Settings[NAV].param == 0) {
+    if (getSettingParam(NAV) == 0) {
         calcSettingPosRowFirst(place, xOffset, yOffset);
     } else {
         calcSettingPosColumnFirst(place, xOffset, yOffset);
@@ -214,15 +223,19 @@ static void calcSettingPos(
 
 // map 0..9 to non linear contrast
 // give finer control at low end where eyes are sensitive
-static inline __attribute__((always_inline))
-uint8_t brightnessToContrast(uint8_t s) {
-    return (uint8_t)(((uint32_t)s * ((uint16_t)s * 130 + 6060)) >> 8);
+static inline uint8_t brightnessToContrast(uint8_t s) {
+
+    // orig curve is
+    // contrast(s) = ((uint32_t)s * ((uint16_t)s * 130 + 6060)) >> 8
+    // its for s=0..9
+    static uint8_t lut[10] = { 0, 24, 49, 75, 102, 131, 160, 190, 221, 254 };
+    return lut[s];
 }
 
 // apply contrast curve to OLED
 // add +1 to avoid full black at lowest setting
 static void applyBrightness() {
-    uint8_t s = g_Settings[Brightness].param;
+    uint8_t s = (uint8_t)getSettingParam(Brightness);
     oled.setContrast((uint8_t)(brightnessToContrast(s) + 1));
 }
 
@@ -234,15 +247,21 @@ static void applyBrightness() {
 // compact mapping keeps UI readable at a glance
 static inline __attribute__((always_inline))
 char stereoIndicatorChar() {
-    if (g_currentMode == FM) {
-        return (g_stereoStatus && g_Settings[ForceMono].param == 0)
-            ? '*' : ' ';
-    }
-    if (g_currentMode == CW) {
+    switch (g_currentMode) {
+    case FM:
+        return (g_stereoStatus && getSettingParam(ForceMono) == 0) ? '*' : ' ';
+
+    case CW:
         return (g_lastCWMode == LSB) ? 'L' : 'U';
+
+    case LSB:
+    case USB:
+        return (getSettingParam(Sync) == 1) ? 'S' : ' ';
+
+    case AM:
+    default:
+        return ' ';
     }
-    if (isSSB() && g_Settings[Sync].param == 1) return 'S';
-    return ' ';
 }
 
 // single slot shows CW sideband, SSB sync, or FM stereo
@@ -286,7 +305,7 @@ static void showModulation() {
 static inline void buildVolumeBuf(char* buf) {
     if (g_muteVolume == 0) {
         // reads from master g_volume - not the chip g_si4735! To compensate
-        convertToChar(buf, g_volume, 2, 0, 0);
+        convertToChar(buf, g_volume, 2, 0, '.', ' ');
     } else {
         buf[0] = ' ';
         buf[1] = 'M';
@@ -311,12 +330,10 @@ static void showVolume() {
 static void showRfHints() {
     if (isSSB()) return;
 
-    const uint8_t x = UI_VOLUME_X;
-    const uint8_t row = UI_VOLUME_ROW + 2;
-    if (row > 7) return;
+    constexpr uint8_t x = UI_VOLUME_X;
+    constexpr uint8_t row = UI_VOLUME_ROW + 2;  // always valid
 
-    clearBox(x, (uint8_t)(row * UI_CHAR_H),
-        (uint8_t)(2 * UI_CHAR_W), UI_CHAR_H);
+    clearBox(x, row * UI_CHAR_H, 2 * UI_CHAR_W, UI_CHAR_H);
 
     if (g_si4735.getCurrentSoftMuteIndicator()) {
         oled.setCursor(x, row);
@@ -364,22 +381,21 @@ static void showSignalQuality() {
 
     // Clear if no RSSI data OR RSSI polling disabled in AM
     if (g_signalQualityValue == UI_SIGNAL_NO_VALUE ||
-        (g_currentMode == AM && g_Settings[RSSI_AM_Off].param == 1)) {
+        (g_currentMode == AM && getSettingParam(RSSI_AM_Off) == 1)) {
         uiSignalClear();
     } else {
-        uiRenderSignalValue(g_signalQualityValue, g_Settings[SMeter].param);
+        uiRenderSignalValue(g_signalQualityValue, (uint8_t)getSettingParam(SMeter));
     }
 
     showRfHints();
 }
 
 // show stable battery percent
-// cap at 100 to avoid overflow when ADC jitters
 static void showChargeOnDisplay() {
     RETURN_IF_SETTINGS_ACTIVE();
-    int charge = min(g_stableBatteryPercent, (int)UI_BATT_MAX_PERCENT);
+    uint8_t charge = g_stableBatteryPercent;
     drawInverted(UI_BATT_X, UI_BATT_ROW, charge, false);
-    if (charge < UI_BATT_MAX_PERCENT) oled.print('%');
+    if (charge < 100) oled.print('%');
 }
 
 // show step value based on mode
@@ -390,10 +406,24 @@ static void showStep() {
     drawInverted(UI_STEP_LABEL_X, UI_STEP_LABEL_ROW, F("STEP: "), invert);
 
     const Band& current_band = g_bandList[g_bandIndex];
-    uint8_t index = (g_currentMode == FM)
-        ? (4 + current_band.stepIdxFM)
-        : (isSSB() ? (SSB_STEP_OFFSET + current_band.stepIdxSSB)
-            : current_band.stepIdxAM);
+    uint8_t index;
+
+    switch (g_currentMode) {
+    case FM:
+        index = (uint8_t)(4 + current_band.stepIdxFM);
+        break;
+
+    case LSB:
+    case USB:
+    case CW: // CW shares the same step settings as SSB
+        index = (uint8_t)(SSB_STEP_OFFSET + current_band.stepIdxSSB);
+        break;
+
+    case AM:
+    default:
+        index = (uint8_t)current_band.stepIdxAM;
+        break;
+    }
 
     oled.invertText(invert);
     oled.print((__FlashStringHelper*)step_lookup_table[index]);
@@ -569,7 +599,7 @@ static void prepareDisplayConfig(bool ssbMode,
         outDotPos = UI_DOTPOS_FM;
         outUnit = "MHz";
     } else if (band == SW_BAND_TYPE &&
-        g_Settings[SettingsIndex::SWUnits].param == 1) {
+        getSettingParam(SWUnits) == 1) {
         // SW can optionally show MHz for user preference
         outDotPos = UI_DOTPOS_SW_MHZ;
         outUnit = "MHz";
@@ -621,9 +651,7 @@ static void renderUnit(bool ssbMode,
     const char* unit) {
     if (ssbMode && len >= 5) return;  // avoid collision with SSB tail
 
-    uint8_t row = (UI_FREQ_TOP_PX + SEVEN_SEG_DIGIT_HEIGHT - UI_CHAR_H)
-        / UI_CHAR_H;
-    if (row > 7) row = 7;
+    constexpr uint8_t row = (UI_FREQ_TOP_PX + SEVEN_SEG_DIGIT_HEIGHT - UI_CHAR_H) / UI_CHAR_H;
 
     clearBox(UI_UNIT_X_PX, row * UI_CHAR_H, 3 * UI_CHAR_W, UI_CHAR_H);
     oled.setCursor(UI_UNIT_X_PX, row);
@@ -699,37 +727,26 @@ static void showFrequencySeek(uint16_t freq) {
 
 #if ENABLE_FAVORITES
 
-static constexpr uint8_t FAV_HEADER_ROW = UI_FAV_HEADER_ROW;
-static constexpr uint8_t FAV_LIST_START_ROW = UI_FAV_LIST_START_ROW; // start at row 2
-static constexpr uint8_t FAV_ROW_GAP = UI_FAV_ROW_GAP;               // 2 char rows gap
-static constexpr uint8_t FAV_ITEMS_PER_PG = UI_FAV_ITEMS_PER_PG;     // 3 per page
-
 // =-=-=-=-=-=-=-=-= UI: FAVORITES HELPERS =-=-=-=-=-=-=-=-=
 
 // page for a given index
 // simple math keeps navigation predictable
-static inline uint8_t fav_pageOf(uint8_t index) {
-    return index / FAV_ITEMS_PER_PG;
-}
+#define fav_pageOf(i) ((i) / UI_FAV_ITEMS_PER_PG)
 
 // page bounds [start, end)
 // clamp to total to avoid out of range reads
 static inline void fav_getPageBounds(uint8_t page,
     uint8_t& start,
     uint8_t& end) {
-    start = page * FAV_ITEMS_PER_PG;
-    end = (start + FAV_ITEMS_PER_PG < g_totalFavorites)
-        ? (start + FAV_ITEMS_PER_PG)
+    start = page * UI_FAV_ITEMS_PER_PG;
+    end = (start + UI_FAV_ITEMS_PER_PG < g_totalFavorites)
+        ? (start + UI_FAV_ITEMS_PER_PG)
         : g_totalFavorites;
 }
 
 // row index on current page
 // fixed spacing keeps list readable on small OLED
-static inline uint8_t fav_rowForIndex(uint8_t index,
-    uint8_t page_start_index) {
-    return FAV_LIST_START_ROW +
-        (index - page_start_index) * FAV_ROW_GAP;
-}
+#define fav_rowForIndex(i, ps) (UI_FAV_LIST_START_ROW + ((i) - (ps)) * UI_FAV_ROW_GAP)
 
 // padding to right-align XX|YY in header
 // stable header width aids orientation
@@ -870,7 +887,7 @@ static inline void fav_drawLine(uint8_t idx,
 // header with title and right-aligned counter
 // stable header helps orientation across pages
 static void fav_drawHeader() {
-    oled.setCursor(0, FAV_HEADER_ROW);
+    oled.setCursor(0, UI_FAV_HEADER_ROW);
     oled.invertText(true);
     oled.print(F("DEL:BW FAVORITES"));
 
@@ -897,7 +914,7 @@ static void fav_drawHeader() {
 // avoid blank UI so user sees state immediately
 static inline void fav_renderEmptyList() {
     clearBox(0,
-        (FAV_LIST_START_ROW - 1) * UI_CHAR_H,
+        (UI_FAV_LIST_START_ROW - 1) * UI_CHAR_H,
         UI_SCREEN_W,
         UI_FAV_PAGE_CLEAR_ROWS * UI_CHAR_H);
     drawInverted(UI_FAV_EMPTY_LIST_X,
@@ -926,7 +943,7 @@ static inline void fav_drawPageOrEmpty(uint8_t page) {
     } else {
         // full clear per page avoids ghosting
         clearBox(0,
-            (FAV_LIST_START_ROW - 1) * UI_CHAR_H,
+            (UI_FAV_LIST_START_ROW - 1) * UI_CHAR_H,
             UI_SCREEN_W,
             UI_FAV_PAGE_CLEAR_ROWS * UI_CHAR_H);
 
@@ -973,6 +990,11 @@ static void fav_handleContent(bool force_redraw) {
 // Favorites menu orchestrator
 // choose cheapest update path to keep UI snappy
 static void showFavorites(bool force_redraw) {
+    if (g_favoriteSelected >= g_totalFavorites) {
+        g_favoriteSelected = g_totalFavorites
+            ? (g_totalFavorites - 1) : 0;
+    }
+
     fav_drawHeader();
     fav_handleContent(force_redraw);
 }
@@ -1023,19 +1045,13 @@ bool formatAliasByIndex(char* buf,
     int8_t param) {
     switch (idx) {
 
-    case CWPitch: {
-        uint16_t hz =
-            pgm_read_word(&cw_pitch_options_hz[param]);
-        convertToChar(buf, hz, UI_SETTING_NUM_WIDTH);
-        return true;
-    }
-
     case SettingsIndex::BATT_PIN: {
         strcpy_P(buf,
             (param == 1) ? BATT_PIN_NAME_ALT
             : BATT_PIN_NAME_DEFAULT);
         return true;
     }
+
     default:
         return false;
     }
@@ -1088,6 +1104,10 @@ void SettingParamToUI_Number(char* buf,
     uint8_t idx,
     int8_t param) {
 
+    // CWPitch is stored as 5..8 (meaning 500..800 Hz)
+    // flash-saving zeros
+    UI_FORMAT_HUNDREDS3_IF(SettingsIndex::CWPitch);
+
     // user expects 1..10 not 0..9
     if (idx == SettingsIndex::Brightness) param++;
 
@@ -1099,19 +1119,21 @@ void SettingParamToUI_Number(char* buf,
     buf[UI_SETTING_NUM_WIDTH] = '\0';
 }
 
+#undef UI_FORMAT_HUNDREDS3_IF
+
 // Convert setting param to UI text
 // Shows '---' for settings not active in current mode
 // Splits formatting path for special cases vs standard numbers
 static void SettingParamToUI(char* buf, uint8_t idx) {
 
     // user expects to see inactive settings are disabled
-    if (!g_Settings[idx].is_active()) {
+    if (!isSettingActive(idx)) {
         strcpy_P(buf, PSTR("---"));
         return;
     }
 
-    int8_t  param = g_Settings[idx].param;
-    uint8_t type = g_Settings[idx].type;
+    int8_t  param = getSettingParam(idx);
+    uint8_t type = getSettingType(idx);
 
     if (SettingParamToUI_Special(buf, idx, param, type)) return;
 
@@ -1166,13 +1188,14 @@ static inline __attribute__((always_inline))
 void drawFullRow(uint8_t x,
     uint8_t y,
     uint8_t idx,
-    const char* buf,
+    const char* nameBuf,
+    const char* valBuf,
     bool isSelected,
     bool isEditing) {
     drawSettingItem(x,
         y,
-        g_Settings[idx].name,
-        buf,
+        nameBuf,
+        valBuf,
         (isSelected && !isEditing),
         isEditing);
 }
@@ -1185,20 +1208,22 @@ static void DrawSetting(uint8_t idx,
     bool full) {
     if (!g_settingsActive) return;
 
-    char buf[UI_SETTING_NUM_WIDTH + 1];
+    char valBuf[UI_SETTING_NUM_WIDTH + 1];
+    char nameBuf[4];
 
     uint8_t x, y;
     settingPosFromIndex(idx, g_SettingsPage, x, y);
 
-    SettingParamToUI(buf, idx);
+    SettingParamToUI(valBuf, idx);
 
     const bool isSelected = (idx == g_SettingSelected);
     const bool isEditing = (isSelected && g_SettingEditing);
 
     if (full) {
-        drawFullRow(x, y, idx, buf, isSelected, isEditing);
+        getSettingName(idx, nameBuf);
+        drawFullRow(x, y, idx, nameBuf, valBuf, isSelected, isEditing);
     } else {
-        drawValueCell(x, y, buf, isEditing);
+        drawValueCell(x, y, valBuf, isEditing);
     }
 }
 
@@ -1250,7 +1275,7 @@ void showSplashScreen() {
     drawInverted(UI_SPLASH_LINE1_X, UI_SPLASH_LINE1_ROW,
         APP_NAME_LINE1, false);
     drawInverted(UI_SPLASH_LINE2_X, UI_SPLASH_LINE2_ROW,
-        F("MOD NO RDS"), false);
+        F("ATS EX"), false);
 
 #if ANIMATE_SPLASH
     for (uint8_t i = 0; i < UI_SPLASH_ANIM_STEPS; i++) {

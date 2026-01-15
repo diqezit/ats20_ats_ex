@@ -14,6 +14,15 @@ void convertToChar(
     char separator = '.',
     char space = ' '
 ) {
+    // len must be >= 1
+    if (len == 0) {
+        str[0] = '\0';
+        return;
+    }
+
+    // dot must be strictly less than len
+    if (dot >= len) dot = 0;
+
     uint8_t current_pos = len + (dot > 0);
     str[current_pos] = '\0';
 
@@ -58,12 +67,6 @@ static inline ModeContext getModeContext() {
         ? MODE_CONTEXT_USB : MODE_CONTEXT_LSB;  // CW inherits from LSB/USB
     default:  return MODE_CONTEXT_AM;           // FM not used for AVC
     }
-}
-
-// Resets the EEPROM save timer to delay saving state until the user is idle
-static inline void resetEepromDelay() {
-    g_storeTime = millis();
-    g_previousFrequency = 0;
 }
 
 // Marks receiver state as dirty to trigger an EEPROM save on idle
@@ -115,11 +118,6 @@ static void doSwitchLogic(int8_t& param, int8_t low, int8_t high, int8_t step) {
     }
 }
 
-// Toggles a binary setting (0 or 1)
-static void toggleSetting(uint8_t settingIndex) {
-    g_Settings[settingIndex].param = 1 - g_Settings[settingIndex].param;
-}
-
 // Helper to clamp an index to a valid range, resetting to 0 if out of bounds
 // 'strict' uses a > comparison, otherwise >= is used
 static inline void clamp_index(int8_t& var, const int8_t max_val, bool strict = false) {
@@ -135,6 +133,15 @@ void updateIfChanged(T& old_value, T new_value, void (*update_fn)()) {
         old_value = new_value;
         update_fn();
     }
+}
+
+static inline uint16_t adcReadAx(uint8_t analogPin) {
+    uint8_t ch = (uint8_t)(analogPin - A0);      // A0..A7 -> 0..7
+    ADMUX = (1 << REFS0) | (ch & 0x07);         // опора AVcc
+    ADCSRA = (1 << ADEN) | (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0); // /128
+    ADCSRA |= (1 << ADSC);
+    while (ADCSRA & (1 << ADSC)) {}
+    return ADC;
 }
 
 #if DEBUG_MODE
