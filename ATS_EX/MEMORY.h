@@ -226,7 +226,7 @@ static void loadBandState(uint8_t bandIndex) {
     // Boundary checks
     clamp_index(band.bwIdxSSB, g_bwSSBMaxIdx, true);
     clamp_index(band.bwIdxAM, g_maxFilterAM, true);
-    clamp_index(band.bwIdxFM, LEN(bw_fm_map), true);
+    clamp_index(band.bwIdxFM, (int8_t)MAX_INDEX(bw_fm_map), true);
     clamp_index(band.stepIdxAM, (int8_t)(AM_STEPS_COUNT - 1), true);
     clamp_index(band.stepIdxSSB, (int8_t)(SSB_STEPS_COUNT - 1), true);
     clamp_index(band.stepIdxFM, g_lastStepFM, true);
@@ -315,6 +315,49 @@ static inline void handleModeSettingsEEPROM(bool save) {
 #undef PACK4
 #undef UNPACK_LO
 #undef UNPACK_HI
+
+// ==========================================
+// ===== SETTINGS VALIDATION ================
+// ==========================================
+
+// Validate all loaded settings against hardware limits
+// Called once after EEPROM load to ensure RAM state is clean
+// Prevents sending 0xFFFF (from EEPROM 0xFF -> int8_t -1 -> uint16_t 0xFFFF)
+// to Si4735 reserved bit fields which would violate AN332 specifications
+static void validateLoadedSettings() {
+
+    // FM Soft Mute
+    if ((uint8_t)getSettingParam(FmSmAtt) > FM_SOFT_MUTE_MAX_ATTN_LEVEL)
+        setSettingParam(FmSmAtt, FM_SOFT_MUTE_DEFAULT_ATT);
+
+    if ((uint8_t)getSettingParam(FmSmThr) > FM_SOFT_MUTE_MAX_SNR_LEVEL)
+        setSettingParam(FmSmThr, FM_SOFT_MUTE_DEFAULT_THR);
+
+    // AM/SSB Soft Mute Threshold
+    if ((uint8_t)getSettingParam(SoftMuteThr) > SOFT_MUTE_MAX_SNR_THRESHOLD)
+        setSettingParam(SoftMuteThr, 0);
+
+    // Squelch
+    if ((uint8_t)getSettingParam(SQL) > SQUELCH_MAX_LEVEL)
+        setSettingParam(SQL, 0);
+
+    // Mode-specific settings validation
+    // These are stored separately from g_SettingsParams and need individual checks
+    for (uint8_t ctx = 0; ctx < MODE_CONTEXT_COUNT; ++ctx) {
+
+        // Soft Mute Attenuation
+        if ((uint8_t)g_modeSettings[MODE_SETTING_SOFT_MUTE][ctx] > SOFT_MUTE_MAX_ATTENUATION)
+            g_modeSettings[MODE_SETTING_SOFT_MUTE][ctx] = DEFAULT_MODE_SETTINGS.soft_mute;
+
+        // AVC index
+        if ((uint8_t)g_modeSettings[MODE_SETTING_AVC][ctx] > AVC_MAX_INDEX)
+            g_modeSettings[MODE_SETTING_AVC][ctx] = DEFAULT_MODE_SETTINGS.avc;
+
+        // AGC/ATT
+        if ((uint8_t)g_modeSettings[MODE_SETTING_AGC][ctx] > MAX_ATTENUATION_AM_DB)
+            g_modeSettings[MODE_SETTING_AGC][ctx] = DEFAULT_MODE_SETTINGS.agc;
+    }
+}
 
 // ==========================================
 // ===== MAIN ORCHESTRATORS =================
@@ -406,7 +449,7 @@ static void readAllReceiverInformation() {
     g_volume = header.volume;
     g_bandIndex = header.bandIndex;
 
-    if ((uint8_t)g_bandIndex > g_lastBand) g_bandIndex = 1; // clamp to valid range
+    if (g_bandIndex > g_lastBand) g_bandIndex = 1; // clamp to valid range
     g_currentMode = header.currentMode > FM ? AM : header.currentMode;
 
     g_currentBFO = header.currentBFO;
@@ -439,6 +482,8 @@ static void readAllReceiverInformation() {
         setSettingParam(DisplayOff, 0);
 
     handleModeSettingsEEPROM(false);
+
+    validateLoadedSettings();
 
     applyBrightness();
 

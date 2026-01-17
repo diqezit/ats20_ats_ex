@@ -258,7 +258,7 @@ static void handleVolumeDownShortPress() {
     RETURN_IF_SETTINGS_ACTIVE();
     if (g_activeCommand == CMD_VOLUME) return;
 
-    // if currently muted (we have stored previous volume) restore it
+    // If currently muted - restore audio
     if (g_muteVolume) {
         g_muteVolume = 0;
         applyCompensatedVolume();
@@ -266,10 +266,10 @@ static void handleVolumeDownShortPress() {
         return;
     }
 
-    // if not muted - store USER volume (not chip volume) and mute
+    // If not muted - store current user volume and mute
     if (g_volume) {
         g_muteVolume = g_volume;
-        g_si4735.setVolume(0);
+        applyCompensatedVolume();
         showVolume();
     }
 }
@@ -344,7 +344,7 @@ static void handleBandwidthLongDone() {
 
 // Short press on Mode button cycles through AM/SSB/CW, but is disabled in FM
 static void handleModeShortPress() {
-    if (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE) return;
+    if (currentBandType() == FM_BAND_TYPE) return;
     RETURN_IF_SETTINGS_ACTIVE();
     cycleAmSsbCwModes();
 }
@@ -387,7 +387,8 @@ void switchCommand(CommandMode mode) {
     CommandMode newMode = (g_activeCommand != mode) ? mode : CMD_NONE;
     g_activeCommand = newMode;
 
-    if (g_activeCommand != CMD_NONE) {
+    // avoid volatile reread of g_activeCommand (use known written value)
+    if (newMode != CMD_NONE) {
         noteUserActivity();
     } else {
         g_lastAdjustmentTime = 0;

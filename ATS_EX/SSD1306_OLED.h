@@ -10,7 +10,7 @@
     (!) Minimal features for only main functionality with ATS_EX receiver
 
     Manual generation of segments 14x32 resolution (7-segment display) use SSD1306 minimal library
-    By diqezit v2.0
+    By diqezit v2.1
     Charset: '.', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
 
     My repos: https://github.com/diqezit/TestDisplay
@@ -155,6 +155,10 @@ static const uint8_t _oled_init[] PROGMEM = {
     0x40,
     OLED_NORMALDISPLAY,
     OLED_DISPLAY_ON,
+    OLED_SETCOMPINS,
+    OLED_HEIGHT_64,
+    OLED_SETMULTIPLEX,
+    OLED_64,
 };
 
 
@@ -228,7 +232,6 @@ public:
     // Constructor
     GyverOLED(uint8_t address = 0x3C) : _address(address) {}
 
-
     // =================================================================================
     // ===== Service Functions =========================================================
     // =================================================================================
@@ -236,24 +239,12 @@ public:
     // Sets up I2C and sends initialization commands to configure display parameters
     void init(int __attribute__((unused)) sda = 0, int __attribute__((unused)) scl = 0) {
         Wire.begin();
-
-        // Default safe I2C speed for initial boot stability
-        //
-        // User setting from EEPROM will be applied later by applyI2CSpeed()
-        // after readAllReceiverInformation() loads the configuration
         Wire.setClock(I2C_BASE_HZ);
 
         beginCommand();
         for (uint8_t i = 0; i < sizeof(_oled_init); i++) {
             sendByte(pgm_read_byte(&_oled_init[i]));
         }
-        endTransm();
-
-        beginCommand();
-        sendByte(OLED_SETCOMPINS);
-        sendByte(OLED_HEIGHT_64);
-        sendByte(OLED_SETMULTIPLEX);
-        sendByte(OLED_64);
         endTransm();
 
         setCursorXY(0, 0);
@@ -272,7 +263,8 @@ public:
         y1 = OLED_CLAMP(y1, 0, _maxRow);
         x0 = OLED_CLAMP(x0, 0, _maxX);
         x1 = OLED_CLAMP(x1, 0, OLED_WIDTH);
-        setWindow(x0, y0, x1, y1);
+
+        setWindowRaw((uint8_t)x0, (uint8_t)y0, (uint8_t)x1, (uint8_t)y1);
 
         beginData();
         uint16_t bytes = (uint16_t)(x1 - x0) * (y1 - y0 + 1);
@@ -301,7 +293,6 @@ public:
         endTransm();
     }
 
-
     // =================================================================================
     // ===== Text Output ===============================================================
     // =================================================================================
@@ -313,10 +304,9 @@ public:
     static constexpr uint8_t FONT_SPACER = 1;
     static constexpr uint8_t FONT_TOTAL = FONT_COLS + FONT_SPACER;
 
-    size_t write(uint8_t data) {
-        if (_x + FONT_TOTAL > _maxX) return 1;  // Skip if beyond screen
-
-        beginData();
+    // Core write without beginData()/endTransm() for batching
+    inline void writeCore(uint8_t data) {
+        if (_x + FONT_TOTAL > _maxX) return;  // Skip if beyond screen
 
         // 5 columns from font table
         for (uint8_t col = 0; col < FONT_COLS; col++) {
@@ -327,10 +317,14 @@ public:
         }
 
         // 1 column spacing
-        uint8_t spacer = _invState ? 0xFF : 0x00;
-        sendByte(spacer);
+        sendByte(_invState ? 0xFF : 0x00);
         _x++;
+    }
 
+    // Single-char write
+    size_t write(uint8_t data) {
+        beginData();
+        writeCore(data);
         endTransm();
         return 1;
     }
@@ -346,11 +340,13 @@ public:
     // print RAM string
     size_t print(const char* s) {
         if (!s) return 0;
+        beginData();
         size_t n = 0;
         while (*s) {
-            write((uint8_t)*s++);
+            writeCore((uint8_t)*s++);
             n++;
         }
+        endTransm();
         return n;
     }
 
@@ -358,27 +354,17 @@ public:
     size_t print(const __FlashStringHelper* s) {
         if (!s) return 0;
         PGM_P p = (PGM_P)s;
+        beginData();
         size_t n = 0;
         while (1) {
             char c = (char)pgm_read_byte(p++);
             if (!c) break;
-            write((uint8_t)c);
+            writeCore((uint8_t)c);
             n++;
         }
+        endTransm();
         return n;
     }
-
-    // ---- number print helpers (no utoa/ultoa, no strrev) ----
-    // This avoids pulling libc utoa_ncheck.o + strrev.o into flash
-
-    size_t print(uint8_t v) { return printUnsigned((uint32_t)v); }
-    size_t print(uint16_t v) { return printUnsigned((uint32_t)v); }
-    size_t print(uint32_t v) { return printUnsigned(v); }
-
-    size_t print(int8_t v) { return printSigned((int32_t)v); }
-    size_t print(int16_t v) { return printSigned((int32_t)v); }
-    size_t print(int32_t v) { return printSigned(v); }
-
 
     // =================================================================================
     // ===== Cursor / Text Mode ========================================================
@@ -391,12 +377,11 @@ public:
     void setCursorXY(int x, int y) {
         _x = x;
         _y = y;
-        setWindow(x, (y >> 3), _maxX, (y >> 3));  // Simplified window for single row (scale=1)
+        setWindowRaw((uint8_t)x, (uint8_t)(y >> 3), _maxX, (uint8_t)(y >> 3));
     }
 
     // Toggles text inversion mode for white-on-black or black-on-white rendering
     void invertText(bool inv) { _invState = inv; }
-
 
     // =================================================================================
     // ===== Seven Segment Drawing ======================================================
@@ -432,26 +417,19 @@ public:
     // =-=-=-=-=-=-=-=-= Mid-level data transfer =-=-=-=-=-=-=-=-=
 
     // send rectangular window of data to display
-    // NULL data pointer clears the window to save flash
     void partialUpdate(uint8_t x, uint8_t y, uint8_t w, uint8_t h, const unsigned char* data) {
         uint8_t startPage = y >> 3;
         uint8_t endPage = (y + h - 1) >> 3;
-
-        beginCommand();
-        sendByte(OLED_COLUMNADDR);
-        sendByte(x);
-        sendByte(x + w - 1);
-        sendByte(OLED_PAGEADDR);
-        sendByte(startPage);
-        sendByte(endPage);
-        endTransm();
+        setWindowRaw(x, startPage, (uint8_t)(x + w - 1), endPage);
 
         uint8_t pages = endPage - startPage + 1;
         uint16_t len = (uint16_t)w * pages;
 
         beginData();
-        for (uint16_t i = 0; i < len; i++) {
-            sendByte(data ? data[i] : 0x00);
+        if (!data) {
+            while (len--) sendByte(0x00);
+        } else {
+            while (len--) sendByte(*data++);
         }
         endTransm();
     }
@@ -513,14 +491,13 @@ public:
         partialUpdate((uint8_t)px, (uint8_t)py, digitW, SEVEN_SEG_DIGIT_HEIGHT, localBuf);
     }
 
-
     // =================================================================================
     // ===== System Functions ===========================================================
     // =================================================================================
 
     // Fills entire display with specified byte value and resets cursor
     void fill(uint8_t data) {
-        setWindow(0, 0, _maxX, _maxRow);
+        setWindowRaw(0, 0, _maxX, _maxRow);
         beginData();
         for (uint16_t i = 0; i < SCREEN_BYTES; i++) sendByte(data);
         endTransm();
@@ -528,13 +505,10 @@ public:
     }
 
     // Transmits single byte over I2C with batch handling to optimize transfers
-    void sendByte(uint8_t data) {
+    // NOTE: microWire has no internal buffer: Wire.write() sends immediately.
+    // So we do not force periodic endTransm()/beginData() here.
+    inline void sendByte(uint8_t data) {
         Wire.write(data);
-        _writes++;
-        if (_writes >= I2C_BATCH) {
-            endTransm();
-            beginData();
-        }
     }
 
     // Sends single command byte to display controller
@@ -554,14 +528,14 @@ public:
 
     // Defines active window area for data writing on display
     void setWindow(int x0, int y0, int x1, int y1) {
-        beginCommand();
-        sendByte(OLED_COLUMNADDR);
-        sendByte(OLED_CLAMP(x0, 0, _maxX));
-        sendByte(OLED_CLAMP(x1, 0, _maxX));
-        sendByte(OLED_PAGEADDR);
-        sendByte(OLED_CLAMP(y0, 0, _maxRow));
-        sendByte(OLED_CLAMP(y1, 0, _maxRow));
-        endTransm();
+        // keep safety clamps here (used by clear() etc.)
+        uint8_t cx0 = (uint8_t)OLED_CLAMP(x0, 0, _maxX);
+        uint8_t cx1 = (uint8_t)OLED_CLAMP(x1, 0, _maxX);
+        uint8_t cy0 = (uint8_t)OLED_CLAMP(y0, 0, _maxRow);
+        uint8_t cy1 = (uint8_t)OLED_CLAMP(y1, 0, _maxRow);
+
+        // use raw to avoid repeating command code
+        setWindowRaw(cx0, cy0, cx1, cy1);
     }
 
     // Starts I2C transmission in data mode
@@ -573,11 +547,10 @@ public:
     // Starts I2C transmission for single command
     void beginOneCommand() { beginTransmMode(OLED_ONE_COMMAND_MODE); }
 
-    // Ends I2C transmission and resets write counter
+    // Ends I2C transmission
     // No delay needed - I2C is slow enough for display timing
     void endTransm() {
         Wire.endTransmission();
-        _writes = 0;
     }
 
     // retrieves font column byte using a lookup table for a compact font map
@@ -587,7 +560,6 @@ public:
         uint8_t index = pgm_read_byte(&(_charLookup[font - 32]));
         return (index == 0xFF) ? 0 : pgm_read_byte(&(_charMap_min[index][col]));
     }
-
 
     // =================================================================================
     // ===== Variables and Constants ====================================================
@@ -599,8 +571,6 @@ public:
 
     bool _invState = 0;
     int  _x = 0, _y = 0;
-    uint8_t _writes = 0;
-
 
 private:
     // =================================================================================
@@ -612,73 +582,23 @@ private:
         Wire.write(mode);
     }
 
-    // =================================================================================
-    // ===== Local number printing (no libc utoa/strrev) ================================
-    // =================================================================================
-
-    size_t printUnsigned(uint32_t v) {
-        // max 10 digits for uint32_t
-        char buf[10];
-        uint8_t i = 0;
-
-        do {
-            // one division per digit
-            uint32_t q = v / 10;
-            uint8_t digit = (uint8_t)(v - q * 10);
-            buf[i++] = (char)('0' + digit);
-            v = q;
-        } while (v);
-
-        // output reversed
-        for (uint8_t n = i; n > 0; --n) {
-            write((uint8_t)buf[n - 1]);
-        }
-        return i;
-    }
-
-    size_t printSigned(int32_t v) {
-        if (v < 0) {
-            write((uint8_t)'-');
-            // safe abs via unsigned math (works even for INT_MIN)
-            uint32_t u = 0u - (uint32_t)v;
-            return 1 + printUnsigned(u);
-        }
-        return printUnsigned((uint32_t)v);
+    // Raw window setter to avoid clamp-heavy logic in hot paths
+    // Safe only if caller guarantees: x0..x1 in 0..127, y0..y1 in 0..7 (pages)
+    inline void setWindowRaw(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1) {
+        beginCommand();
+        sendByte(OLED_COLUMNADDR);
+        sendByte(x0);
+        sendByte(x1);
+        sendByte(OLED_PAGEADDR);
+        sendByte(y0);
+        sendByte(y1);
+        endTransm();
     }
 
     // derived constants for seven-seg drawing and transfers
     static constexpr uint8_t  SEG_PAGES = (SEVEN_SEG_DIGIT_HEIGHT + 7) / 8;
     static constexpr uint8_t  SEG_MAX_W = SEVEN_SEG_DIGIT_WIDTH;
     static constexpr uint16_t SEG_BUF_SZ = (uint16_t)SEG_MAX_W * SEG_PAGES;
-
-    // How many bytes to send in one I2C burst before restarting the transmission.
-    // Larger value = fewer START/STOP pulses on the bus, less overhead and less EMI from I2C activity
-    // How many bytes to send in one I2C burst before restarting the transmission.
-    //
-    // so now explanation with easy
-    // 
-    // I2C clock is about 77 kHz (I2C_BASE_HZ = 77000)
-    // One clock tick is about 13 ms
-    // One I2C byte on the bus takes 9 clock ticks
-    // 8 data bits plus 1 ACK bit
-    // So one byte takes about 9 * 13 us = 117 us
-    //
-    // burst of 64 bytes keeps the bus busy for about
-    // 64 * 117 us = 7488 us so about 7.5 ms
-    //
-    // well 64 is good
-    // fewer restarts (START and STOP) during OLED updates
-    // less overhead and usually less EMI noise from I2C activity (kept in midn so si4735 works on same line)
-    //
-    // if I2C_BATCH is 16, the same 64 bytes are sent as 4 smaller bursts,
-    // which means 4 times more START and STOP events,
-    // and that can increase audible digital whine in the radio audio
-    //
-    // That is, with soft mute, when switching chips at the end of soft mute,
-    // you could hear squeaks-now they are also nowhere to be found and are present,
-    // but they have become a little shorter
-    //
-    static constexpr uint8_t I2C_BATCH = 64;
 
     static constexpr uint16_t SCREEN_BYTES = BUFSIZE_128x64; // full screen size
 };

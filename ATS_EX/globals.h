@@ -14,9 +14,6 @@
 // used to limit max AM step index as larger steps (like 9/10kHz)
 #define IS_LW_MW(bt) ((bt)==LW_BAND_TYPE || (bt)==MW_BAND_TYPE)
 
-// to get the last valid index of a zero-based array
-#define LEN(a) ((uint8_t)(sizeof(a) - 1))
-
 // timed checks
 #define now_ms()            (uint32_t)millis()
 #define since_ms(t)         (now_ms() - (uint32_t)(t))
@@ -304,8 +301,8 @@ constexpr uint16_t SW_MAX_FREQ = 30000;
 constexpr uint16_t SSB_MODE_MIN_FREQ = 150;
 constexpr uint16_t SSB_MODE_MAX_FREQ = 30000;
 
-// to track the current band where is 1 = MW
-int8_t g_bandIndex = 1;
+// to track the current band where is 1 = MW 
+uint8_t g_bandIndex = 1; // so that muls doesn spread across the code and without sbc r17, r17, uint is needed
 
 // Default step/bandwidth/bfo values for band initialization
 // stepIdxAM, stepIdxSSB, stepIdxFM, bwIdxAM, bwIdxSSB, bwIdxFM, bfoCal
@@ -400,18 +397,12 @@ const uint8_t g_maxFilterAM = 6;
 const uint8_t g_bwAMIdx[] = { 4, 5, 3, 6, 2, 1, 0 };
 
 // =================================================================================================
-// S-meter tables
+// S-meter tables (HF only)
 // =================================================================================================
 
 // dBuV thresholds for S0 through S9+50 on HF
 static const uint8_t THR_HF[] PROGMEM = { 1,2,3,4,10,16,22,28,34,44,54,64,74,84,94 };
-// dBuV thresholds for S3 through S9+50 on FM
-static const uint8_t THR_FM[] PROGMEM = { 0,2,8,14,24,34,44,54,64,74 };
-// Special non-linear S-point mapping for low signal FM
-static const uint8_t FM_S4[] PROGMEM = { 3,6,7,8 };
-
 static constexpr uint8_t LEN_HF = sizeof(THR_HF);
-static constexpr uint8_t LEN_FM = sizeof(THR_FM);
 
 static inline uint8_t CREAD(const uint8_t* p, uint8_t i) {
     return pgm_read_byte(&p[i]);

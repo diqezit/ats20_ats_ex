@@ -197,7 +197,7 @@ const SettingMeta g_SettingsMeta[SETTINGS_MAX] PROGMEM = {
 
     // --- Page 4: Display & UI ---
     { "SCR", 4,  Num,        doBrightness,        isAlwaysActive   },
-    { "SPT", 0,  Switch,     doSMeter,            isAlwaysActive   },
+    { "SPT", 0,  Switch,     doSMeter,            isAMFamilyActive },
     { "SWU", 0,  Switch,     doSWUnits,           isAMFamilyActive },
     { "DIS", 0,  Switch,     doDisplayOff,        isAlwaysActive   },
     { "RSI", 1,  Switch,     doRSSIAMOff,         isAMFamilyActive },
@@ -218,6 +218,11 @@ int8_t g_SettingsParams[SETTINGS_MAX];
 static void toggleSetting(uint8_t settingIndex) {
     g_SettingsParams[settingIndex] = 1 - g_SettingsParams[settingIndex];
 }
+
+// Precomputed page start indices
+// Index 0 unused, pages are 1-based
+const uint8_t g_pageStartIdx[6] PROGMEM = { 0, 0, 6, 12, 18, 24 };
+
 // =================================================================================================
 // Settings API (RAM access)
 // =================================================================================================

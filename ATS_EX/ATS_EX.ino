@@ -34,7 +34,7 @@
 // you will need to manually edit the SI4735.h header file,
 // which is part of the PU2CLR library, if the library is updated automatically
 #include <microWire.h> // #include <Wire.h>
-
+#include <avr/wdt.h>
 #include "Defines.h"
 #include "SI4735_fixed.h"
 #include <avr/eeprom.h>
@@ -330,7 +330,6 @@ void tuneToSelectedFavorite() {
 
     // LSB/USB/CW are 1..3, FM is 4, AM is 0
     bool wantSSB = (fav.modulation > AM && fav.modulation < FM);
-    g_ssbLoaded = wantSSB;
 
     uint8_t targetBand = findBandForFavorite(fav);
 
@@ -405,12 +404,25 @@ void doStep(int8_t v) {
 
 // FM signals sound louder than other audio sources
 // Apply a user-set offset for consistent volume feel
+// Caches last HW value to skip redundant I2C writes
 static void applyCompensatedVolume() {
-    if (g_currentMode == FM) {
-        int8_t offset = getSettingParam(FmVolAdjust);
-        g_si4735.setVolume(constrain(g_volume - offset, 0, 63));
+    static uint8_t s_last = 0xFF;
+    uint8_t t = 0;
+
+    if (g_muteVolume) {
+        t = 0;
     } else {
-        g_si4735.setVolume(g_volume);
+        t = g_volume;
+
+        if (g_currentMode == FM) {
+            uint8_t o = getSettingParam(FmVolAdjust);
+            t = (o >= t) ? 0 : (uint8_t)(t - o);
+        }
+    }
+
+    if (t != s_last) {
+        s_last = t;
+        g_si4735.setVolume(t);
     }
 }
 
@@ -436,11 +448,13 @@ static inline void doBandwidth(uint8_t v) {
 
     switch (g_currentMode) {
     case LSB:
-    case USB:
+    case USB: {
         doSwitchLogic(band.bwIdxSSB, 0, MAX_INDEX(bw_ssb_map), v);
-        g_si4735.setSSBAudioBandwidth(g_bwSSBIdx[band.bwIdxSSB]);
-        updateSSBCutoffFilter();
+        uint8_t hwBw = g_bwSSBIdx[band.bwIdxSSB];
+        uint8_t cut = ssbCutoffForHwBw(hwBw);
+        g_si4735.setSSBAudioBwAndCutoff(hwBw, cut);
         break;
+    }
 
     case AM:
         doSwitchLogic(band.bwIdxAM, 0, MAX_INDEX(bw_am_map), v);
@@ -450,12 +464,12 @@ static inline void doBandwidth(uint8_t v) {
     case FM:
         // invert step because FM map is ordered in reverse
         // this makes knob rotation feel consistent with other modes
-        doSwitchLogic(band.bwIdxFM, 0, MAX_INDEX(bw_fm_map), -v);
+        doSwitchLogic(band.bwIdxFM, 0, MAX_INDEX(bw_fm_map), (int8_t)-v);
         g_si4735.setFmBandwidth(band.bwIdxFM);
         break;
 
-        // for any unexpected modes do nothing
-    default: break;
+    default:
+        break;
     }
 
     showBandwidth();
@@ -519,10 +533,8 @@ void doBrightness(int8_t v) {
 //Settings: SSB AVC Switch
 void doSSBAVC(int8_t v) {
     toggleSetting(SVC);
-    if (isSSB()) {
-        g_si4735.setSSBAutomaticVolumeControl(getSettingParam(SVC));
-        applyBandConfiguration(true);
-    }
+
+    if (isSSB()) applyBandConfiguration(false);
 }
 
 // Settings: Automatic Volume Control (AVC)
@@ -538,8 +550,7 @@ void doAvc(int8_t v) {
     persistModeSetting(MODE_SETTING_AVC, AutoVolControl);
 
     // re-apply value to hardware immediately
-    uint8_t avcValue = getAvcValueFromIndex(getSettingParam(AutoVolControl));
-    g_si4735.setAvcAmMaxGain(avcValue);
+    applyAvcGainHW((uint8_t)getSettingParam(AutoVolControl));
 }
 
 //Settings: Sync switch
@@ -549,18 +560,7 @@ void doSync(int8_t v) {
 
     toggleSetting(Sync);
 
-    switch (g_currentMode) {
-    case LSB:
-    case USB: {
-        uint8_t p = getSettingParam(Sync); // p ∈ {0,1}
-        g_si4735.setSSBDspAfc(1 - p);
-        g_si4735.setSSBAvcDivider(3 * p);
-        applyBandConfiguration(true);
-        break;
-    }
-    default:
-        break;
-    }
+    if (isSSB()) applyBandConfiguration(false);
 }
 
 // Settings: FM De-Emphasis (DE)
@@ -603,7 +603,7 @@ void doCPUSpeed(int8_t v) {
 void doBFOCalibration(int8_t v) {
 
     // BFO calibration is not applicable in FM
-    if (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE) return;
+    if (currentBandType() == FM_BAND_TYPE) return;
 
     // Expanded range to -25..+25. With a x100 multiplier in updateBFO(),
     // this provides a +/- 2.5kHz calibration range in 100Hz step
@@ -638,6 +638,7 @@ void doBatteryPinSelect(int8_t v) {
 //Settings: Auto Antenna Capacitor
 void doAntennaCapacitor(int8_t v) {
     toggleSetting(AntennaCap);
+    applyBandAntennaCap(currentBandType() == FM_BAND_TYPE); // in menu
 }
 
 //Settings: RSSI AM Off switch
@@ -692,7 +693,7 @@ void doSquelch(int8_t v) {
 void doFmSoftMuteAtt(int8_t v) {
     doSwitchLogic(settingRef(FmSmAtt), 0, FM_SOFT_MUTE_MAX_ATTN_LEVEL, v);
     if (g_currentMode == FM)
-        g_si4735.setProperty(FM_PROP_SOFTMUTE_MAX_ATTN_ADDR, getSettingParam(FmSmAtt));
+        g_si4735.setProperty(FM_PROP_SOFTMUTE_MAX_ATTN_ADDR, (uint16_t)(uint8_t)getSettingParam(FmSmAtt));
 }
 
 // Settings: FM Soft Mute Threshold (FST)
@@ -702,7 +703,7 @@ void doFmSoftMuteAtt(int8_t v) {
 void doFmSoftMuteThr(int8_t v) {
     doSwitchLogic(settingRef(FmSmThr), 0, FM_SOFT_MUTE_MAX_SNR_LEVEL, v);
     if (g_currentMode == FM)
-        g_si4735.setProperty(FM_PROP_SOFTMUTE_SNR_THRESH_ADDR, getSettingParam(FmSmThr));
+        g_si4735.setProperty(FM_PROP_SOFTMUTE_SNR_THRESH_ADDR, (uint16_t)(uint8_t)getSettingParam(FmSmThr));
 }
 
 // Settings: Toggle handler for SW AFC menu item (SWA)
@@ -742,30 +743,22 @@ static uint8_t scanThreshold(
 }
 
 // map index to S-point based on receiver mode
-// fm uses custom low-end map for better squelch feel
-// hf follows classic S scale for SWL convention
+// for AM-family only (AM/LSB/USB/CW)
 static inline void mapIdxToSAndPlus(
     uint8_t idx,
-    uint8_t fm,
     uint8_t* s,
     uint8_t* plus) {
-    if (fm) {
-        if (idx < 4) {
-            *s = CREAD(FM_S4, idx);
-            *plus = 0;
-            return;         // fast path for weak fm
-        }
-        *s = 9;
-        *plus = (idx > 4);  // show S9+ only above index 4
-        return;
-    }
+
+    // HF mapping:
+    // idx 0..8  -> S0..S8
+    // idx >= 9  -> S9+
     if (idx < 9) {
         *s = idx;
         *plus = 0;
         return;
     }
     *s = 9;
-    *plus = 1;              // classic S9+
+    *plus = 1;
 }
 
 // format fixed-width string to keep UI columns aligned
@@ -782,24 +775,17 @@ static void formatSMeter(
 
 // orchestrate s-meter display from raw rssi value
 // blanks output on no signal to prevent stale readings
-// splits path for fm/hf to use mode-specific rules
-void rssiToSLevel(
-    char* buffer,
-    uint8_t rssi) {
+// FM rendered as numeric RSSI
+void rssiToSLevel(char* buffer, uint8_t rssi) {
     if (rssi == UI_SIGNAL_NO_VALUE) {
-        // write "   \0" in one go
-        *((uint32_t*)buffer) = 0x00202020;
+        *((uint32_t*)buffer) = 0x00202020; // "   \0"
         return;
     }
 
-    uint8_t fm = (g_currentMode == FM);
-    const uint8_t* thr = fm ? THR_FM : THR_HF;
-    uint8_t len = fm ? LEN_FM : LEN_HF;
-
-    uint8_t idx = scanThreshold(rssi, thr, len);
+    uint8_t idx = scanThreshold(rssi, THR_HF, LEN_HF);
 
     uint8_t s, plus;
-    mapIdxToSAndPlus(idx, fm, &s, &plus);
+    mapIdxToSAndPlus(idx, &s, &plus);
     formatSMeter(buffer, s, plus);
 }
 
@@ -883,7 +869,6 @@ static void handleDelayedFrequencyUpdate() {
 // skip AM polling when disabled or right after user action to avoid clicks
 inline static __attribute__((always_inline))
 bool amRssiPollingAllowed(uint32_t now_ms) {
-    if (getSettingParam(RSSI_AM_Off) == 1) return false;
     uint16_t now_s = (uint16_t)(now_ms / 1000);
     return (uint16_t)(now_s - g_lastUserActivityTime) >= 1;
 }
@@ -891,13 +876,17 @@ bool amRssiPollingAllowed(uint32_t now_ms) {
 // Fetches signal quality (RSSI) using mode-specific commands
 // SSB/CW poll RSQ (0x43) and return RSSI (RESP4) after SSB patch is loaded
 static uint8_t getSignalQuality() {
+    // RSSI disabled for AM-family (AM/SSB/CW)
+    if (g_currentMode != FM && getSettingParam(RSSI_AM_Off) == 1)
+        return UI_SIGNAL_NO_VALUE;
+
     switch (g_currentMode) {
     case AM:
         if (!amRssiPollingAllowed(millis()))
             return g_signalQualityValue;
 
-        g_si4735.getCurrentReceivedSignalQuality(0);  // AM_RSQ_STATUS (0x43)
-        return g_si4735.getCurrentRSSI();             // RSSI 
+        g_si4735.getCurrentReceivedSignalQuality(0);
+        return g_si4735.getCurrentRSSI();
 
     case FM: case LSB: case USB: case CW:
         g_si4735.getCurrentReceivedSignalQuality(1);
@@ -1069,7 +1058,6 @@ static inline void initHardwarePins() {
 // Helper to initialize OLED display
 static inline void initOLED() {
     oled.init();
-    oled.clear();
     oled.setPower(true);
 }
 
@@ -1084,6 +1072,7 @@ static inline void handleEEPROMReset() {
     if (!(PINC & (1 << (ENCODER_BUTTON - 14))) || !(PINB & (1 << (AGC_BUTTON - 8)))) {
         // Invalidate version to trigger reset logic
         eeprom_update_byte((uint8_t*)EEPROM_VERSION_ADDRESS, 0);
+        oled.clear();
     } else {
 #if ENABLE_SPLASH_SCREEN
         showSplashScreen();
@@ -1118,9 +1107,7 @@ static inline void applyInitialConfiguration() {
 
     applyBandConfiguration(false);
     g_currentFrequency = g_si4735.getFrequency();
-
-    oled.clear();
-    showStatus();
+    showFrequency(true);
 }
 
 // Initialize controller
@@ -1165,6 +1152,7 @@ static inline bool handleCWViewMode() {
 
 // main loop program in process order
 void loop() {
+
     updateEncoderState();
     checkDisplayTimeout();
 
@@ -1194,7 +1182,10 @@ void loop() {
 int main(void) {
     init();
     setup();
-    while (1)
+    wdt_enable(WDTO_8S);
+    while (1) {
+        wdt_reset();
         loop();
+    }
     return 0;
 }

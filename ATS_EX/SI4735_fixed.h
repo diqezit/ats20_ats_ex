@@ -1,6 +1,6 @@
 #pragma once
 
-#include <SI4735.h>
+#include "SI4735.h"
 
 class SI4735_fixed : public SI4735 {
 public:
@@ -191,32 +191,77 @@ public:
     }
 #endif
 
-    // Configures FM stereo decoder for forced mono or automatic blend mode
-    // This single function replaces separate On/Off methods to save flash mem
+    // Sets FM stereo/mono blend mode per AN332 specifications
+    // force_mono = true:  force mono reception (reduces hiss on weak signals)
+    // force_mono = false: automatic stereo/mono blend (default chip behavior)
+    //
+    // AN332 blend logic:
+    // - RSSI/SNR: Higher threshold = more mono (127 = force mono, 0 = force stereo)
+    // - Multipath: INVERTED! Higher value = more stereo (0 = force mono, 100 = force stereo)
+    //
     void setFmStereoMode(bool force_mono) {
-        // Data is stored as pairs: { address, (auto_value << 8) | mono_value }
+        // Table format: {property_address, (auto_value << 8) | mono_value}
         static const uint16_t fm_settings[] PROGMEM = {
-            0x1800, (49 << 8) | 127,    // FM_BLEND_RSSI_STEREO_THRESHOLD
-            0x1801, (30 << 8) | 127,    // FM_BLEND_RSSI_MONO_THRESHOLD
-            0x1804, (27 << 8) | 127,    // FM_BLEND_SNR_STEREO_THRESHOLD
-            0x1805, (14 << 8) | 127,    // FM_BLEND_SNR_MONO_THRESHOLD
-            0x1808, (20 << 8) | 0,      // FM_BLEND_MULTIPATH_STEREO_THRESHOLD
-            0x1809, (60 << 8) | 0       // FM_BLEND_MULTIPATH_MONO_THRESHOLD
+            // RSSI-based blend
+            FM_BLEND_RSSI_STEREO_THRESHOLD_PROP,
+                (FM_BLEND_RSSI_STEREO_DEFAULT << 8) | 127,
+            FM_BLEND_RSSI_MONO_THRESHOLD_PROP,
+                (FM_BLEND_RSSI_MONO_DEFAULT << 8) | 127,
+
+                // SNR-based blend
+                FM_BLEND_SNR_STEREO_THRESHOLD_PROP,
+                    (FM_BLEND_SNR_STEREO_DEFAULT << 8) | 127,
+                FM_BLEND_SNR_MONO_THRESHOLD_PROP,
+                    (FM_BLEND_SNR_MONO_DEFAULT << 8) | 127,
+
+                    // Multipath-based blend (inverted logic)
+                    FM_BLEND_MULTIPATH_STEREO_THRESHOLD_PROP,
+                        (FM_MP_STEREO_THR_DEFAULT << 8) | 0,
+                    FM_BLEND_MULTIPATH_MONO_THRESHOLD_PROP,
+                        (FM_MP_MONO_THR_DEFAULT << 8) | 0
         };
 
         const uint8_t entries = (sizeof(fm_settings) / sizeof(fm_settings[0])) / 2;
 
         for (uint8_t i = 0; i < entries; i++) {
-            // read address and packed values from the flat array
             uint16_t addr = pgm_read_word(&fm_settings[i * 2]);
             uint16_t packed = pgm_read_word(&fm_settings[i * 2 + 1]);
 
-            // unpack the two 8-bit values
             uint8_t autoVal = packed >> 8;
             uint8_t monoVal = packed & 0xFF;
 
             sendProperty(addr, force_mono ? monoVal : autoVal);
         }
+    }
+
+    // Set SSB audio BW + cutoff and commit once
+    inline void setSSBAudioBwAndCutoff(uint8_t audioBw, uint8_t cutoff) {
+        currentSSBMode.param.AUDIOBW = audioBw;     // 0..5
+        currentSSBMode.param.SBCUTFLT = cutoff;     // 0/1
+        sendSSBModeProperty();                      // ONE send
+    }
+
+    // Batch SSB Mode Configuration - ONE I2C transaction instead of FIVE
+    inline void configureSSBModeBatch(
+        uint8_t avcen,      // SVC setting (0/1)
+        uint8_t dspAfcDis,  // 1 for CW, (1-sync) for SSB
+        uint8_t avcDiv,     // 0 for CW, (sync*3) for SSB
+        uint8_t audioBw,    // bandwidth index (0..5)
+        uint8_t smuteSel    // SSM setting (0/1)
+    ) {
+        // clear to avoid stale reserved bits
+        currentSSBMode.raw[0] = 0;
+        currentSSBMode.raw[1] = 0;
+
+        // Collect ALL bits into a structure WITHOUT sending
+        currentSSBMode.param.AVCEN = avcen;
+        currentSSBMode.param.DSP_AFCDIS = dspAfcDis;
+        currentSSBMode.param.AVC_DIVIDER = avcDiv;
+        currentSSBMode.param.AUDIOBW = audioBw;
+        currentSSBMode.param.SMUTESEL = smuteSel;
+
+        // ONE I2C call instead of five
+        sendSSBModeProperty();
     }
 
     #if TEST

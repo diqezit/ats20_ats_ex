@@ -113,7 +113,7 @@ static void applySwAfcProfileHz(uint16_t pullHz, uint16_t lockHz) {
 static void applySwAfc() {
     if (g_currentMode != AM) return;
 
-    uint8_t target = (g_bandList[g_bandIndex].bandType == SW_BAND_TYPE)
+    uint8_t target = (currentBandType() == SW_BAND_TYPE)
         ? getSettingParam(SWAFC)
         : SW_AFC_PROFILE_PPM;
 
@@ -180,12 +180,18 @@ static inline uint8_t getAvcValueFromIndex(uint8_t index) {
     return pgm_read_byte(&avc_table[index]);
 }
 
+// Applies AVC gain to hardware from user index (0..10)
+// Kept out-of-line to deduplicate inlined setAvcAmMaxGain sequences under -Os + LTO
+static void __attribute__((noinline)) applyAvcGainHW(uint8_t avcIndex) {
+    uint8_t avcValue = getAvcValueFromIndex(avcIndex);
+    g_si4735.setAvcAmMaxGain(avcValue);
+}
+
 // Applies mode-specific AVC gain to hardware
 // Ensures correct gain is restored on mode switch
 static void applyAvcGain(ModeContext modeCtx) {
-    uint8_t avcIndex = g_modeSettings[MODE_SETTING_AVC][modeCtx];
-    uint8_t avcValue = getAvcValueFromIndex(avcIndex);
-    g_si4735.setAvcAmMaxGain(avcValue);
+    uint8_t avcIndex = (uint8_t)g_modeSettings[MODE_SETTING_AVC][modeCtx];
+    applyAvcGainHW(avcIndex);
 }
 
 // =-=-=-=-=-=-=-=-= BFO helpers =-=-=-=-=-=-=-=-=
@@ -220,19 +226,26 @@ static void updateBFO() {
 
 // =-=-=-=-=-=-=-=-= SSB cutoff helpers =-=-=-=-=-=-=-=-=
 
-// auto cutoff pick for common widths so default sound stays natural without menu tweaks
-static inline __attribute__((always_inline)) uint8_t ssbAutoCutoffFromBwIdx(uint8_t idx) {
-    return (idx == 0 || idx == 4 || idx == 5) ? 0 : 1;
+// auto cutoff pick for common widths
+static inline __attribute__((always_inline))
+uint8_t ssbAutoCutoffFromBwIdx(uint8_t hwBw) {
+    return (hwBw == 0 || hwBw == 4 || hwBw == 5) ? 0 : 1;
 }
 
-//Saves more flash image size
-static void updateSSBCutoffFilter() {
-    uint8_t idx = g_bwSSBIdx[g_bandList[g_bandIndex].bwIdxSSB];
+// compute SSB cutoff value (0/1) from current HW BW + user setting
+static inline __attribute__((always_inline))
+uint8_t ssbCutoffForHwBw(uint8_t hwBw) {
+    uint8_t cf = (uint8_t)getSettingParam(CutoffFilter);
 
-    if (getSettingParam(CutoffFilter) == 0 || g_currentMode == CW)
-        g_si4735.setSSBSidebandCutoffFilter(ssbAutoCutoffFromBwIdx(idx));
-    else
-        g_si4735.setSSBSidebandCutoffFilter(getSettingParam(CutoffFilter) - 1);
+    if (cf == 0 || g_currentMode == CW)
+        return ssbAutoCutoffFromBwIdx(hwBw);
+
+    return (uint8_t)(cf - 1);
+}
+
+static inline void updateSSBCutoffFilter() {
+    uint8_t hwBw = g_bwSSBIdx[g_bandList[g_bandIndex].bwIdxSSB];
+    g_si4735.setSSBSidebandCutoffFilter(ssbCutoffForHwBw(hwBw));
 }
 
 // =-=-=-=-=-=-=-=-= Squelch helpers =-=-=-=-=-=-=-=-=
@@ -330,8 +343,8 @@ static void applyFmSoftMuteSettings() {
 
     applyProperties(fixed_soft_mute_props);
 
-    g_si4735.setProperty(0x1302, getSettingParam(FmSmAtt));
-    g_si4735.setProperty(0x1303, getSettingParam(FmSmThr));
+    g_si4735.setProperty(0x1302, (uint16_t)(uint8_t)getSettingParam(FmSmAtt));
+    g_si4735.setProperty(0x1303, (uint16_t)(uint8_t)getSettingParam(FmSmThr));
 }
 
 // Applies or disables AM Noise Blanker based on user settings
@@ -387,22 +400,51 @@ static inline __attribute__((always_inline)) void applyFmNoiseBlankerProps() {
 
 // switchable Hi-Cut profile to match small speaker vs headphones
 // keeps code size low by driving both paths from tables
-static inline __attribute__((always_inline)) void applyFmHiCutProfile(bool enabled) {
+static inline __attribute__((always_inline))
+void applyFmHiCutProfile(bool enabled) {
+
+    // AN332 mapping:
+    // 0x1A00 FM_HICUT_SNR_HIGH_THRESHOLD
+    // 0x1A01 FM_HICUT_SNR_LOW_THRESHOLD
+    // 0x1A02 FM_HICUT_ATTACK_RATE
+    // 0x1A03 FM_HICUT_RELEASE_RATE
+    // 0x1A04 FM_HICUT_MULTIPATH_TRIGGER_THRESHOLD
+    // 0x1A05 FM_HICUT_MULTIPATH_END_THRESHOLD
+    // 0x1A06 FM_HICUT_CUTOFF_FREQUENCY
+    //      - Hi-Cut disabled when FREQ[2:0] == 0
+
     static const uint16_t hicut_speaker_eq_props[][2] PROGMEM = {
-        {0x1A00, FM_PROP_HICUT_ENABLE},
-        {0x1A01, FM_PROP_HICUT_WINDOW},
-        {0x1A02, FM_PROP_HICUT_SNR_THRESH},
-        {0x1A03, FM_HICUT_RELEASE_DEFAULT},
-        {0x1A04, FM_HICUT_MP_TRIGGER_DEFAULT},
-        {0x1A05, FM_HICUT_MP_END_DEFAULT},
-        {0x1A06, FM_PROP_HICUT_CUTOFF},
-        {0, 0} // terminator
+        // Speaker EQ profile: keep Hi-Cut engaged (static “warm” sound)
+        { FM_HICUT_SNR_HIGH_THRESHOLD_PROP, 127 },
+        { FM_HICUT_SNR_LOW_THRESHOLD_PROP,  127 },
+
+        { FM_HICUT_ATTACK_RATE_PROP,        FM_HICUT_ATTACK_DEFAULT },
+        { FM_HICUT_RELEASE_RATE_PROP,       FM_HICUT_RELEASE_DEFAULT },
+
+        { FM_HICUT_MP_TRIGGER_PROP,         FM_HICUT_MP_TRIGGER_DEFAULT },
+        { FM_HICUT_MP_END_PROP,             FM_HICUT_MP_END_DEFAULT },
+
+        { FM_HICUT_CUTOFF_PROP,             FM_PROP_HICUT_CUTOFF },
+
+        { 0, 0 } // terminator
     };
+
     static const uint16_t hicut_default_props[][2] PROGMEM = {
-        {0x1A00, 0},
-        {0x1A06, 0x0000},
-        {0, 0}
+        // Restore AN332 defaults and disable Hi-Cut
+        { FM_HICUT_SNR_HIGH_THRESHOLD_PROP, FM_HICUT_SNR_HIGH_DEFAULT },
+        { FM_HICUT_SNR_LOW_THRESHOLD_PROP,  FM_HICUT_SNR_LOW_DEFAULT  },
+
+        { FM_HICUT_ATTACK_RATE_PROP,        FM_HICUT_ATTACK_DEFAULT   },
+        { FM_HICUT_RELEASE_RATE_PROP,       FM_HICUT_RELEASE_DEFAULT  },
+
+        { FM_HICUT_MP_TRIGGER_PROP,         FM_HICUT_MP_TRIGGER_DEFAULT },
+        { FM_HICUT_MP_END_PROP,             FM_HICUT_MP_END_DEFAULT     },
+
+        { FM_HICUT_CUTOFF_PROP,             0x0000 }, // Hi-Cut disabled
+
+        { 0, 0 } // terminator
     };
+
     applyProperties(enabled ? hicut_speaker_eq_props : hicut_default_props);
 }
 
@@ -440,12 +482,9 @@ static void applySoftMuteSettings(ModeContext modeCtx) {
 // Orchestrates complete Si4735 setup for FM mode
 // set limits + spacing + thresholds
 // then apply audio profile and stereo mode
-static void configureFMMode() {
+static void configureFMMode(const Band& current_band) {
     g_currentMode = FM;
     g_stereoStatus = false;
-
-    // Get all parameters from the current band's state
-    const Band& current_band = g_bandList[g_bandIndex];
 
     g_si4735.setFM(
         current_band.minimumFreq,
@@ -470,9 +509,8 @@ static void configureFMMode() {
 
 // Configures chip for standard AM reception
 // send critical audio and gain right after setAM to avoid muted audio on cold start
-static void configureAMMode(uint16_t minFreq, uint16_t maxFreq) {
+static void configureAMMode(const Band& current_band, uint16_t minFreq, uint16_t maxFreq) {
     g_currentMode = AM;
-    const Band& current_band = g_bandList[g_bandIndex];
     ModeContext modeCtx = getModeContext();
 
     // Set primary mode and frequency
@@ -489,7 +527,6 @@ static void configureAMMode(uint16_t minFreq, uint16_t maxFreq) {
     // Soft Mute settings
     g_si4735.setProperty(AM_SOFT_MUTE_SLOPE_PROP, AM_SOFT_MUTE_SLOPE_RECOMMENDED);
     applySoftMuteSettings(modeCtx);
-
 }
 
 // Centralizes setup for properties shared between AM and SSB to avoid duplication
@@ -508,51 +545,43 @@ static void configureAMCommon(uint16_t minFreq, uint16_t maxFreq) {
 // Orchestrates Si4735 setup for SSB and CW modes
 // optional patch reload + CW disables sync AFC + apply user filters and soft mute
 static void configureSSBMode(
+    Band& current_band,
     uint16_t minFreq,
     uint16_t maxFreq,
     bool extraSSBReset) {
-
-    Band& current_band = g_bandList[g_bandIndex];
 
     if (current_band.bwIdxSSB > g_bwSSBMaxIdx)
         current_band.bwIdxSSB = 4;
 
     // reload patch only when requested to save time
-    if (extraSSBReset)
+    if (!g_ssbLoaded || extraSSBReset)
         loadSSBPatch();
 
-    g_si4735.setSSBAutomaticVolumeControl(getSettingParam(SVC));
+    bool isCW = (g_currentMode == CW);
+    uint8_t sync = isCW ? 0 : getSettingParam(Sync);
 
     g_si4735.setSSB(
-        minFreq,
-        maxFreq,
+        minFreq, maxFreq,
         current_band.currentFreq,
         1, // Base step for the chip (1 kHz)
-        (g_currentMode == CW) ? g_lastCWMode : g_currentMode
+        isCW ? g_lastCWMode : g_currentMode
+    );
+
+    g_si4735.configureSSBModeBatch(
+        getSettingParam(SVC),                                      // AVCEN
+        isCW ? 1 : (1 - sync),                                     // DSP_AFCDIS
+        isCW ? 0 : (sync * 3),                                     // AVC_DIVIDER
+        isCW ? g_bwSSBIdx[0] : g_bwSSBIdx[current_band.bwIdxSSB],  // AUDIOBW
+        getSettingParam(SSM)                                       // SMUTESEL
     );
 
     updateSSBCutoffFilter();
-
-    // CW uses tone offset, not DSP AFC
-    if (g_currentMode == CW) {
-        g_si4735.setSSBDspAfc(1);
-        g_si4735.setSSBAvcDivider(0);
-    } else { // LSB or USB
-        uint8_t p = getSettingParam(Sync);  // p ∈ {0,1}
-        g_si4735.setSSBDspAfc(1 - p);
-        g_si4735.setSSBAvcDivider(3 * p);
-    }
 
     // soft mute and SNR gate from storage for SSB
     ModeContext modeCtx = getModeContext();
     applySoftMuteSettings(modeCtx);
 
-    // CW uses narrow fixed bandwidth, SSB uses user index
-    g_si4735.setSSBAudioBandwidth(
-        (g_currentMode == CW) ? g_bwSSBIdx[0] : g_bwSSBIdx[current_band.bwIdxSSB]);
-
     updateBFO();
-    g_si4735.setSSBSoftMute(getSettingParam(SSM));
 }
 
 // Applies AGC settings based on current mode and stored values
@@ -584,8 +613,11 @@ void applyBandAntennaCap(bool isFmBand) {
 // Top-level orchestrator for all band and mode changes
 // mute around FM<->AM + load state + set RF cap + configure mode then refresh UI
 static void applyBandConfiguration(bool extraSSBReset) {
+    // Get band once (avoid repeated &g_bandList[g_bandIndex] in sub-functions)
+    Band& band = g_bandList[g_bandIndex];
+
     // detects a major mode switch (FM <-> non-FM) to safely toggle amp
-    bool isFmBand = (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE);
+    bool isFmBand = (band.bandType == FM_BAND_TYPE);
     bool switchingBetweenFMandAM = (g_currentMode == FM) != isFmBand;
 
     // disable squelch if active to avoid stuck mute across reconfig
@@ -600,19 +632,20 @@ static void applyBandConfiguration(bool extraSSBReset) {
 
     g_signalQualityValue = INVALID_RSSI_VALUE;
 
-    applyBandAntennaCap(isFmBand);
-
     if (isFmBand) {
-        configureFMMode();
+        configureFMMode(band);
     } else {
-        uint16_t minFreq = g_bandList[g_bandIndex].minimumFreq;
-        uint16_t maxFreq = g_bandList[g_bandIndex].maximumFreq;
+        uint16_t minFreq = band.minimumFreq;
+        uint16_t maxFreq = band.maximumFreq;
 
-        if (g_ssbLoaded) {
-            configureSSBMode(minFreq, maxFreq, extraSSBReset);
+        applyBandAntennaCap(false);
+
+        if (isSSB()) {
+            configureSSBMode(band, minFreq, maxFreq, extraSSBReset);
         } else {
-            configureAMMode(minFreq, maxFreq);
+            configureAMMode(band, minFreq, maxFreq);
         }
+
         configureAMCommon(minFreq, maxFreq);
 
         applySwAfc();
@@ -635,7 +668,7 @@ static void applyBandConfiguration(bool extraSSBReset) {
     applyBandAmpMute(switchingBetweenFMandAM, false);
 
     g_previousFrequency = g_currentFrequency;
-    }
+}
 
 // ==========================================
 // ===== STATE & ACTION MANAGEMENT ==========
@@ -799,10 +832,14 @@ static inline uint16_t fmAlign10k(uint16_t f) {
 }
 
 // apply DSP and UI after seek so audio and filters follow the new station
-static inline void finalizeSeekUpdate() {
+static inline void finalizeSeekUpdate(bool bandChanged) {
     g_si4735.setFrequency(g_currentFrequency);
     applySwAfc(); // Recalculate AFC window for SW (AM) after seek
-    doBandwidth(0);
+
+    // BW does not depend on frequency - reapply only when band changed (SW remap)
+    if (bandChanged)
+        doBandwidth(0);
+
     syncActiveStateToBand();
     showStatus(true);
     markStateAsDirty();
@@ -813,6 +850,8 @@ static inline void finalizeSeekUpdate() {
 // SW remaps to sub-band for correct limits/labels
 // FM aligns to 10 kHz grid
 static void doSeek() {
+    uint8_t oldBand = g_bandIndex;
+
     uint16_t f = executeHardwareSeek();
     if (!f) return;
 
@@ -829,7 +868,8 @@ static void doSeek() {
         break;
     }
 
-    finalizeSeekUpdate();
+    // BW does not depend on frequency - reapply only when band changed (SW remap)
+    finalizeSeekUpdate(g_bandIndex != oldBand);
 }
 
 // =-=-=-=-=-=-=-=-= Band switch helpers =-=-=-=-=-=-=-=-=
@@ -872,8 +912,13 @@ static void bandSwitch(bool up, bool loadStoredFreq) {
     uint8_t oldBandIndex = g_bandIndex;
     g_currentBFO = 0;
 
-    int8_t delta = up ? 1 : -1;
-    g_bandIndex = (g_bandIndex + delta + g_bandCount) % g_bandCount;
+    if (up) {
+        g_bandIndex++;
+        if (g_bandIndex >= g_bandCount) g_bandIndex = 0;
+    } else {
+        if (g_bandIndex == 0) g_bandIndex = g_bandCount - 1;
+        else g_bandIndex--;
+    }
 
     if (loadStoredFreq) loadActiveStateFromBand();
 
@@ -969,79 +1014,66 @@ static void doFrequencyTune() {
     markStateAsDirty();
 }
 
-// =-=-=-=-=-=-=-=-= SSB tune helpers =-=-=-=-=-=-=-=-=
+// =-=-=-=-=-=-=-=-= SSB Tune Helpers =-=-=-=-=-=-=-=-=
 
-// centralize step pick so BFO delta follows user SSB step setting
-static inline int32_t ssbStepHz() {
+// Returns current SSB step in Hz from user settings
+static inline __attribute__((always_inline)) int32_t ssbStepHz() {
     return (int32_t)g_tabStep[SSB_STEP_OFFSET + g_bandList[g_bandIndex].stepIdxSSB];
 }
 
-// update chip only if base kHz changed to avoid unnecessary I2C traffic
-static inline void ssbApplyChipUpdateIfNeeded(uint16_t old_freq) {
-    if (g_currentFrequency != old_freq) {
-        g_si4735.setFrequency(g_currentFrequency);
-        applyAgcSettings();
+// Rate-limited I2C update to Si4735
+// Prevents chip lockup when encoder is turned very fast
+static inline void ssbChipRate() {
+    static uint16_t last_ms16 = 0;
+    static uint16_t last_sent_freq = 0xFFFF;
+    static uint8_t  last_mode = 0xFF;
+
+    // Invalidate cache on mode change
+    if (last_mode != (uint8_t)g_currentMode) {
+        last_mode = (uint8_t)g_currentMode;
+        last_sent_freq = 0xFFFF;
     }
+
+    // Rate limit gate
+    uint16_t now16 = (uint16_t)millis();
+    if ((uint16_t)(now16 - last_ms16) < (uint16_t)MIN_SETFREQ_INTERVAL_MS) return;
+
+    // Update base frequency only when kHz changed
+    if (g_currentFrequency != last_sent_freq) {
+        g_si4735.setFrequency(g_currentFrequency);
+        last_sent_freq = g_currentFrequency;
+    }
+
+    updateBFO();
+    last_ms16 = now16;
 }
 
-// prepare SSB tune by checking count and calculating temp values
-static inline bool ssbTunePrepare(uint16_t & temp_freq, int32_t & temp_bfo) {
+// Main SSB tuning handler
+// UI updates immediately, chip updates are rate-limited
+static inline void doFrequencyTuneSSB() {
     int16_t encoder_delta = getAndResetEncoderCount(g_encoderCount);
-    if (encoder_delta == 0) return false;
+    if (encoder_delta == 0) return;
 
-    // store frequency before changes to detect a rollover event
-    temp_freq = g_currentFrequency;
-
-    // 32-bit integer to prevent overflow during fast encoder spins
-    temp_bfo = g_currentBFO;
-
+    // Apply encoder movement to BFO (int32_t prevents overflow on fast turns)
+    uint16_t temp_freq = g_currentFrequency;
+    int32_t  temp_bfo = g_currentBFO;
     temp_bfo += ssbStepHz() * (int32_t)encoder_delta;
 
-    return true;
-}
+    uint8_t old_band = (uint8_t)g_bandIndex;
 
-// performs SSB rollover and chip update
-static inline void ssbRolloverAndUpdate(
-    uint16_t & temp_freq,
-    int32_t & temp_bfo,
-    uint16_t old_freq) {
+    // Normalize BFO and handle band boundaries
     performBfoRolloverWithBandCheck(&temp_freq, &temp_bfo);
 
     g_currentFrequency = temp_freq;
     g_currentBFO = temp_bfo;
 
-    // if the base frequency changed, the chip must be updated
-    // this is critical fix
-    ssbApplyChipUpdateIfNeeded(old_freq);
-}
-
-// finalize SSB tune - updating BFO, state, and display
-static inline void ssbTuneFinalize() {
-    updateBFO();
-    syncActiveStateToBand();
-    g_lastFreqChange = millis();
-    g_previousFrequency = 0;
-    showFrequency();
-    markStateAsDirty();
-}
-
-// SSB tuning with post-rollover band synchronization
-// After frequency calculation, finds correct band by searching frequency table
-static void doFrequencyTuneSSB() {
-    uint16_t temp_freq;
-    int32_t  temp_bfo;
-    uint16_t old_freq = g_currentFrequency;
-    uint8_t  old_band = (uint8_t)g_bandIndex;
-
-    if (!ssbTunePrepare(temp_freq, temp_bfo)) return;
-    ssbRolloverAndUpdate(temp_freq, temp_bfo, old_freq);
-
+    // Safety guard for FM mode
     if (g_currentMode == FM) {
         loadActiveStateFromBand();
         return;
     }
 
-    // Find correct band by frequency lookup
+    // Find correct band for new frequency
     uint8_t new_band = old_band;
     for (uint8_t i = 0; i < g_bandCount; ++i) {
         if (g_bandList[i].bandType == FM_BAND_TYPE) continue;
@@ -1052,14 +1084,26 @@ static void doFrequencyTuneSSB() {
         }
     }
 
+    // Update UI on band change
     if (new_band != old_band) {
-        g_bandIndex = (int8_t)new_band;
-        doBandwidth(0);
+        g_bandIndex = new_band;
         showBandTag();
         showStep();
+
+        // apply DSP filter only on band change to avoid redundant I2C traffic
+        // during SSB tuning (BW does not depend on frequency)
+        doBandwidth(0);
     }
 
-    ssbTuneFinalize();
+    // Send to chip (rate-limited)
+    ssbChipRate();
+
+    // Update UI and state
+    syncActiveStateToBand();
+    g_lastFreqChange = millis();
+    g_previousFrequency = 0;
+    showFrequency();
+    markStateAsDirty();
 }
 
 // =-=-=-=-=-=-=-=-= Mode switch helpers =-=-=-=-=-=-=-=-=
