@@ -298,6 +298,12 @@ SI4735_fixed g_si4735;
 constexpr uint16_t SW_MIN_FREQ = 1710;
 constexpr uint16_t SW_MAX_FREQ = 30000;
 
+// AM-family absolute tuning limits (LW/MW/SW, excludes FM)
+// Used by SSB/BFO normalization to avoid invalid kHz (e.g. 149 or 30001),
+// which would break band lookup and desync UI/state
+constexpr uint16_t SSB_MODE_MIN_FREQ = 150;
+constexpr uint16_t SSB_MODE_MAX_FREQ = 30000;
+
 // to track the current band where is 1 = MW
 int8_t g_bandIndex = 1;
 

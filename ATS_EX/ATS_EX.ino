@@ -721,13 +721,9 @@ void doSMeter(int8_t v) {
 }
 
 // Settings: Navigation Style
-// Toggles between row-first and column-first navigation in the settings menu
+// Toggles between row-first and column-first cursor movement
 void doNavStyle(int8_t v) {
     toggleSetting(NAV);
-    // Changing navigation style requires a full redraw of the settings page
-    oled.clear();
-    showSettingsTitle();
-    showSettings();
 }
 
 // ==========================================

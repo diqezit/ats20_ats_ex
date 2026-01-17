@@ -52,7 +52,7 @@ constexpr auto EEPROM_FAVORITES_COUNT = 381;            // Used: 1B   (381)
 constexpr auto APP_VERSION = 07;
 
 // Centralizes user-facing strings on main screen
-#define APP_NAME_LINE1 F("ATS-20+ V7.0")
+#define APP_NAME_LINE1 F("ATS-20+ V7.0.1")
 
 // I2C SCL base rate for shared bus (OLED + Si4735)
 // Fixed to 77 kHz as a compromise: faster OLED updates than 35/50 kHz,
@@ -124,6 +124,12 @@ constexpr auto MIN_SETFREQ_INTERVAL_MS = 25UL;
 
 // Debugging options - only for test purposes & port monotoring - see Utils.h
 #define DEBUG_MODE 0                        // Set to 1 to enable debug mode, 0 to disable, (This use serial speed 9600)
+
+#define TEST 0
+
+// SSB frequency clamp - prevents out-of-band states on NON-SSB bands (149 kHz, 30001 kHz)
+// Disable to save ~170 bytes if Flash is critical
+#define ENABLE_SSB_FREQ_CLAMP 1
 
 // Set to 1 to enable the highly compressed SSB patch loading system
 // This advanced method significantly reduces firmware size
