@@ -219,7 +219,7 @@ public:
         }
     }
 
-    // test purposes
+    #if TEST
     // 
     // -----------------------------------------------------------------------------
     // Fast SI4735 reset + setup without Arduino pinMode()/digitalWrite()
@@ -318,4 +318,5 @@ public:
         // Not found
         return 0;
     }
+    #endif
 };

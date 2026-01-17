@@ -1571,3 +1571,42 @@ This version introduces the ability to save your favorite FM stations.
   
 ------------------------------------------------------------------------------------------------------------
 
+
+### **MOD_NO_RDS v7.0.1**
+
+`Settings.h`, `UI.h`, `Input.h`, `RadioControl.h`, `ATS_EX.ino`
+
+---
+
+* **[Fixed] Settings menu layout stability:**
+  * Menu items now always render in Row-first order regardless of NAV setting
+  * NAV affects only cursor movement order, not item positions
+
+* **[Fixed] SSB band switching cascade bug:**
+  * Removed `bandSwitch()` calls from `bfoFastRollover()` and `bfoPreciseRollover()`
+  * Band is now determined by frequency table lookup after rollover calculation
+  * Eliminates incorrect band jumps (e.g., 75m→60m→49m→41m) when tuning near band edges
+  * Fixes direction error where BFO sign was used instead of frequency boundary crossing
+
+* **[Optimized] Settings API unified via templates:**
+  * Simplified PROGMEM accessors to `uint8_t` parameter only
+
+* **[Optimized] Removed redundant functions (Flash savings):**
+  * Removed `calcSettingPosRowFirst()`, `calcSettingPosColumnFirst()`, `wrapAroundIndex()`
+  * Navigation logic consolidated into `getNextSettingIndex()`
+
+* **[Added] Column-first navigation tables (PROGMEM):**
+  * Added `g_navColFirstOrder[29]` and `g_navColFirstReverse[29]`
+  * Macro-generated for maintainability, handles partial last page correctly
+
+* **[Changed] NAV setting behavior:**
+  * `doNavStyle()` no longer triggers menu redraw
+  * Cursor path switches between linear (0→1→2→3...) and column-first (0→2→4→1→3→5...)
+
+* **[Changed] SSB rollover architecture:**
+  * `bfoFastRollover()` normalizes negative BFO remainder to 0..999 Hz
+  * `bfoPreciseRollover()` base kHz when absolute frequency exits band boundaries
+  * `doFrequencyTuneSSB()` finds correct band via inline frequency table search
+  
+  
+------------------------------------------------------------------------------------------------------------

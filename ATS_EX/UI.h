@@ -172,49 +172,19 @@ static void drawInverted(uint8_t x,
     oled.invertText(false);
 }
 
-// Navigate left-right then down like reading text
-// Reduces encoder turns for faster menu access
-static inline void calcSettingPosRowFirst(
-    uint8_t place,
-    uint8_t& xOffset,
-    uint8_t& yOffset) {
-    uint8_t row = place >> 1;      // 0..2 every two items
-    bool    right = (place & 1);   // odd places are right column
-
-    xOffset = right ? UI_SETTINGS_RIGHT_COL_X : UI_SETTINGS_LEFT_COL_X;
-    yOffset = UI_SETTINGS_ROW_START + row * UI_SETTINGS_ROW_STEP;
-}
-
-// Offers a traditional column-based layout
-static inline void calcSettingPosColumnFirst(
-    uint8_t place,
-    uint8_t& xOffset,
-    uint8_t& yOffset) {
-    uint8_t withinCol = place;
-
-    if (place >= UI_SETTINGS_PER_COL) {
-        xOffset = UI_SETTINGS_RIGHT_COL_X;
-        withinCol -= UI_SETTINGS_PER_COL;
-    } else {
-        xOffset = UI_SETTINGS_LEFT_COL_X;
-    }
-    yOffset = UI_SETTINGS_ROW_START + withinCol * UI_SETTINGS_ROW_STEP;
-}
-
-// Let user choose menu navigation style
-// See: https://github.com/diqezit/ats20_ats_ex/issues/43#issuecomment-3183836389
-static void calcSettingPos(
+// Calculate screen position for settings item
+// Layout is ALWAYS Row-first (NAV only affects cursor movement order)
+// Row 0: items 0,1 | Row 1: items 2,3 | Row 2: items 4,5
+static inline void calcSettingPos(
     uint8_t idx,
     uint8_t& xOffset,
     uint8_t& yOffset) {
     uint8_t place = idx % UI_SETTINGS_PER_PAGE; // 0..5 on page
+    uint8_t row = place >> 1;                   // 0..2 every two items
+    bool right = (place & 1);                   // odd places are right column
 
-    // 0=Row-first (default), 1=Column-first
-    if (getSettingParam(NAV) == 0) {
-        calcSettingPosRowFirst(place, xOffset, yOffset);
-    } else {
-        calcSettingPosColumnFirst(place, xOffset, yOffset);
-    }
+    xOffset = right ? UI_SETTINGS_RIGHT_COL_X : UI_SETTINGS_LEFT_COL_X;
+    yOffset = UI_SETTINGS_ROW_START + row * UI_SETTINGS_ROW_STEP;
 }
 
 // ==========================================

@@ -417,25 +417,17 @@ static void FMAudioConfigure() {
 // Helper to set seek thresholds for both AM and FM
 // lower thresholds improve find rate on weak stations
 static void setSeekThresholds(bool isFM) {
-    if (isFM) {
-
-        g_si4735.setProperty(
-            FM_SEEK_TUNE_SNR_THRESHOLD_PROP,
-            FM_SEEK_SNR_THRESHOLD_VAL);
-
-        g_si4735.setProperty(
-            FM_SEEK_TUNE_RSSI_THRESHOLD_PROP,
-            FM_SEEK_RSSI_THRESHOLD_VAL);
-
-    } else {
-        g_si4735.setProperty(
-            AM_SEEK_SNR_THRESHOLD_PROP,
-            AM_SEEK_SNR_THRESHOLD_VAL);
-
-        g_si4735.setProperty(
-            AM_SEEK_RSSI_THRESHOLD_PROP,
-            AM_SEEK_RSSI_THRESHOLD_VAL);
-    }
+    static const uint16_t fm_seek[][2] PROGMEM = {
+        {FM_SEEK_TUNE_SNR_THRESHOLD_PROP, FM_SEEK_SNR_THRESHOLD_VAL},
+        {FM_SEEK_TUNE_RSSI_THRESHOLD_PROP, FM_SEEK_RSSI_THRESHOLD_VAL},
+        {0, 0}
+    };
+    static const uint16_t am_seek[][2] PROGMEM = {
+        {AM_SEEK_SNR_THRESHOLD_PROP, AM_SEEK_SNR_THRESHOLD_VAL},
+        {AM_SEEK_RSSI_THRESHOLD_PROP, AM_SEEK_RSSI_THRESHOLD_VAL},
+        {0, 0}
+    };
+    applyProperties(isFM ? fm_seek : am_seek);
 }
 
 // Helper to apply soft mute settings
@@ -498,12 +490,6 @@ static void configureAMMode(uint16_t minFreq, uint16_t maxFreq) {
     g_si4735.setProperty(AM_SOFT_MUTE_SLOPE_PROP, AM_SOFT_MUTE_SLOPE_RECOMMENDED);
     applySoftMuteSettings(modeCtx);
 
-
-    // AGC will be applied after full configuration via applyAgcSettings()
-
-    //// AGC settings first to stabilize audio level
-    //int8_t att_val = g_modeSettings[MODE_SETTING_AGC][modeCtx];
-    //setAgcHardware(att_val);
 }
 
 // Centralizes setup for properties shared between AM and SSB to avoid duplication
@@ -663,18 +649,47 @@ static inline bool bfoNeedsFastRollover(int32_t bfo) {
     return (bfo >= BFO_ROLLOVER_MAX_HZ) || (bfo <= -BFO_ROLLOVER_MAX_HZ);
 }
 
-// collapse whole kHz from BFO into main frequency
-// keeps BFO small for stable SSB tuning
-// handles band edge jump then snaps to current step grid
-static inline void bfoFastRollover(uint16_t * freq, int32_t * bfo) {
-    int16_t steps_khz = (int16_t)(*bfo / HZ_PER_KHZ);
-    *freq += steps_khz;
-    *bfo %= HZ_PER_KHZ;
+// Global clamp to AM-family hardware limits [LW_min, 10m_max]
+static inline __attribute__((always_inline))
+void clampFreqLimits(int32_t& khz, int32_t& bfo) {
+    if (khz < SSB_MODE_MIN_FREQ) khz = SSB_MODE_MIN_FREQ;
+    if (khz >= SSB_MODE_MAX_FREQ) { khz = SSB_MODE_MAX_FREQ; bfo = 0; }
+}
 
-    if (*freq >= g_bandList[g_bandIndex].maximumFreq ||
-        *freq < g_bandList[g_bandIndex].minimumFreq) {
-        bandSwitch(steps_khz > 0, false);
+// Converts absolute frequency in Hz into (kHz, bfo_hz) using floor division
+// Guarantees bfo_hz in [0..999] and kHz adjusted accordingly
+static inline __attribute__((always_inline))
+void hzToKHzBfoFloor(int32_t abs_hz, int32_t& out_khz, int32_t& out_bfo_hz) {
+    out_khz = abs_hz / HZ_PER_KHZ;
+    out_bfo_hz = abs_hz % HZ_PER_KHZ;
+
+    // Corrects negative BFO back into positive range 0-999
+    // and adjusts main frequency down by 1 kHz to compensate
+    if (out_bfo_hz < 0) {
+        out_bfo_hz += HZ_PER_KHZ;
+        out_khz -= 1;
     }
+
+#if ENABLE_SSB_FREQ_CLAMP
+    clampFreqLimits(out_khz, out_bfo_hz);
+#endif
+}
+
+// Collapse whole kHz from BFO into main frequency when |BFO| exceeds ±13 kHz threshold
+// Normalizes negative BFO remainder to keep BFO in stable 0..999 Hz range
+static inline void bfoFastRollover(uint16_t * freq, int32_t * bfo) {
+    int32_t steps_khz = *bfo / HZ_PER_KHZ;
+
+    // Build absolute Hz from new base kHz + remainder, then normalize through one way
+    int32_t abs_hz =
+        ((int32_t)(*freq) + steps_khz) * (int32_t)HZ_PER_KHZ +
+        (int32_t)(*bfo % HZ_PER_KHZ);
+
+    int32_t k, b;
+    hzToKHzBfoFloor(abs_hz, k, b);
+
+    *freq = (uint16_t)k;
+    *bfo = b;
 
     snapToNewStep(freq, steps_khz > 0);
 }
@@ -682,35 +697,21 @@ static inline void bfoFastRollover(uint16_t * freq, int32_t * bfo) {
 // convert absolute Hz back to kHz + BFO after band edge decision
 // keeps BFO in 0..999 Hz
 static inline void absHzToFreqBfo(long absolute_freq_hz, uint16_t * freq, int32_t * bfo) {
-    int32_t new_freq_khz = (int32_t)(absolute_freq_hz / HZ_PER_KHZ);
-    int32_t new_bfo_hz = (int32_t)(absolute_freq_hz % HZ_PER_KHZ);
-
-    // corrects negative BFO back into  positive range 0-999
-    // and adjusts main frequency down by 1 kHz to compensate
-    if (new_bfo_hz < 0) {
-        new_bfo_hz += HZ_PER_KHZ;
-        new_freq_khz -= 1;
-    }
-
-    *freq = (uint16_t)new_freq_khz;
-    *bfo = new_bfo_hz;
+    int32_t k, b;
+    hzToKHzBfoFloor((int32_t)absolute_freq_hz, k, b);
+    *freq = (uint16_t)k;
+    *bfo = b;
 }
 
-// precise path near limits checks absolute Hz against band in Hz
-// direction comes from BFO sign so wrap matches user motion then re-snap to the step grid
+// Re-anchor base kHz when absolute frequency exits current band boundaries
+// Converts absolute Hz back to kHz + BFO pair for seamless tuning across band edges
 static inline void bfoPreciseRollover(uint16_t * freq, int32_t * bfo) {
     long absolute_freq_hz = ((long)(*freq) * HZ_PER_KHZ) + *bfo;
     long min_freq_hz = (long)g_bandList[g_bandIndex].minimumFreq * HZ_PER_KHZ;
     long max_freq_hz = (long)g_bandList[g_bandIndex].maximumFreq * HZ_PER_KHZ;
 
     if (absolute_freq_hz >= max_freq_hz || absolute_freq_hz < min_freq_hz) {
-        bool direction_is_up = (*bfo > 0);
-        bandSwitch(direction_is_up, false);
-
-        // after band switch recalculate freq/bfo from the absolute Hz value
         absHzToFreqBfo(absolute_freq_hz, freq, bfo);
-
-        snapToNewStep(freq, direction_is_up);
     }
 }
 
@@ -1024,11 +1025,13 @@ static inline void ssbTuneFinalize() {
     markStateAsDirty();
 }
 
-// handles ssb tuning using the definitive "atomic step with integrated checks" architecture
+// SSB tuning with post-rollover band synchronization
+// After frequency calculation, finds correct band by searching frequency table
 static void doFrequencyTuneSSB() {
     uint16_t temp_freq;
-    int32_t temp_bfo;
+    int32_t  temp_bfo;
     uint16_t old_freq = g_currentFrequency;
+    uint8_t  old_band = (uint8_t)g_bandIndex;
 
     if (!ssbTunePrepare(temp_freq, temp_bfo)) return;
     ssbRolloverAndUpdate(temp_freq, temp_bfo, old_freq);
@@ -1036,6 +1039,24 @@ static void doFrequencyTuneSSB() {
     if (g_currentMode == FM) {
         loadActiveStateFromBand();
         return;
+    }
+
+    // Find correct band by frequency lookup
+    uint8_t new_band = old_band;
+    for (uint8_t i = 0; i < g_bandCount; ++i) {
+        if (g_bandList[i].bandType == FM_BAND_TYPE) continue;
+        if (g_currentFrequency >= g_bandList[i].minimumFreq &&
+            g_currentFrequency <= g_bandList[i].maximumFreq) {
+            new_band = i;
+            break;
+        }
+    }
+
+    if (new_band != old_band) {
+        g_bandIndex = (int8_t)new_band;
+        doBandwidth(0);
+        showBandTag();
+        showStep();
     }
 
     ssbTuneFinalize();
@@ -1056,14 +1077,8 @@ static inline void normalizeSsbBeforeSwitch(Band & band) {
     // use absolute Hz in 32bit to prevent overflow and simplify math
     int32_t total_freq_hz = (freq_khz * HZ_PER_KHZ) + bfo_hz;
 
-    freq_khz = total_freq_hz / HZ_PER_KHZ;
-    bfo_hz = total_freq_hz % HZ_PER_KHZ;
-
-    // correct negative modulo to implement floor division
-    if (bfo_hz < 0) {
-        bfo_hz += HZ_PER_KHZ;
-        freq_khz--;
-    }
+    // floor-division normalization
+    hzToKHzBfoFloor(total_freq_hz, freq_khz, bfo_hz);
 
     // clamp to band edges to keep state valid before the mode switch
     if (freq_khz < band.minimumFreq || freq_khz > band.maximumFreq) {

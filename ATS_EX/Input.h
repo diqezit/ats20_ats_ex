@@ -406,13 +406,6 @@ void resetCommandMode() {
     }
 }
 
-// Wrap-around index (avoids negative or overflow)
-inline int8_t wrapAroundIndex(int16_t value, uint8_t total) {
-    while (value < 0) value += total;
-    while (value >= total) value -= total;
-    return (int8_t)value;
-}
-
 // Calculate which settings page the index belongs to
 inline uint8_t calculateSettingsPage(uint8_t index) {
     if (index < 6) return 1;
@@ -430,14 +423,16 @@ inline void updateSettingDisplay(uint8_t prev, uint8_t current) {
     }
 }
 
-// Navigate settings with wrap-around
-// update page if changed, else refresh only moved items
+// Navigate settings with cursor order
+// NAV=0: linear order (0→1→2→3→4→5→6...)
+// NAV=1: column-first (0→2→4→1→3→5→6→8→10→7→9→11...)
 static void navigateSettingsPage(int16_t encoder_delta) {
     if (!encoder_delta) return;
 
     uint8_t prev = g_SettingSelected;
 
-    g_SettingSelected = wrapAroundIndex(prev + encoder_delta, SettingsIndex::SETTINGS_MAX);
+    // nav table in Settings.h
+    g_SettingSelected = getNextSettingIndex(prev, encoder_delta);
 
     uint8_t newPage = calculateSettingsPage(g_SettingSelected);
 

@@ -11,6 +11,7 @@
 //   - g_SettingsParams[] (settings values buffer; menu edits this array)
 //   - g_SettingsMeta[] (PROGMEM metadata: names, types, callbacks)
 //   - switch_setting_map[] + paramTexts[][] (PROGMEM tables used by UI formatting)
+//   - Navigation tables for column-first cursor movement
 // 
 // ====================================================================================
 
@@ -217,33 +218,18 @@ int8_t g_SettingsParams[SETTINGS_MAX];
 static void toggleSetting(uint8_t settingIndex) {
     g_SettingsParams[settingIndex] = 1 - g_SettingsParams[settingIndex];
 }
-
 // =================================================================================================
 // Settings API (RAM access)
 // =================================================================================================
 
-// Read setting parameter from RAM buffer
-static inline int8_t getSettingParam(uint8_t idx) {
-    return g_SettingsParams[idx];
-}
-
-// Write setting parameter to RAM buffer
-static inline void setSettingParam(uint8_t idx, int8_t val) {
-    g_SettingsParams[idx] = val;
-}
-
-// Enum-friendly overloads
-static inline int8_t getSettingParam(SettingsIndex idx) {
+template<typename T>
+static inline int8_t getSettingParam(T idx) {
     return g_SettingsParams[(uint8_t)idx];
 }
 
-static inline void setSettingParam(SettingsIndex idx, int8_t val) {
+template<typename T>
+static inline void setSettingParam(T idx, int8_t val) {
     g_SettingsParams[(uint8_t)idx] = val;
-}
-
-// Reference access (for doSwitchLogic and other in-place modifiers)
-static inline int8_t& settingRef(uint8_t idx) {
-    return g_SettingsParams[idx];
 }
 
 static inline int8_t& settingRef(SettingsIndex idx) {
@@ -251,31 +237,26 @@ static inline int8_t& settingRef(SettingsIndex idx) {
 }
 
 // =================================================================================================
-// accessors for PROGMEM metadata only to keep call sites clean
+// Accessors for PROGMEM metadata
 // =================================================================================================
 
-// Read setting name into buffer (4 chars including null terminator area)
 inline void getSettingName(uint8_t idx, char* buf) {
     memcpy_P(buf, g_SettingsMeta[idx].name, 4);
 }
 
-// Read setting type from PROGMEM
 inline uint8_t getSettingType(uint8_t idx) {
     return pgm_read_byte(&g_SettingsMeta[idx].type);
 }
 
-// Read default value from PROGMEM
 inline int8_t getSettingDefault(uint8_t idx) {
     return (int8_t)pgm_read_byte(&g_SettingsMeta[idx].defaultVal);
 }
 
-// Call the setting's manipulation callback
 inline void callSettingCallback(uint8_t idx, int8_t v) {
     SettingCallback cb = (SettingCallback)pgm_read_ptr(&g_SettingsMeta[idx].callback);
     if (cb) cb(v);
 }
 
-// Check if setting is active in current mode
 inline bool isSettingActive(uint8_t idx) {
     ActiveCheckFunc fn = (ActiveCheckFunc)pgm_read_ptr(&g_SettingsMeta[idx].isActive);
     return fn ? fn() : true;
@@ -304,6 +285,71 @@ static constexpr ModeDefaults DEFAULT_MODE_SETTINGS = { 0, 0, 10 };
 
 // Live storage (EEPROM <-> RAM)
 int8_t g_modeSettings[MODE_SETTINGS_COUNT][MODE_CONTEXT_COUNT];
+
+// =================================================================================================
+// Navigation tables for Column-first cursor movement
+// =================================================================================================
+// NAV affects ONLY cursor movement order, NOT visual layout
+// Visual layout is ALWAYS Row-first: 0,1 / 2,3 / 4,5 per page
+//
+// Column-first cursor path on page:
+//   [0] [1]       1st --- 4th
+//   [2] [3]       2nd --- 5th
+//   [4] [5]       3rd --- 6th
+
+// Full page pattern (6 items) left column first, then right
+#define NAV_PAGE6_ORDER(B)   (B)+0, (B)+2, (B)+4, (B)+1, (B)+3, (B)+5
+#define NAV_PAGE6_REVERSE(B) (B)+0, (B)+3, (B)+1, (B)+4, (B)+2, (B)+5
+
+// Partial page pattern (5 items) page 5 has no slot 29
+#define NAV_PAGE5_ORDER(B)   (B)+0, (B)+2, (B)+4, (B)+1, (B)+3
+#define NAV_PAGE5_REVERSE(B) (B)+0, (B)+3, (B)+1, (B)+4, (B)+2
+
+// Navigation position to Physical settings index
+const uint8_t g_navColFirstOrder[SETTINGS_MAX] PROGMEM = {
+    NAV_PAGE6_ORDER(0),
+    NAV_PAGE6_ORDER(6),
+    NAV_PAGE6_ORDER(12),
+    NAV_PAGE6_ORDER(18),
+    NAV_PAGE5_ORDER(24)
+};
+
+// Physical settings index to Navigation position
+const uint8_t g_navColFirstReverse[SETTINGS_MAX] PROGMEM = {
+    NAV_PAGE6_REVERSE(0),
+    NAV_PAGE6_REVERSE(6),
+    NAV_PAGE6_REVERSE(12),
+    NAV_PAGE6_REVERSE(18),
+    NAV_PAGE5_REVERSE(24)
+};
+
+#undef NAV_PAGE6_ORDER
+#undef NAV_PAGE6_REVERSE
+#undef NAV_PAGE5_ORDER
+#undef NAV_PAGE5_REVERSE
+
+// get next setting index with wrap-around based on NAV mode
+static inline uint8_t getNextSettingIndex(uint8_t current, int16_t delta) {
+    int16_t next;
+
+    if (getSettingParam(NAV) == 0) {
+        // linear order
+        next = (int16_t)current + delta;
+    } else {
+        // column order
+        next = (int16_t)pgm_read_byte(&g_navColFirstReverse[current]) + delta;
+    }
+
+    while (next < 0) next += SETTINGS_MAX;
+    while (next >= SETTINGS_MAX) next -= SETTINGS_MAX;
+
+    // mapping back to physical index for column ord
+    if (getSettingParam(NAV) != 0) {
+        return pgm_read_byte(&g_navColFirstOrder[(uint8_t)next]);
+    }
+
+    return (uint8_t)next;
+}
 
 // =================================================================================================
 // Switch formatting mapping tables
