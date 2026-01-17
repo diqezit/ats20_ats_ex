@@ -28,12 +28,19 @@
 //
 // =================================================================================================
 
-// --- Core EEPROM Validation ---
+
+// =================================================================================================
+// --------------- Core EEPROM Validation ----------------------------------------------------------
+// =================================================================================================
+
 constexpr auto EEPROM_APP_ID = 235;
 constexpr auto EEPROM_APP_ID_ADDRESS = 0;
 constexpr auto EEPROM_VERSION_ADDRESS = 1;
 
-// --- Data Block Start Addresses ---
+
+// =================================================================================================
+// --------------- EEPROM Block Start Addresses ----------------------------------------------------
+// =================================================================================================
 // ReceiverHeader:      7 bytes
 // BandStatePacked:     6 bytes (x36 bands = 216 bytes)
 // Settings:            29 bytes used (SETTINGS_MAX = 29 items * 1 byte each), 30 bytes reserved
@@ -48,11 +55,22 @@ constexpr auto EEPROM_MODE_SETTINGS_START = 272;        // Used: 9B   (272..280)
 constexpr auto EEPROM_FAVORITES_START = 281;            // Used: 100B (281..380)
 constexpr auto EEPROM_FAVORITES_COUNT = 381;            // Used: 1B   (381)
 
+
 // Increment APP_VERSION to force EEPROM reset due to layout changes
 constexpr auto APP_VERSION = 07;
 
-// Centralizes user-facing strings on main screen
-#define APP_NAME_LINE1 F("ATS-20+ V7.0.1")
+
+// =================================================================================================
+// --------------- UI Strings ----------------------------------------------------------------------
+// =================================================================================================
+
+#define APP_NAME_LINE1 F("ATS-20+ V7.0.2")
+#define APP_NAME_LINE2 F("ATS EX")
+
+
+// =================================================================================================
+// --------------- I2C / Bus -----------------------------------------------------------------------
+// =================================================================================================
 
 // I2C SCL base rate for shared bus (OLED + Si4735)
 // Fixed to 77 kHz as a compromise: faster OLED updates than 35/50 kHz,
@@ -60,41 +78,48 @@ constexpr auto APP_VERSION = 07;
 // First harmonics: 77, 154, 231, 308 kHz
 constexpr uint32_t I2C_BASE_HZ = 77000UL;
 
-// Behavior
+
+// =================================================================================================
+// --------------- Runtime Timing / Behavior -------------------------------------------------------
+// =================================================================================================
+
 constexpr auto SAVE_ON_IDLE_TIMEOUT = 15000UL;          // 15 seconds
 constexpr auto DEFAULT_VOLUME = 25;
+
 constexpr auto ADJUSTMENT_ACTIVE_TIMEOUT = 3000;
 constexpr auto SETTINGS_MENU_TIMEOUT = 10000UL;
-#define BAND_DELAY                2
+
+#define BAND_DELAY 2
 constexpr auto MIN_ELAPSED_TIME = 100;
+
 constexpr auto SEEK_TIME = 65535UL;                     // 65535 ms = 65.535 seconds
 
-// for signal polling timing
+// RSSI / stereo polling timing
 constexpr auto RSSI_POLL_INTERVAL_MS = 1000UL;          // How often to check RSSI/Stereo when idle.
 constexpr auto RSSI_POLL_DELAY_AFTER_TUNE_MS = 500UL;   // Debounce delay after tuning to let signal settle.
 
+// delay (in ms) to wait after the encoder stops turning before sending final frequency to the chip
+constexpr auto FREQ_UPDATE_DELAY_MS = 30UL;
+
+// if the frequency change since chip update exceeds this threshold (kHz), send immediately
+constexpr auto FREQ_FORCE_UPDATE_THRESHOLD_KHZ = 50;
+
+// absolute minimum time between setFrequency calls (protect I2C / CTS wait)
+constexpr auto MIN_SETFREQ_INTERVAL_MS = 25UL;
+
+
+// =================================================================================================
+// --------------- Hardware Pins -------------------------------------------------------------------
+// =================================================================================================
+
 // Display
-#define RST_PIN -1
+#define RST_PIN   -1
 #define RESET_PIN 12
 
 // Amplifier MD8002A control
 #define AMP_DDR   DDRC
 #define AMP_PORT  PORTC
 #define AMP_BIT   3
-
-// delay (in ms) to wait after the encoder stops turning before sending
-// final frequency to the chip
-// shorter delay feels more responsive but can increase I2C traffic if tuning slowly
-constexpr auto FREQ_UPDATE_DELAY_MS = 30UL;
-
-// if the frequency change (delta) since chip update exceeds this threshold in kHz,
-// send the update immediately without waiting for the delay
-// This prevents the receiver from "lagging" behind during fast tuning
-constexpr auto FREQ_FORCE_UPDATE_THRESHOLD_KHZ = 50;
-
-// protect the I2C bus from being flooded with commands, this sets the absolute minimum
-// time that must pass between any two setFrequency calls ( safety rate limit)
-constexpr auto MIN_SETFREQ_INTERVAL_MS = 25UL;
 
 // Encoder Pins
 #define ENCODER_PIN_A 2
@@ -107,65 +132,58 @@ constexpr auto MIN_SETFREQ_INTERVAL_MS = 25UL;
 #define AVC_BUTTON        7
 #define BAND_BUTTON       8
 #define SOFTMUTE_BUTTON   9
-#define AGC_BUTTON       11
 #define STEP_BUTTON      10
+#define AGC_BUTTON       11
 #define ENCODER_BUTTON   14
 
+
+// =================================================================================================
+// --------------- Compile-Time Switches -----------------------------------------------------------
+// =================================================================================================
+
 // Display options
-#define ENABLE_SPLASH_SCREEN 1              // Set to 1 to show splash screen, 0 to disable
-#define ENABLE_EEPROM_RESET_MSG 1           // Set to 1 to show "EEPROM RESET" message, 0 to disable
-#define ANIMATE_SPLASH 0                    // Set to 1 to animate splash screen, 0 to disable
+#define ENABLE_SPLASH_SCREEN    1  // 1=show splash screen, 0=disable
+#define ENABLE_EEPROM_RESET_MSG 1  // 1=show EEPROM reset message, 0=disable
+#define ANIMATE_SPLASH          0  // 1=animate splash, 0=disable
 
-// IC options - must disable some other features to compile & work properly
-#define ENABLE_FAVORITES 1                  // Set to 1 to use unified favorites, 0 to disable
-#define DISABLE_FM 0                        // not implemented yet
+// Features
+#define ENABLE_FAVORITES 1         // 1=Favorites enabled
+#define DISABLE_FM       0         // not implemented yet
 
-#define ENABLE_BATTERY_MONITOR 1            // Set to 1 to enable battery monitoring, 0 to disable
+#define ENABLE_BATTERY_MONITOR 1   // 1=battery monitor enabled
 
-// Debugging options - only for test purposes & port monotoring - see Utils.h
-#define DEBUG_MODE 0                        // Set to 1 to enable debug mode, 0 to disable, (This use serial speed 9600)
+// Debug (see Utils.h)
+#define DEBUG_MODE 0               // 1=enable debug output (9600 baud), 0=disable
 
-#define TEST 0
+// Test / experimental flag (project-specific)
+#define TEST 1                     // Enables temporary test code paths / experiments
 
-// SSB frequency clamp - prevents out-of-band states on NON-SSB bands (149 kHz, 30001 kHz)
-// Disable to save ~170 bytes if Flash is critical
+// SSB frequency clamp (149..30001 kHz). Disable to save Flash if critical.
 #define ENABLE_SSB_FREQ_CLAMP 1
 
-// Set to 1 to enable the highly compressed SSB patch loading system
-// This advanced method significantly reduces firmware size
-// Enabled  (1) Saves 108 bytes of Flash memory compared to the original compressed patch
-// Disabled (0) Falls back to a less optimized format
-// Strongly recommended to keep enabled
-#define PATCH_EX_SSB 1
+// SSB patch compression
+#define PATCH_EX_SSB 1             // 1=highly compressed patch loader (recommended)
 
-
-// EXPERIMENTAL: CW (Morse code) to text decoder
-// To use - at first connect speaker audio via a 2.2 µF capacitor to analog pin A6
-// While in CW mode, a long-press on the MODE button will toggle the decoder view
-// Must be disable (ENABLE_FAVORITES 0) at first to compile (30720 bytes)
-// See CW_decoder.h for details
+// EXPERIMENTAL: CW (Morse) decoder view
 #define ENABLE_CW_DECODER 0
 
 
 // =================================================================================================
 // --------------- Audio Enhancement Profile Constants ---------------------------------------------
 // =================================================================================================
-// Defines curated audio profiles for both FM and AM/SSB modes
 // Values are derived from experimental testing and the Si47XX AN332 programming guide
 
-// --- FM: Aggressive Soft Mute for Quiet Tuning ---
-// Eliminate static hiss when tuning between stations
-// Properties are set for instant reaction and deep attenuation when SNR drops
-// These values are aggressive. Reducing them will result in a softer mute
-// Extremes might cause audio pumping on fading signals
+
+// -------------------------------------------------------------------------------------------------
+// FM: Aggressive Soft Mute for Quiet Tuning
+// -------------------------------------------------------------------------------------------------
 
 // Property 0x1300: FM_SOFTMUTE_RATE
-// Sets mute/unmute speed. Maximum value provides instantaneous action
+// Sets mute/unmute speed.
 constexpr uint8_t FM_PROP_SOFTMUTE_RATE = 255;                 // Default: 64. Range: 1-255
 
 // Property 0x1301: FM_SOFTMUTE_SLOPE
-// Configures attenuation slope (dB attenuation per 1 dB SNR drop)
-// A higher value causes faster audio fade-out as signal weakens
+// Attenuation slope (dB attenuation per 1 dB SNR drop).
 constexpr uint8_t FM_PROP_SOFTMUTE_SLOPE = 4;                  // Default: 2. Range: 0-63
 
 // Property addresses for user-configurable soft mute values
@@ -173,83 +191,92 @@ constexpr uint8_t FM_PROP_SOFTMUTE_SLOPE = 4;                  // Default: 2. Ra
 #define FM_PROP_SOFTMUTE_SNR_THRESH_ADDR 0x1303
 
 // Property 0x1304 & 0x1305: FM_SOFTMUTE_RELEASE/ATTACK_RATE
-// These undocumented properties likely control release/attack rates
-// High values are used to ensure the mute engages and disengages rapidly
-constexpr uint16_t FM_PROP_SOFTMUTE_REL_RATE = 32700;          // Property 0x1304 (Assumed Release Rate)
-constexpr uint16_t FM_PROP_SOFTMUTE_ATT_RATE = 32700;          // Property 0x1305 (Assumed Attack Rate)
+// Undocumented in some docs, used here as an audio profile tweak.
+constexpr uint16_t FM_PROP_SOFTMUTE_REL_RATE = 32700;
+constexpr uint16_t FM_PROP_SOFTMUTE_ATT_RATE = 32700;
+
+// FM Soft Mute defaults (AN332 safe defaults)
+// Used as fallback when EEPROM contains invalid data (0xFF)
+constexpr uint8_t FM_SOFT_MUTE_DEFAULT_ATT = 16;               // 16 dB attenuation
+constexpr uint8_t FM_SOFT_MUTE_DEFAULT_THR = 4;                // 4 dB SNR threshold
 
 
-// --- FM: Hi-Cut Filter as a "Warm Sound" Equalizer ---
-// Goal: Reduce high-frequency harshness to suit the small speaker
-// Mechanism: The dynamic hi-cut filter is re-purposed as a static audio filter
-// It is forced active to tailor audio output for the speaker's physical limitations
-// Safe Range: The CUTOFF value is critical. Changing it will alter the audio tone
+// -------------------------------------------------------------------------------------------------
+// FM: Hi-Cut Filter (AN332 mapping)
+// -------------------------------------------------------------------------------------------------
+// NOTE (AN332):
+// - There is NO separate "enable" property at 0x1A00.
+// - Hi-Cut is disabled when FM_HICUT_CUTOFF_FREQUENCY FREQ[2:0] == 0.
+// - Properties 0x1A00..0x1A06 are fixed and must be written with reserved bits = 0.
 
-// Property 0x1A00: FM_HICUT_ENABLE
-// Enables or disables hi-cut functionality. Forced ON to act as an EQ.
-constexpr uint16_t FM_PROP_HICUT_ENABLE = 1;                   // 1 = On, 0 = Off
+// AN332 Hi-Cut property addresses
+constexpr uint16_t FM_HICUT_SNR_HIGH_THRESHOLD_PROP = 0x1A00;   // default 24 dB
+constexpr uint16_t FM_HICUT_SNR_LOW_THRESHOLD_PROP  = 0x1A01;   // default 15 dB
+constexpr uint16_t FM_HICUT_ATTACK_RATE_PROP        = 0x1A02;   // default 0x4E20 (~3 ms)
+constexpr uint16_t FM_HICUT_RELEASE_RATE_PROP       = 0x1A03;   // default 0x0014 (~3.3 s)
+constexpr uint16_t FM_HICUT_MP_TRIGGER_PROP         = 0x1A04;   // default 20 %
+constexpr uint16_t FM_HICUT_MP_END_PROP             = 0x1A05;   // default 60 %
+constexpr uint16_t FM_HICUT_CUTOFF_PROP             = 0x1A06;   // default 0x0000 (disabled)
 
-// Property 0x1A00: FM_HICUT_SNR_HIGH_THRESHOLD
-// SNR level where the hi-cut filter starts to engage
-// A low value ensures the filter is active on almost all signals for a consistent audio profile
-constexpr uint16_t FM_PROP_HICUT_SNR_THRESH = 10;              // Property Address 0x1A00, Default: 24 dB
+// AN332 defaults (values)
+constexpr uint16_t FM_HICUT_SNR_HIGH_DEFAULT = 24;             // 0x0018
+constexpr uint16_t FM_HICUT_SNR_LOW_DEFAULT  = 15;             // 0x000F
+constexpr uint16_t FM_HICUT_ATTACK_DEFAULT   = 0x4E20;         // 20000 (~3 ms)
 
-// Property 0x1A06: FM_HICUT_CUTOFF_FREQUENCY
-// This setting controls the audio tone. It has two parts:
-// - Bits 6:4: Maximum Audio Frequency. Sets a hard limit on the audio path
-// - Bits 2:0: Hi-Cut Transition Frequency. Sets frequency for filter attenuation
-// Value 0x0055 (binary ...0101 0101) translates to:
-// - Max Audio = 2 (3 kHz). Audio above 3 kHz is sharply cut. This removes piercing highs
-// - Hi-Cut Freq = 5 (6 kHz). This softens upper mid-range frequencies
-constexpr uint16_t FM_PROP_HICUT_CUTOFF = 0x0055;              // Property Address 0x1A06, Default: 0x0000 (Disabled)
+// 0x1A03: FM_HICUT_RELEASE_RATE (AN332 default 0x0014 ~3.3s)
+constexpr uint16_t FM_HICUT_RELEASE_DEFAULT = 0x0014;
 
-// Other Hi-Cut properties that define filter behavior. These values ensure a fast,
-// stable response when the filter is active, preventing audio pumping or instability
-constexpr uint16_t FM_PROP_HICUT_WINDOW = 1;                   // Property 0x1A01: Sets filter response window for stability
-constexpr uint16_t FM_PROP_HICUT_ATT_RATE = 32760;             // Property 0x1A02: Fast attack rate ensures immediate filter action
-constexpr uint16_t FM_PROP_HICUT_REL_RATE = 1;                 // Property 0x1A03: Fast release rate prevents pumping on signal recovery
-constexpr uint16_t FM_PROP_HICUT_MPX_THRESH = 100;             // Property 0x1A05: High threshold to ignore multipath effects on filter
+// 0x1A04 / 0x1A05: Multipath thresholds (AN332 defaults)
+constexpr uint16_t FM_HICUT_MP_TRIGGER_DEFAULT = 20;
+constexpr uint16_t FM_HICUT_MP_END_DEFAULT     = 60;
 
-
-// --- FM: Experimental Noise Blanker ---
-// Potentially reduces impulse noise from sources like car ignitions
-// Default values from AN332 are used here for base configuration
-constexpr uint16_t FM_PROP_NB_REJ_THRESH = 16;                 // Property 0x1900: Default=16dB. Threshold to detect a noise spike. Set to 0 to disable
-constexpr uint16_t FM_PROP_NB_ATT_RATE = 24;                   // Property 0x1901: Default=24us. Duration for which the signal is blanked
-constexpr uint16_t FM_PROP_NB_REL_RATE = 64;                   // Property 0x1902: Default=64 (6.4kHz). Max rate of blanking events
-constexpr uint16_t FM_PROP_NB_ADC_OVER_THRESH = 300;           // Property 0x1903: Default=300 (465Hz). Bandwidth of noise floor estimator
-constexpr uint16_t FM_PROP_NB_ADC_OVER_DELAY = 170;            // Property 0x1904: Default=170us. Delay before applying blanking
+// 0x1A06: FM_HICUT_CUTOFF_FREQUENCY
+// Bits 6:4 = MAXIMUM_AUDIO_FREQUENCY (0..7)
+// Bits 2:0 = HICUT_TRANSITION_FREQUENCY (0..7); 0 disables Hi-Cut
+//
+// 0x0055 = (MAX_AUDIO=5 -> 6 kHz), (HICUT=5 -> 6 kHz), Hi-Cut enabled (since HICUT != 0)
+constexpr uint16_t FM_PROP_HICUT_CUTOFF = 0x0055;              // Default: 0x0000 (Disabled)
 
 
-// --- AM: Experimental Noise Blanker (NB) ---
-// These properties configure the Noise Blanker for AM/SSB modes
-// It is disabled by default and can be enabled via the settings menu
-// Default values from AN32 are used for base config
-#define AM_NB_DETECT_THRESHOLD_PROP  0x3900             // Property Address for NB Threshold
-#define AM_NB_INTERVAL_PROP          0x3901             // Property Address for NB Interval
-#define AM_NB_RATE_PROP              0x3902             // Property Address for NB Rate
-#define AM_NB_IIR_FILTER_PROP        0x3903             // Property Address for NB IIR Filter
-#define AM_NB_DELAY_PROP             0x3904             // Property Address for NB Delay
+// Legacy names kept for compatibility with older code paths that treated these as "profile values".
+// They are NOT property addresses; use FM_HICUT_*_PROP constants for addresses.
+//
+// If your RadioControl.h uses the old table:
+//   {0x1A00, FM_PROP_HICUT_ENABLE}
+//   {0x1A01, FM_PROP_HICUT_WINDOW}
+//   {0x1A02, FM_PROP_HICUT_SNR_THRESH}
+// then these values will map correctly to AN332 fields.
+constexpr uint16_t FM_PROP_HICUT_ENABLE    = 127;              // legacy alias: SNR_HIGH threshold (profile)
+constexpr uint16_t FM_PROP_HICUT_WINDOW    = 127;              // legacy alias: SNR_LOW threshold  (profile)
+constexpr uint16_t FM_PROP_HICUT_SNR_THRESH = FM_HICUT_ATTACK_DEFAULT; // legacy alias: ATTACK rate (profile)
 
-// Default=12dB. Threshold for detecting an impulse noise spike
-// Setting this to 0 disables the Noise Blanker feature. Range: 0-90
-constexpr auto AM_NB_THRESHOLD_DEFAULT = 12;
 
-// Default=55us. The duration for which the original audio is replaced
-// with interpolated samples after a noise spike is detected. Range: 15-110
-constexpr auto AM_NB_INTERVAL_DEFAULT = 55;
+// -------------------------------------------------------------------------------------------------
+// FM: Experimental Noise Blanker (Si4742/43/44/45 class parts; may be ignored on some silicon)
+// -------------------------------------------------------------------------------------------------
 
-// Default=64 (6.4kHz). The maximum rate at which the noise blanker
-// is allowed to activate, preventing excessive signal processing. Range: 1-64
-constexpr auto AM_NB_RATE_DEFAULT = 64;
+constexpr uint16_t FM_PROP_NB_REJ_THRESH       = 16;            // 0x1900
+constexpr uint16_t FM_PROP_NB_ATT_RATE         = 24;            // 0x1901
+constexpr uint16_t FM_PROP_NB_REL_RATE         = 64;            // 0x1902
+constexpr uint16_t FM_PROP_NB_ADC_OVER_THRESH  = 300;           // 0x1903
+constexpr uint16_t FM_PROP_NB_ADC_OVER_DELAY   = 170;           // 0x1904
 
-// Default=300 (465Hz). The bandwidth of the filter used to estimate the
-// noise floor, which is the baseline for detecting spikes. Range: 300-1600
-constexpr auto AM_NB_IIR_FILTER_DEFAULT = 300;
 
-// Default=172us. The delay before the blanking is applied, allowing the
-// system to accurately identify the noise impulse. Range: 125-219
-constexpr auto AM_NB_DELAY_DEFAULT = 172;
+// -------------------------------------------------------------------------------------------------
+// AM: Experimental Noise Blanker (NB)
+// -------------------------------------------------------------------------------------------------
+
+#define AM_NB_DETECT_THRESHOLD_PROP  0x3900
+#define AM_NB_INTERVAL_PROP          0x3901
+#define AM_NB_RATE_PROP              0x3902
+#define AM_NB_IIR_FILTER_PROP        0x3903
+#define AM_NB_DELAY_PROP             0x3904
+
+constexpr auto AM_NB_THRESHOLD_DEFAULT   = 12;
+constexpr auto AM_NB_INTERVAL_DEFAULT    = 55;
+constexpr auto AM_NB_RATE_DEFAULT        = 64;
+constexpr auto AM_NB_IIR_FILTER_DEFAULT  = 300;
+constexpr auto AM_NB_DELAY_DEFAULT       = 172;
 
 
 // p. 318 Rev. v 0.8
@@ -257,248 +284,215 @@ constexpr auto AM_NB_DELAY_DEFAULT = 172;
 constexpr uint16_t AM_SOFT_MUTE_SLOPE_PROP = 0x3301;
 constexpr uint16_t AM_SOFT_MUTE_SLOPE_RECOMMENDED = 2;
 
+
 // =================================================================================================
-// --------------- Short-Wave AFC (AM on SW) profiles (Si47xx AN332) -------------------------------
-// -------------------------------------------------------------------------------------------------
-//   Configure AFC pull-in and lock-in ranges on SW in AM mode to improve capture and hold
-//
-//   0x3104 AM_AFC_SW_PULL_IN_RANGE  pull-in range
-//   0x3105 AM_AFC_SW_LOCK_IN_RANGE  lock-in range
-//
-// PPM defaults
-//   115 ppm -> 0x21F7
-//   85  ppm -> 0x2DF5
-//
-//   Written only when band is SW and mode is AM
-//   On older silicon the write is ignored
-//
-// Profiles (g_Settings[SWAFC].param)
-//   0 OFF
-//   1 PPM defaults
-//   2 Fixed Hz  pull 1600  lock 1200
-//   3 Fixed Hz  pull 2000  lock 1500
-//
-// Fixed Hz conversion
-//   reg = round(1000 * freq_kHz / window_Hz) clamped to 1..0xFFFF
-//
-//   Keep pull-in >= lock-in
-//   Does not calibrate the dial
-//   Default SWA is 0 OFF
+// --------------- Short-Wave AFC (AM on SW) profiles (Si47xx AN332) --------------------------------
 // =================================================================================================
 
 constexpr uint16_t AM_AFC_SW_PULL_IN_RANGE_PROP = 0x3104; // pull-in
 constexpr uint16_t AM_AFC_SW_LOCK_IN_RANGE_PROP = 0x3105; // lock-in
 
 // Profile 1 PPM defaults
-constexpr uint16_t AM_AFC_SW_PULL_IN_RANGE_VAL = 0x21F7;  // 8695
-constexpr uint16_t AM_AFC_SW_LOCK_IN_RANGE_VAL = 0x2DF5;  // 11765
+constexpr uint16_t AM_AFC_SW_PULL_IN_RANGE_VAL = 0x21F7;  // 115 ppm
+constexpr uint16_t AM_AFC_SW_LOCK_IN_RANGE_VAL = 0x2DF5;  // 85 ppm
 
 // Profile IDs
-constexpr uint8_t  SW_AFC_PROFILE_OFF = 0;
-constexpr uint8_t  SW_AFC_PROFILE_PPM = 1;
+constexpr uint8_t  SW_AFC_PROFILE_OFF       = 0;
+constexpr uint8_t  SW_AFC_PROFILE_PPM       = 1;
 constexpr uint8_t  SW_AFC_PROFILE_HZ_NORMAL = 2;
-constexpr uint8_t  SW_AFC_PROFILE_HZ_AGGR = 3;
+constexpr uint8_t  SW_AFC_PROFILE_HZ_AGGR   = 3;
 
 // Fixed Hz windows
 constexpr uint16_t SW_AFC_PULL_HZ_NORMAL = 1600;
 constexpr uint16_t SW_AFC_LOCK_HZ_NORMAL = 1200;
-constexpr uint16_t SW_AFC_PULL_HZ_AGGR = 2000;
-constexpr uint16_t SW_AFC_LOCK_HZ_AGGR = 1500;
+constexpr uint16_t SW_AFC_PULL_HZ_AGGR   = 2000;
+constexpr uint16_t SW_AFC_LOCK_HZ_AGGR   = 1500;
 
-// FM multipath blending: automatic cleanup when reflections (multipath) break the stereo image
-// No manual mono/stereo switching needed; in good conditions it is transparent
-// Works by measuring reflections as MULT (0..100) and blending stereo to mono when MULT is high
-//
-// Logic (simple):
-// If MULT <= x  -> keep 100% stereo
-// If x < MULT < y -> smoothly blend stereo to mono
-// If MULT >= y -> force 100% mono
-//
-// Timing:
-// Attack: speed of stereo->mono (fast to hide artifacts)
-// Release: speed of mono->stereo (slower to avoid pumping)
-//
-// MULT readout and multipath interrupts are guaranteed on D60 only
 
-// 0x1808 FM_BLEND_MULTIPATH_STEREO_THRESHOLD
-// below => 100% stereo
-// above => start blend
-// Default=20 (0x0014) Range=0–100
+// =================================================================================================
+// --------------- FM Multipath Blend (AN332) ------------------------------------------------------
+// =================================================================================================
+
+// 0x1808 FM_BLEND_MULTIPATH_STEREO_THRESHOLD (default 20)
 constexpr uint16_t FM_MP_STEREO_THR_DEFAULT = 20;
 
-// 0x1809 FM_BLEND_MULTIPATH_MONO_THRESHOLD
-// above => 100% mono
-// Default=60 (0x003C)
-// Range=0–100
+// 0x1809 FM_BLEND_MULTIPATH_MONO_THRESHOLD (default 60)
 constexpr uint16_t FM_MP_MONO_THR_DEFAULT = 60;
 
-// 0x180A FM_BLEND_MULTIPATH_ATTACK_RATE
-// stereo→mono attack ATTACK=65536/time_ms
-// Default=0x0FA0 (~16 ms)
-// Range=0 (disabled), 1–32767
+// 0x180A FM_BLEND_MULTIPATH_ATTACK_RATE (default 0x0FA0 ~16ms)
 constexpr uint16_t FM_MP_ATTACK_DEFAULT = 0x0FA0;
 
-// 0x1A03 FM_HICUT_RELEASE_RATE
-// rate to increase hi‑cut transition freq
-// RELEASE=65536/time_ms
-// Default=0x0014 (~3.3 s)
-// Range=0 (disabled), 1–32767
-constexpr uint16_t FM_HICUT_RELEASE_DEFAULT = 0x0014;
-
-// 0x180B FM_BLEND_MULTIPATH_RELEASE_RATE mono→stereo release
-// RELEASE=65536/time_ms
-// Default=0x0028 (~1.64 s)
-// Range=0 (disabled), 1–32767
+// 0x180B FM_BLEND_MULTIPATH_RELEASE_RATE (default 0x0028 ~1.64s)
 constexpr uint16_t FM_MP_RELEASE_DEFAULT = 0x0028;
 
-// 0x1A04 FM_HICUT_MULTIPATH_TRIGGER_THRESHOLD
-// MULT at which hi‑cut starts band‑limiting
-// Default=20 Range=0–100
-constexpr uint16_t FM_HICUT_MP_TRIGGER_DEFAULT = 20;
-
-// 0x1A05 FM_HICUT_MULTIPATH_END_THRESHOLD
-// MULT at which hi‑cut reaches maximum band‑limiting
-// Default=60 Range=0–100
-constexpr uint16_t FM_HICUT_MP_END_DEFAULT = 60;
 
 // =================================================================================================
-// --------------- LOGIC AND ALGORITHM CONSTANTS ---------------------------------------------------
+// --------------- FM Stereo/Mono Blend Thresholds (AN332) -----------------------------------------
 // =================================================================================================
 
-// --- Utility Macros ---
-// Gets the number of elements in a static array
+// RSSI-based blend thresholds (dBµV)
+constexpr uint16_t FM_BLEND_RSSI_STEREO_THRESHOLD_PROP = 0x1800;
+constexpr uint16_t FM_BLEND_RSSI_MONO_THRESHOLD_PROP   = 0x1801;
+constexpr uint8_t  FM_BLEND_RSSI_STEREO_DEFAULT        = 49;
+constexpr uint8_t  FM_BLEND_RSSI_MONO_DEFAULT          = 30;
+
+// SNR-based blend thresholds (dB)
+constexpr uint16_t FM_BLEND_SNR_STEREO_THRESHOLD_PROP  = 0x1804;
+constexpr uint16_t FM_BLEND_SNR_MONO_THRESHOLD_PROP    = 0x1805;
+constexpr uint8_t  FM_BLEND_SNR_STEREO_DEFAULT         = 27;
+constexpr uint8_t  FM_BLEND_SNR_MONO_DEFAULT           = 14;
+
+// Multipath-based blend thresholds (addresses only; values use FM_MP_* defaults)
+constexpr uint16_t FM_BLEND_MULTIPATH_STEREO_THRESHOLD_PROP = 0x1808;
+constexpr uint16_t FM_BLEND_MULTIPATH_MONO_THRESHOLD_PROP   = 0x1809;
+
+
+// =================================================================================================
+// --------------- Utility Macros ------------------------------------------------------------------
+// =================================================================================================
+
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
-// Gets the last valid index of a zero-based array
-#define MAX_INDEX(a) (ARRAY_SIZE(a) - 1)
+#define MAX_INDEX(a)  (ARRAY_SIZE(a) - 1)
 
 
-// --- Tuning and Seek Parameters ---
+// =================================================================================================
+// --------------- Logic and Algorithm Constants ---------------------------------------------------
+// =================================================================================================
 
-// Defines max BFO deviation before it rolls over into main frequency for seamless tuning
+// BFO rollover threshold (Hz)
 constexpr int32_t BFO_ROLLOVER_MAX_HZ = 13000;
 constexpr int16_t HZ_PER_KHZ = 1000;
 
 // Standard FM channel spacing for most regions
 constexpr uint8_t FM_SEEK_SPACING_KHZ = 10;
 
-// Short delay after setting frequency to allow hardware to settle before seeking
+// Short delay after setting frequency before seek
 constexpr uint16_t DEFAULT_SEEK_DELAY_MS = 30;
 
-// Default to 5kHz for AM seek if user-selected step is not hardware-supported
+// AM seek spacing normalization
 constexpr uint8_t AM_SEEK_STEP_DEFAULT_KHZ = 5;
-constexpr uint8_t AM_SEEK_STEP_MAX_KHZ = 10;
+constexpr uint8_t AM_SEEK_STEP_MAX_KHZ     = 10;
 
-// See AN332 for property details
-constexpr uint16_t FM_SEEK_TUNE_SNR_THRESHOLD_PROP = 0x1403;
+// Seek threshold properties (AN332)
+constexpr uint16_t FM_SEEK_TUNE_SNR_THRESHOLD_PROP  = 0x1403;
 constexpr uint16_t FM_SEEK_TUNE_RSSI_THRESHOLD_PROP = 0x1404;
 
-// Lower thresholds help find weaker stations during seek
-constexpr uint8_t  FM_SEEK_SNR_THRESHOLD_VAL = 2;               // Default: 3
-constexpr uint8_t  FM_SEEK_RSSI_THRESHOLD_VAL = 5;              // Default: 20
-constexpr uint16_t AM_SEEK_SNR_THRESHOLD_PROP = 0x3403;
+constexpr uint8_t  FM_SEEK_SNR_THRESHOLD_VAL  = 2;               // default 3
+constexpr uint8_t  FM_SEEK_RSSI_THRESHOLD_VAL = 5;               // default 20
+
+constexpr uint16_t AM_SEEK_SNR_THRESHOLD_PROP  = 0x3403;
 constexpr uint16_t AM_SEEK_RSSI_THRESHOLD_PROP = 0x3404;
-constexpr uint8_t  AM_SEEK_SNR_THRESHOLD_VAL = 3;               // Default: 5
-constexpr uint8_t  AM_SEEK_RSSI_THRESHOLD_VAL = 10;             // Default: 25
 
-// --- SSB/CW Parameters ---
+constexpr uint8_t  AM_SEEK_SNR_THRESHOLD_VAL  = 3;               // default 5
+constexpr uint8_t  AM_SEEK_RSSI_THRESHOLD_VAL = 10;              // default 25
 
-// I2C speed for SSB patch loading
-// Higher speeds (500-800kHz) can shorten patch load time, but speeds above
-// 500kHz have caused lock-ups on some chips. 500kHz is a safe default
+
+// =================================================================================================
+// --------------- SSB/CW Parameters ---------------------------------------------------------------
+// =================================================================================================
+
+// I2C speed for SSB patch loading (Wire.setClock request)
 constexpr int32_t I2C_SSB_PATCH_SPEED_HZ = 500000;
 
-// Brief pause after power-up command before sending patch data
+// Delay after patch power-up before download
 constexpr uint16_t PATCH_LOAD_DELAY_MS = 50;
+
+// Base hardware step for SSB
 constexpr uint8_t SSB_BASE_STEP_KHZ = 1;
 
-// Values to toggle the Si4735 internal DSP Automatic Frequency Control
+// DSP AFC flags (library-level)
 constexpr int8_t  SSB_DSP_AFC_OFF = 1;
-constexpr int8_t  SSB_DSP_AFC_ON = 0;
+constexpr int8_t  SSB_DSP_AFC_ON  = 0;
 
-// Values to control AVC behavior when DSP AFC (Sync) is active
+// AVC divider behavior when Sync is active
 constexpr int8_t  SSB_AVC_DIVIDER_SYNC_OFF = 0;
-constexpr int8_t  SSB_AVC_DIVIDER_SYNC_ON = 3;
+constexpr int8_t  SSB_AVC_DIVIDER_SYNC_ON  = 3;
 
-// --- Mode and State Management ---
 
-// Special value to indicate RSSI is not currently valid or available
+// =================================================================================================
+// --------------- Mode and State Management -------------------------------------------------------
+// =================================================================================================
+
 constexpr uint8_t INVALID_RSSI_VALUE = 255;
 
-// FM de-emphasis values for different broadcast regions
-constexpr int8_t  DEEMPHASIS_50_US = 1;                         // Europe etc
-constexpr int8_t  DEEMPHASIS_75_US = 2;                         // Americas
+// FM de-emphasis (menu uses 0/1, hardware expects 1/2)
+constexpr int8_t  DEEMPHASIS_50_US = 1;
+constexpr int8_t  DEEMPHASIS_75_US = 2;
 
-// --- Attenuator (AGC) Settings ---
 
-// Max hardware attenuation levels for FM and AM modes
+// =================================================================================================
+// --------------- Attenuator (AGC) Settings -------------------------------------------------------
+// =================================================================================================
+
 constexpr uint8_t MAX_ATTENUATION_FM_DB = 26;
 constexpr uint8_t MAX_ATTENUATION_AM_DB = 37;
 
-// Chip attenuation index is user value minus one
 constexpr uint8_t AGC_ATT_INDEX_OFFSET = 1;
 
-// --- Soft Mute Settings ---
 
-// Max attenuation level for AM soft mute feature
-constexpr uint8_t SOFT_MUTE_MAX_ATTENUATION = 32;
+// =================================================================================================
+// --------------- Soft Mute Settings --------------------------------------------------------------
+// =================================================================================================
 
-// Max SNR threshold for AM soft mute activation
+constexpr uint8_t SOFT_MUTE_MAX_ATTENUATION   = 32;
 constexpr uint8_t SOFT_MUTE_MAX_SNR_THRESHOLD = 63;
 
-// Max adjustment levels for FM soft mute settings
 constexpr uint8_t FM_SOFT_MUTE_MAX_ATTN_LEVEL = 31;
-constexpr uint8_t FM_SOFT_MUTE_MAX_SNR_LEVEL = 15;
+constexpr uint8_t FM_SOFT_MUTE_MAX_SNR_LEVEL  = 15;
 
 
-// --- Squelch Settings ---
+// =================================================================================================
+// --------------- Squelch Settings ----------------------------------------------------------------
+// =================================================================================================
 
-// Defines the maximum RSSI threshold for the Squelch setting
 constexpr uint8_t SQUELCH_MAX_LEVEL = 60;
 
-// --- AVC Settings ---
 
-// Defines the adjustment range for Automatic Volume Control max gain
-// Maps index 0-10 to IC 473x gain AVC values 12-90
-// Check getAvcValueFromIndex in RadioControl.h for details
+// =================================================================================================
+// --------------- AVC Settings --------------------------------------------------------------------
+// =================================================================================================
+
 constexpr uint8_t AVC_MAX_INDEX = 10;
 constexpr uint8_t AVC_MIN_INDEX = 0;
 
-// --- BFO Calibration ---
 
-// Range for user BFO calibration to compensate for crystal inaccuracies
+// =================================================================================================
+// --------------- BFO Calibration -----------------------------------------------------------------
+// =================================================================================================
+
 constexpr int8_t  BFO_CALIBRATION_MIN = -25;            // in 100Hz steps
 constexpr int8_t  BFO_CALIBRATION_MAX = 25;             // in 100Hz steps
 
-// Multiplier to convert BFO setting param to Hz
 constexpr int16_t BFO_CALIBRATION_MULTIPLIER = 100;
 
-// --- Cutoff Filter ---
 
-// Defines the number of available cutoff filter options
+// =================================================================================================
+// --------------- Cutoff Filter -------------------------------------------------------------------
+// =================================================================================================
+
 constexpr int8_t CUTOFF_FILTER_MAX_VALUE = 2;
 
-// These are API values for setSSBSidebandCutoffFilter
 constexpr int8_t CUTOFF_FILTER_AUDIO_TAPERED = 1;
-constexpr int8_t CUTOFF_FILTER_HISS_REDUCED = 0;        // The more aggressive filter value
+constexpr int8_t CUTOFF_FILTER_HISS_REDUCED  = 0;
 
-// --- Display & CPU ---
 
-// Defines the 0-9 range for the brightness setting
+// =================================================================================================
+// --------------- Display & CPU -------------------------------------------------------------------
+// =================================================================================================
+
 constexpr uint8_t BRIGHTNESS_MAX_LEVEL = 9;
-
-// Defines the number of available display-off timer settings
 constexpr uint8_t DISPLAY_OFF_TIMER_MAX_LEVEL = 4;
 
-// CPU prescaler for deep power save on display timeout
-constexpr uint8_t CPU_PRESCALER_DEEP_SLEEP = 3;         // Corresponds to 2 MHz
+// CPU prescaler for deep sleep on display timeout
+constexpr uint8_t CPU_PRESCALER_DEEP_SLEEP = 3;         // 2 MHz
 
-// --- Hardware and System ---
 
-// ADC threshold to detect if battery measurement pin is connected
+// =================================================================================================
+// --------------- Hardware and System -------------------------------------------------------------
+// =================================================================================================
+
 constexpr uint16_t ADC_CONNECTED_THRESHOLD = 300;
-
-// Delay for system initialization to allow components to stabilize
 constexpr uint16_t SYSTEM_INIT_DELAY_MS = 500;
 
-// Simple math to toggle between LSB (1) and USB (2)
-constexpr int8_t   SIDEBAND_TOGGLE_LSB_USB = 3;
+// Toggle between LSB (1) and USB (2)
+constexpr int8_t SIDEBAND_TOGGLE_LSB_USB = 3;

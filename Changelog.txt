@@ -1610,3 +1610,293 @@ This version introduces the ability to save your favorite FM stations.
   
   
 ------------------------------------------------------------------------------------------------------------
+
+
+
+
+### **MOD_NO_RDS v7.0.2**
+
+`SSD1306_OLED.h`, `UI.h`, `Utils.h`, `Globals.h`, `RadioControl.h`, `Memory.h`, `ATS_EX.ino`
+
+---
+
+## **Fixes**
+
+* **[Fixed] `drawInverted<T>` template type safety:**
+  * Replaced generic template with two explicit overloads:
+    * `drawInverted(..., const char*)`
+    * `drawInverted(..., const __FlashStringHelper*)`
+  * Prevents accidental numeric-type instantiations that could cause undefined behavior
+
+* **[Fixed] SSB tuning lockup on fast encoder rotation:**
+  * Root cause: `waitToSend()` in PU2CLR library has no timeout - I2C command floods cause infinite CTS wait loop
+  * Added `ssbChipRate()` - rate-limits chip commands to once per `MIN_SETFREQ_INTERVAL_MS` (25ms)
+  * UI updates immediately on every encoder tick, chip updates are deferred
+  * Reduces I2C bus load by 60-87% depending on encoder speed
+
+* **[Fixed] RSSI/SNR display (source-driven):**
+  * UI clears RSSI only on `UI_SIGNAL_NO_VALUE` (no mode-specific `RSSI_AM_Off` checks in UI)
+  * RSSI off-policy handled in `RadioControl` to prevent stale/ghost readings and unnecessary RSQ polling
+
+* **[Fixed] Volume mute/unmute state desync (UI shows value but audio stays muted):**
+  * Root cause: mute path used direct `g_si4735.setVolume(0)` which bypassed `applyCompensatedVolume()` cache (`s_last`)
+  * `applyCompensatedVolume()` now treats `g_muteVolume` as a hardware state and updates `s_last` accordingly
+  * `handleVolumeDownShortPress()` no longer calls `setVolume(0)` directly - all volume changes go through `applyCompensatedVolume()`
+
+* **[Fixed] Setting name print safety:**
+  * `getSettingName()` copies 4 bytes with no `'\0'`
+  * UI now guarantees null-termination before `oled.print()` (`nameBuf[5]`, `nameBuf[4]=0`)
+
+* **[Fixed] FM Force Mono behavior (AN332-compliant blend thresholds):**
+  * Root cause: `setFmStereoMode(true)` was using `monoVal=0` for `0x1800` (RSSI stereo threshold) and
+    `0x1804` (SNR stereo threshold), which does **not** force mono per AN332 rules
+  * Updated `setFmStereoMode()` blend table to apply correct mono-forcing values:
+    * RSSI/SNR thresholds: `127` forces mono (and `0` forces stereo)
+    * Multipath thresholds keep inverted logic: `0` forces mono, `100` forces stereo
+  * Ensures `ForceMono` menu setting actually forces mono across RSSI + SNR + Multipath blend engines
+
+* **[Fixed] FM Hi-Cut filter AN332 compliance:**
+  * Root cause: old code used incorrect legacy constants (`FM_PROP_HICUT_ENABLE=1`, `FM_PROP_HICUT_WINDOW=1`,
+    `FM_PROP_HICUT_SNR_THRESH=10`) that did not match AN332 property definitions
+  * Per AN332: there is NO separate "enable" property at 0x1A00 - Hi-Cut is disabled when
+    `FM_HICUT_CUTOFF_FREQUENCY FREQ[2:0] == 0`
+  * Updated `Defines.h` with correct AN332 property addresses and default values:
+    * `FM_HICUT_SNR_HIGH_THRESHOLD_PROP` (0x1A00) - default 24 dB
+    * `FM_HICUT_SNR_LOW_THRESHOLD_PROP` (0x1A01) - default 15 dB
+    * `FM_HICUT_ATTACK_RATE_PROP` (0x1A02) - default 0x4E20 (~3 ms)
+    * `FM_HICUT_RELEASE_RATE_PROP` (0x1A03) - default 0x0014 (~3.3 s)
+    * `FM_HICUT_MP_TRIGGER_PROP` (0x1A04) - default 20%
+    * `FM_HICUT_MP_END_PROP` (0x1A05) - default 60%
+    * `FM_HICUT_CUTOFF_PROP` (0x1A06) - FREQ[2:0]=0 disables
+  * Rewrote `applyFmHiCutProfile()` to properly configure all 7 Hi-Cut registers:
+    * Speaker EQ mode: sets SNR thresholds to 127 (always active), cutoff to 0x0055 (6kHz filter)
+    * Default/off mode: restores all AN332 defaults and sets cutoff to 0x0000 (disabled)
+  * Old disable path only cleared 2 registers (0x1A00, 0x1A06), leaving stale values in 0x1A01-0x1A05
+
+---
+
+## **Added**
+
+* **[Added] `ssbChipRate()` - centralized rate-limited chip update:**
+  * 16-bit timer (2 bytes RAM saved vs 32-bit, safe for 25ms window)
+  * Cache invalidation on band/mode change prevents state desync after external changes
+  * Bandwidth updates removed from SSB hot path to avoid I2C bursts during tuning; BW is applied only on band change
+  * Single I2C entry point for entire SSB tuning path
+
+* **[Added] `MIN_SETFREQ_INTERVAL_MS` constant in `Defines.h`:**
+  * Default: 25ms - minimum time between chip commands in SSB mode
+  * Increase to 30-35ms if using high-PPR encoders (>50 PPR)
+
+* **[Added] Lightweight number output helpers (UI-side):**
+  * `oledPrintU8_2()` - width 2, space padded (for RSSI / counters)
+  * `oledPrintU8_3()` - width 3, space padded (for battery %)
+  * `oledPrintU8_min()` - minimal width, no padding (for tight counters)
+  * `oledPrintDec2()` - 2-digit with leading zero (for `.XX` suffix)
+  * Helpers build a small char buffer and call `oled.print()` - single I2C transaction per number
+
+* **[Added] EEPROM settings validation on boot (`validateLoadedSettings()`):**
+  * Added `validateLoadedSettings()` in `Memory.h` after loading EEPROM settings
+  * Sanitizes loaded `int8_t` settings to documented hardware ranges (AN332 reserved-bits safe)
+  * Prevents erased/corrupted EEPROM values (`0xFF` -> `-1` -> `0xFFFF`) from being sent to
+    `SI4735::setProperty()`
+  * Applied to FM soft mute (0x1302/0x1303), AM/SSB soft mute threshold (0x3303), squelch, and
+    mode-dependent settings tables
+  * EEPROM layout unchanged (no version bump needed)
+
+* **[Added] AN332-compliant Hi-Cut constants in `Defines.h`:**
+  * Added property address constants: `FM_HICUT_SNR_HIGH_THRESHOLD_PROP` through `FM_HICUT_CUTOFF_PROP`
+  * Added AN332 default value constants: `FM_HICUT_SNR_HIGH_DEFAULT`, `FM_HICUT_SNR_LOW_DEFAULT`,
+    `FM_HICUT_ATTACK_DEFAULT`, `FM_HICUT_RELEASE_DEFAULT`, `FM_HICUT_MP_TRIGGER_DEFAULT`, `FM_HICUT_MP_END_DEFAULT`
+  * Kept legacy constant names (`FM_PROP_HICUT_ENABLE`, `FM_PROP_HICUT_WINDOW`, `FM_PROP_HICUT_SNR_THRESH`)
+    with corrected values for backward compatibility with old code paths
+
+* **[Added] Bounded `waitToSend()` (prevents hard hangs):**
+  * Replaced the original infinite CTS polling loop with a bounded spin loop (`SI4735_CTS_SPINS`)
+  * Validates I2C read (`requestFrom(...) == 1`) and ignores invalid `Wire.read()` results
+  * Exits on `CTS=1`, `ERR=1`, or when the spin limit is reached, so the MCU cannot hang forever waiting for CTS
+
+* **[Added] AN332 reference PDFs bundled into the project:**
+  * Added a `PDF` folder with multiple SI47xx AN332 revisions and related documentation for quick offline access during development
+
+* **[Added] Local SI4735 library sources (for stability and easier patching):**
+  * Included the SI4735 library files directly in the project to avoid dependency/version drift until upstream releases an official fix
+
+---
+
+## **Changed**
+
+* **[Changed] `doFrequencyTuneSSB()` restructured:**
+  * All math (BFO rollover, band lookup) and UI updates execute without I2C
+  * `ssbChipRate()` called as final step with rate limiting
+  * DSP bandwidth (`doBandwidth(0)`) is applied only on band change (BW does not depend on frequency)
+  * Removed inline I2C calls that could flood the bus
+
+* **[Changed] Lightweight number helpers refactored for I2C batching:**
+  * `oledPrintU8_2()`, `oledPrintU8_3()`, `oledPrintDec2()` now use `char buf[]` + `oled.print(buf)`
+  * Reduces I2C transactions from 2-3 per number to 1
+  * `oledPrintU8_min()` kept as minimal-width helper
+
+* **[Changed] Lightweight number helpers: `divmod10()` extracted as shared division helper:**
+  * Replaced 6 inline copies of `q = v / 10; r = v - q * 10` with a single `divmod10()` function
+  * Returns `DivMod10` struct (two `uint8_t` fields) — maps to a register pair on AVR, zero RAM overhead
+  * Single point of definition for all uint8_t digit extraction across:
+    `oledPrintU8_2()`, `oledPrintU8_2sep()`, `oledPrintU8_3suf()`,
+    `oledPrintFavPrefix()`, `oledPrintFavCounter()`, `oledPrintDotDec2()`, `oledPrintFreqFM()`
+  * Compiler emits ONE hardware division per call site (no separate `/` and `%` instructions)
+
+* **[Changed] UI no longer uses `oled.print(number)`:**
+  * Battery %, RSSI display, settings page counters, favorites counters and frequencies now rendered via lightweight
+    helpers or direct digit writes
+  * Consistent rendering behavior across all numeric displays
+
+* **[Changed] SSB Cutoff filter logic centralized:**
+  * Added helper `ssbAutoCutoffFromBwIdx(hwBw)` to centralize auto-cutoff rule for common bandwidths
+  * Added helper `ssbCutoffForHwBw(hwBw)` to compute final cutoff value (AUTO / manual) in one place
+  * `updateSSBCutoffFilter()` now uses `ssbCutoffForHwBw()` as single source of truth
+  * `doBandwidth()` uses `ssbCutoffForHwBw()` and applies both BW + cutoff via `setSSBAudioBwAndCutoff(hwBw, cut)`
+
+* **[Changed] `configureSSBMode()` cutoff/bandwidth apply order:**
+  * SSB mode configuration uses `configureSSBModeBatch()` to apply core DSP parameters
+    (AVCEN, DSP_AFCDIS, AVC_DIVIDER, AUDIOBW, SMUTESEL)
+  * Cutoff filter is applied right after via `updateSSBCutoffFilter()` to keep final audio profile consistent after reconfig
+
+* **[Changed] `Defines.h` reorganized with clear section headers:**
+  * Added structured section dividers (`// ===== SECTION NAME =====`)
+  * Grouped constants by functionality: EEPROM, Timing, Hardware Pins, Compile Switches, Audio Profiles
+  * Improved inline documentation with AN332 references
+
+* **[Changed] `applyFmHiCutProfile()` completely rewritten:**
+  * Now configures all 7 Hi-Cut registers (0x1A00-0x1A06) instead of partial subset
+  * Speaker EQ profile uses SNR thresholds of 127 to keep filter always engaged
+  * Default/disable profile properly restores all AN332 defaults before disabling
+  * Uses symbolic constants from `Defines.h` instead of magic numbers
+
+* **[Changed] `SMeter` setting scope:**
+  * `SMeter` now affects **AM/SSB/CW only**
+  * FM ignores `SMeter` and always displays raw RSSI
+
+* **[Changed] `rssiToSLevel()` simplified (HF-only):**
+  * Removed FM-specific S-meter mapping logic from `rssiToSLevel()`
+  * S-meter conversion is now only used for AM-family modes
+
+* **[Changed] Favorites page rendering cleanup:**
+  * Favorites page bounds unpacking is now centralized via `fav_unpackPageBounds(...)`
+  * No behavioral changes (same redraw/cursor-update logic, same empty-list behavior)
+
+* **[Changed] AVC update flow:**
+  * AVC changes and mode reconfiguration now use a single HW entry point (`applyAvcGainHW`) to keep behavior consistent and reduce duplicated code under LTO
+
+---
+
+## **Optimizations**
+
+* **[Optimized] Removed heavy numeric printing from OLED driver (~180 bytes Flash):**
+  * Dropped `printUnsigned(uint32_t)`, `printSigned(int32_t)` and all numeric `print()` overloads
+  * Keeps only string printing: `print(char)`, `print(const char*)`, `print(F("..."))`
+  * Avoids pulling in 32-bit division/formatting code from avr-libc
+
+* **[Optimized] `sendByte()` simplified for microWire (~20 bytes Flash, 1 byte RAM):**
+  * Removed `_writes` counter and `I2C_BATCH` mechanism - unnecessary with bufferless microWire
+  * microWire sends each byte immediately, so forced STOP/START every 64 bytes was adding overhead
+  * Cleaner code path: `Wire.write(data)` only
+
+* **[Optimized] Text batching via `writeCore()` + `print()` wrappers:**
+  * Added `writeCore()` - character output without `beginData()`/`endTransm()` calls
+  * `print(const char*)` and `print(F("..."))` now wrap entire string in single I2C transaction
+  * Reduces START/STOP events per string from N to 1
+
+* **[Optimized] `g_bandIndex` type changed from `int8_t` to `uint8_t` (~20-40 bytes Flash):**
+  * Eliminates signed extension instructions (`sbc r17, r17`) after index operations
+  * Uses `mul` instead of `muls` for band address calculation (`index × 18`)
+  * Reduces code size across all functions accessing `g_bandList[g_bandIndex]`
+
+* **[Optimized] `bandSwitch()` rewritten without modulo operator (~15-25 bytes Flash):**
+  * Replaced `(g_bandIndex + delta + g_bandCount) % g_bandCount` with explicit `if/else`
+  * Avoids expensive `%` operation and signed/unsigned mixing on AVR
+
+* **[Optimized] Band configuration functions now accept `Band&` parameter:**
+  * `configureFMMode(const Band&)`
+  * `configureAMMode(const Band&, uint16_t, uint16_t)`
+  * `configureSSBMode(Band&, uint16_t, uint16_t, bool)`
+  * Eliminates repeated `g_bandList[g_bandIndex]` address calculations inside sub-functions
+
+* **[Optimized] `applyBandConfiguration()` caches band reference and fields:**
+  * Single `Band& band = g_bandList[g_bandIndex]` at function entry
+  * Extracts `minFreq`, `maxFreq` into local variables before passing to helpers
+  * Reduces redundant `index × 18 + base` recalculations after each `call`
+
+* **[Optimized] `partialUpdate()` loop structure:**
+  * Moved `data == NULL` check out of the per-byte loop
+  * Separate tight loops: fill with `0x00` or stream from `*data++`
+
+* **[Optimized] Fast OLED window setter for hot paths:**
+  * Introduced `setWindowRaw(x0, y0, x1, y1)` - no bounds clamping, minimal I2C commands
+  * Hot calls (cursor positioning, fill operations) switched to `setWindowRaw()`
+  * Kept `setWindow()` as the safe/clamped version for general use
+
+* **[Optimized] Batched remaining small UI outputs to reduce I2C noise:**
+  * Added small buffers for short fragments that were printed via multiple `oled.write()` calls
+  * Slight Flash increase, but fewer I2C START/STOP events → less EMI / "bus noise" impact during redraws
+
+* **[Optimized] Startup redraw path (reduced redundant clears / full redraws):**
+  * Removed extra `oled.clear()` from `initOLED()` to avoid double-clearing before first real UI draw
+  * `showSplashScreen()` no longer clears the screen after the hold delay - the first main UI draw performs the
+    single required clear
+  * `applyInitialConfiguration()` no longer performs `oled.clear()` + `showStatus()`; instead it reads back
+    the real tuned frequency (`g_si4735.getFrequency()`) and updates only the digits area via `showFrequency(true)`
+  * Result: fewer full-screen clears during boot and less I2C traffic, while keeping the displayed frequency
+    synchronized with the chip state
+
+* **[Optimized] `applyCompensatedVolume()` with hardware volume caching:**
+  * Added `static uint8_t s_last` cache to skip redundant `setVolume()` I2C calls
+  * Removed `constrain()` and 16-bit math - `g_volume` is already clamped (0..63), only underflow is handled
+  * Generated asm uses tail-call to `SI4735::setVolume()` (`rjmp`)
+
+* **[Optimized] Seek bandwidth apply reduced to band changes only:**
+  * `doSeek()` stores `oldBand` before seek and computes `bandChanged` after SW remap
+  * `finalizeSeekUpdate(bool bandChanged)` calls `doBandwidth(0)` only when `bandChanged` is true
+  * Prevents redundant I2C BW reapply on FM/LW/MW seek and most in-band seeks
+
+* **[Optimized] Settings item positioning (hot path):**
+  * Switched to `localIdx` (0..5) + bit ops (`>> 1`, `& 1`) instead of `% UI_SETTINGS_PER_PAGE`
+  * Fewer cycles and avoids pulling extra div/mod helpers when not used elsewhere
+
+* **[Optimized] Reduced redraw/I2C traffic in Settings:**
+  * Keep split redraw path: `full row` vs `value-only` update
+  * Prevents redundant name redraws during cursor moves / value edits
+
+* **[Optimized] Removed duplicate Favorites page bounds calculation (`start/end`):**
+  * Moved `fav_getPageBounds(page)` to an out-of-line helper (`noinline`) returning packed bounds `(start | end<<8)`
+  * Eliminates repeated `page * 3 + clamp-to-total` sequences in different Favorites rendering paths
+
+* **[Optimized] Deduplicated current `bandType` access (system-wide pointer-math reduction):**
+  * Added `currentBandType()` (`noinline`) as a lightweight accessor
+  * Replaced multiple direct reads of `g_bandList[g_bandIndex].bandType` across UI/control logic
+  * Reduces repeated `index × sizeof(Band) + base` address calculations in small functions/headers under LTO
+
+* **[Optimized] Deduplicated AVC hardware apply path (removes repeated `setAvcAmMaxGain` sequences):**
+  * Added `applyAvcGainHW(avcIndex)` (`noinline`) and routed both:
+    * mode apply path (`applyAvcGain(...)`)
+    * menu handler (`doAvc(...)`)
+    through the same HW function
+  * Removes multiple inlined clones of the same "index → LUT → setAvcAmMaxGain" sequence under LTO
+
+* **[Optimized] Reduced band pointer recalculation inside UI hot paths:**
+  * `showBandTag()` now uses a single `const Band&` for both `bandType` and `name` access (no separate band-type accessor + name lookup path)
+  * `showStep()` preloads `stepIdxAM/SSB/FM` before `switch`, preventing repeated `g_bandList[g_bandIndex]` field access across branches
+
+* **[Optimized] Removed FM soft-mute sign-extension overhead (safer value typing):**
+  * FM soft-mute properties now pass values as `(uint16_t)(uint8_t)getSettingParam(...)` to avoid signed extension and prevent accidental negative values from propagating into `setProperty()`
+  * Applied in both the FM apply path and live menu updates
+
+* **[Optimized] Reduced volatile reread in `switchCommand()`:**
+  * `g_activeCommand` is `volatile`, so GCC was forced to reload it after storing the new value
+  * Switched the "CMD_NONE?" decision to use the known local `newMode` instead of rereading `g_activeCommand`
+
+* **[Refactor] Favorites bounds unpack helper (readability-only, no size impact):**
+  * Added `fav_unpackPageBounds(page, start, end)` (`inline`) to avoid repeating:
+    `bounds = fav_getPageBounds(page)` / `start` / `end` extraction
+	
+	
+
+------------------------------------------------------------------------------------------------------------
