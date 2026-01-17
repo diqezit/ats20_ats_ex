@@ -440,12 +440,9 @@ static void applySoftMuteSettings(ModeContext modeCtx) {
 // Orchestrates complete Si4735 setup for FM mode
 // set limits + spacing + thresholds
 // then apply audio profile and stereo mode
-static void configureFMMode() {
+static void configureFMMode(const Band& current_band) {
     g_currentMode = FM;
     g_stereoStatus = false;
-
-    // Get all parameters from the current band's state
-    const Band& current_band = g_bandList[g_bandIndex];
 
     g_si4735.setFM(
         current_band.minimumFreq,
@@ -470,9 +467,8 @@ static void configureFMMode() {
 
 // Configures chip for standard AM reception
 // send critical audio and gain right after setAM to avoid muted audio on cold start
-static void configureAMMode(uint16_t minFreq, uint16_t maxFreq) {
+static void configureAMMode(const Band& current_band, uint16_t minFreq, uint16_t maxFreq) {
     g_currentMode = AM;
-    const Band& current_band = g_bandList[g_bandIndex];
     ModeContext modeCtx = getModeContext();
 
     // Set primary mode and frequency
@@ -489,7 +485,6 @@ static void configureAMMode(uint16_t minFreq, uint16_t maxFreq) {
     // Soft Mute settings
     g_si4735.setProperty(AM_SOFT_MUTE_SLOPE_PROP, AM_SOFT_MUTE_SLOPE_RECOMMENDED);
     applySoftMuteSettings(modeCtx);
-
 }
 
 // Centralizes setup for properties shared between AM and SSB to avoid duplication
@@ -508,11 +503,10 @@ static void configureAMCommon(uint16_t minFreq, uint16_t maxFreq) {
 // Orchestrates Si4735 setup for SSB and CW modes
 // optional patch reload + CW disables sync AFC + apply user filters and soft mute
 static void configureSSBMode(
+    Band& current_band,
     uint16_t minFreq,
     uint16_t maxFreq,
     bool extraSSBReset) {
-
-    Band& current_band = g_bandList[g_bandIndex];
 
     if (current_band.bwIdxSSB > g_bwSSBMaxIdx)
         current_band.bwIdxSSB = 4;
@@ -584,8 +578,11 @@ void applyBandAntennaCap(bool isFmBand) {
 // Top-level orchestrator for all band and mode changes
 // mute around FM<->AM + load state + set RF cap + configure mode then refresh UI
 static void applyBandConfiguration(bool extraSSBReset) {
+    // Get band once (avoid repeated &g_bandList[g_bandIndex] in sub-functions)
+    Band& band = g_bandList[g_bandIndex];
+
     // detects a major mode switch (FM <-> non-FM) to safely toggle amp
-    bool isFmBand = (g_bandList[g_bandIndex].bandType == FM_BAND_TYPE);
+    bool isFmBand = (band.bandType == FM_BAND_TYPE);
     bool switchingBetweenFMandAM = (g_currentMode == FM) != isFmBand;
 
     // disable squelch if active to avoid stuck mute across reconfig
@@ -603,16 +600,17 @@ static void applyBandConfiguration(bool extraSSBReset) {
     applyBandAntennaCap(isFmBand);
 
     if (isFmBand) {
-        configureFMMode();
+        configureFMMode(band);
     } else {
-        uint16_t minFreq = g_bandList[g_bandIndex].minimumFreq;
-        uint16_t maxFreq = g_bandList[g_bandIndex].maximumFreq;
+        uint16_t minFreq = band.minimumFreq;
+        uint16_t maxFreq = band.maximumFreq;
 
         if (g_ssbLoaded) {
-            configureSSBMode(minFreq, maxFreq, extraSSBReset);
+            configureSSBMode(band, minFreq, maxFreq, extraSSBReset);
         } else {
-            configureAMMode(minFreq, maxFreq);
+            configureAMMode(band, minFreq, maxFreq);
         }
+
         configureAMCommon(minFreq, maxFreq);
 
         applySwAfc();
@@ -635,7 +633,7 @@ static void applyBandConfiguration(bool extraSSBReset) {
     applyBandAmpMute(switchingBetweenFMandAM, false);
 
     g_previousFrequency = g_currentFrequency;
-    }
+}
 
 // ==========================================
 // ===== STATE & ACTION MANAGEMENT ==========
@@ -872,8 +870,13 @@ static void bandSwitch(bool up, bool loadStoredFreq) {
     uint8_t oldBandIndex = g_bandIndex;
     g_currentBFO = 0;
 
-    int8_t delta = up ? 1 : -1;
-    g_bandIndex = (g_bandIndex + delta + g_bandCount) % g_bandCount;
+    if (up) {
+        g_bandIndex++;
+        if (g_bandIndex >= g_bandCount) g_bandIndex = 0;
+    } else {
+        if (g_bandIndex == 0) g_bandIndex = g_bandCount - 1;
+        else g_bandIndex--;
+    }
 
     if (loadStoredFreq) loadActiveStateFromBand();
 
@@ -969,79 +972,75 @@ static void doFrequencyTune() {
     markStateAsDirty();
 }
 
-// =-=-=-=-=-=-=-=-= SSB tune helpers =-=-=-=-=-=-=-=-=
+// =-=-=-=-=-=-=-=-= SSB Tune Helpers =-=-=-=-=-=-=-=-=
 
-// centralize step pick so BFO delta follows user SSB step setting
-static inline int32_t ssbStepHz() {
+// Returns current SSB step in Hz from user settings
+static inline __attribute__((always_inline)) int32_t ssbStepHz() {
     return (int32_t)g_tabStep[SSB_STEP_OFFSET + g_bandList[g_bandIndex].stepIdxSSB];
 }
 
-// update chip only if base kHz changed to avoid unnecessary I2C traffic
-static inline void ssbApplyChipUpdateIfNeeded(uint16_t old_freq) {
-    if (g_currentFrequency != old_freq) {
+// Rate-limited I2C update to Si4735
+// Prevents chip lockup when encoder is turned very fast
+static inline void ssbChipRate() {
+    static uint16_t last_ms16 = 0;
+    static uint16_t last_sent_freq = 0xFFFF;
+    static uint8_t  last_mode = 0xFF;
+    static bool     bw_pending = true;
+
+    // Invalidate cache on mode change
+    if (last_mode != (uint8_t)g_currentMode) {
+        last_mode = (uint8_t)g_currentMode;
+        last_sent_freq = 0xFFFF;
+        bw_pending = true;
+    }
+
+    // Rate limit gate
+    uint16_t now16 = (uint16_t)millis();
+    if ((uint16_t)(now16 - last_ms16) < (uint16_t)MIN_SETFREQ_INTERVAL_MS) return;
+
+    // Update base frequency only when kHz changed
+    if (g_currentFrequency != last_sent_freq) {
         g_si4735.setFrequency(g_currentFrequency);
         applyAgcSettings();
+        last_sent_freq = g_currentFrequency;
+        bw_pending = true;
     }
+
+    if (bw_pending) {
+        doBandwidth(0);
+        bw_pending = false;
+    }
+
+    updateBFO();
+    last_ms16 = now16;
 }
 
-// prepare SSB tune by checking count and calculating temp values
-static inline bool ssbTunePrepare(uint16_t & temp_freq, int32_t & temp_bfo) {
+// Main SSB tuning handler
+// UI updates immediately, chip updates are rate-limited
+static inline void doFrequencyTuneSSB() {
     int16_t encoder_delta = getAndResetEncoderCount(g_encoderCount);
-    if (encoder_delta == 0) return false;
+    if (encoder_delta == 0) return;
 
-    // store frequency before changes to detect a rollover event
-    temp_freq = g_currentFrequency;
-
-    // 32-bit integer to prevent overflow during fast encoder spins
-    temp_bfo = g_currentBFO;
-
+    // Apply encoder movement to BFO (int32_t prevents overflow on fast turns)
+    uint16_t temp_freq = g_currentFrequency;
+    int32_t  temp_bfo = g_currentBFO;
     temp_bfo += ssbStepHz() * (int32_t)encoder_delta;
 
-    return true;
-}
+    uint8_t old_band = (uint8_t)g_bandIndex;
 
-// performs SSB rollover and chip update
-static inline void ssbRolloverAndUpdate(
-    uint16_t & temp_freq,
-    int32_t & temp_bfo,
-    uint16_t old_freq) {
+    // Normalize BFO and handle band boundaries
     performBfoRolloverWithBandCheck(&temp_freq, &temp_bfo);
 
     g_currentFrequency = temp_freq;
     g_currentBFO = temp_bfo;
 
-    // if the base frequency changed, the chip must be updated
-    // this is critical fix
-    ssbApplyChipUpdateIfNeeded(old_freq);
-}
-
-// finalize SSB tune - updating BFO, state, and display
-static inline void ssbTuneFinalize() {
-    updateBFO();
-    syncActiveStateToBand();
-    g_lastFreqChange = millis();
-    g_previousFrequency = 0;
-    showFrequency();
-    markStateAsDirty();
-}
-
-// SSB tuning with post-rollover band synchronization
-// After frequency calculation, finds correct band by searching frequency table
-static void doFrequencyTuneSSB() {
-    uint16_t temp_freq;
-    int32_t  temp_bfo;
-    uint16_t old_freq = g_currentFrequency;
-    uint8_t  old_band = (uint8_t)g_bandIndex;
-
-    if (!ssbTunePrepare(temp_freq, temp_bfo)) return;
-    ssbRolloverAndUpdate(temp_freq, temp_bfo, old_freq);
-
+    // Safety guard for FM mode
     if (g_currentMode == FM) {
         loadActiveStateFromBand();
         return;
     }
 
-    // Find correct band by frequency lookup
+    // Find correct band for new frequency
     uint8_t new_band = old_band;
     for (uint8_t i = 0; i < g_bandCount; ++i) {
         if (g_bandList[i].bandType == FM_BAND_TYPE) continue;
@@ -1052,14 +1051,22 @@ static void doFrequencyTuneSSB() {
         }
     }
 
+    // Update UI on band change
     if (new_band != old_band) {
-        g_bandIndex = (int8_t)new_band;
-        doBandwidth(0);
+        g_bandIndex = new_band;
         showBandTag();
         showStep();
     }
 
-    ssbTuneFinalize();
+    // Send to chip (rate-limited)
+    ssbChipRate();
+
+    // Update UI and state
+    syncActiveStateToBand();
+    g_lastFreqChange = millis();
+    g_previousFrequency = 0;
+    showFrequency();
+    markStateAsDirty();
 }
 
 // =-=-=-=-=-=-=-=-= Mode switch helpers =-=-=-=-=-=-=-=-=

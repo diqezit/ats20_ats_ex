@@ -1610,3 +1610,114 @@ This version introduces the ability to save your favorite FM stations.
   
   
 ------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v7.0.2**
+
+`SSD1306_OLED.h`, `UI.h`, `Utils.h`, `Globals.h`, `RadioControl.h`, `Memory.h`, `ATS_EX.ino`
+
+---
+
+* **[Fixed] `drawInverted<T>` template type safety:**
+  * Replaced generic template with two explicit overloads:
+    * `drawInverted(..., const char*)`
+    * `drawInverted(..., const __FlashStringHelper*)`
+  * Prevents accidental numeric-type instantiations that could cause undefined behavior
+
+* **[Fixed] SSB tuning lockup on fast encoder rotation:**
+  * Root cause: `waitToSend()` in PU2CLR library has no timeout — I2C command floods cause infinite CTS wait loop
+  * Added `ssbChipRate()` — rate-limits chip commands to once per `MIN_SETFREQ_INTERVAL_MS` (25ms)
+  * UI updates immediately on every encoder tick, chip updates are deferred
+  * Reduces I2C bus load by 60–87% depending on encoder speed
+
+* **[Fixed] RSSI/SNR display (source-driven):**
+  * UI clears RSSI only on `UI_SIGNAL_NO_VALUE` (no mode-specific `RSSI_AM_Off` checks in UI)
+  * RSSI off-policy handled in `RadioControl` to prevent stale/ghost readings and unnecessary RSQ polling
+
+---
+
+* **[Added] `ssbChipRate()` — centralized rate-limited chip update:**
+  * 16-bit timer (2 bytes RAM saved vs 32-bit, safe for 25ms window)
+  * Cache invalidation on band/mode change prevents state desync after external changes
+  * Deferred `doBandwidth()` via `bw_pending` flag prevents I2C bursts on sub-band crossings
+  * Single I2C entry point for entire SSB tuning path
+
+* **[Changed] `doFrequencyTuneSSB()` restructured:**
+  * All math (BFO rollover, band lookup) and UI updates execute without I2C
+  * `ssbChipRate()` called as final step with rate limiting
+  * Removed inline I2C calls that could flood the bus
+
+* **[Added] `MIN_SETFREQ_INTERVAL_MS` constant in `Defines.h`:**
+  * Default: 25ms — minimum time between chip commands in SSB mode
+  * Increase to 30–35ms if using high-PPR encoders (>50 PPR)
+
+---
+
+* **[Optimized] Removed heavy numeric printing from OLED driver (~180 bytes Flash):**
+  * Dropped `printUnsigned(uint32_t)`, `printSigned(int32_t)` and all numeric `print()` overloads
+  * Keeps only string printing: `print(char)`, `print(const char*)`, `print(F("..."))`
+  * Avoids pulling in 32-bit division/formatting code from avr-libc
+
+* **[Optimized] `sendByte()` simplified for microWire (~20 bytes Flash, 1 byte RAM):**
+  * Removed `_writes` counter and `I2C_BATCH` mechanism — unnecessary with bufferless microWire
+  * microWire sends each byte immediately, so forced STOP/START every 64 bytes was adding overhead
+  * Cleaner code path: `Wire.write(data)` only
+
+* **[Optimized] Text batching via `writeCore()` + `print()` wrappers:**
+  * Added `writeCore()` — character output without `beginData()`/`endTransm()` calls
+  * `print(const char*)` and `print(F("..."))` now wrap entire string in single I2C transaction
+  * Reduces START/STOP events per string from N to 1
+
+* **[Optimized] `g_bandIndex` type changed from `int8_t` to `uint8_t` (~20–40 bytes Flash):**
+  * Eliminates signed extension instructions (`sbc r17, r17`) after index operations
+  * Uses `mul` instead of `muls` for band address calculation (`index × 18`)
+  * Reduces code size across all functions accessing `g_bandList[g_bandIndex]`
+
+* **[Optimized] `bandSwitch()` rewritten without modulo operator (~15–25 bytes Flash):**
+  * Replaced `(g_bandIndex + delta + g_bandCount) % g_bandCount` with explicit `if/else`
+  * Avoids expensive `%` operation and signed/unsigned mixing on AVR
+
+* **[Optimized] Band configuration functions now accept `Band&` parameter (~30–50 bytes Flash):**
+  * `configureFMMode(const Band&)`
+  * `configureAMMode(const Band&, uint16_t, uint16_t)`
+  * `configureSSBMode(Band&, uint16_t, uint16_t, bool)`
+  * Eliminates repeated `g_bandList[g_bandIndex]` address calculations inside sub-functions
+
+* **[Optimized] `applyBandConfiguration()` caches band reference and fields:**
+  * Single `Band& band = g_bandList[g_bandIndex]` at function entry
+  * Extracts `minFreq`, `maxFreq` into local variables before passing to helpers
+  * Reduces redundant `index × 18 + base` recalculations after each `call`
+
+* **[Optimized] `partialUpdate()` loop structure:**
+  * Moved `data == NULL` check out of the per-byte loop
+  * Separate tight loops: fill with `0x00` or stream from `*data++`
+
+* **[Optimized] Fast OLED window setter for hot paths:**
+  * Introduced `setWindowRaw(x0, y0, x1, y1)` — no bounds clamping, minimal I2C commands
+  * Hot calls (cursor positioning, fill operations) switched to `setWindowRaw()`
+  * Kept `setWindow()` as the safe/clamped version for general use
+
+---
+
+* **[Added] Lightweight number output helpers (UI-side):**
+  * `oledPrintU8_2()` — width 2, space padded (for RSSI / counters)
+  * `oledPrintU8_3()` — width 3, space padded (for battery %)
+  * `oledPrintU8_min()` — minimal width, no padding (for tight counters)
+  * `oledPrintDec2()` — 2-digit with leading zero (for `.XX` suffix)
+  * Helpers build a small char buffer and call `oled.print()` — single I2C transaction per number
+
+* **[Changed] Lightweight helpers refactored for I2C batching:**
+  * `oledPrintU8_2()`, `oledPrintU8_3()`, `oledPrintDec2()` now use `char buf[]` + `oled.print(buf)`
+  * Reduces I2C transactions from 2–3 per number to 1
+  * `oledPrintU8_min()` kept as minimal-width helper
+
+* **[Changed] UI no longer uses `oled.print(number)`:**
+  * Battery %, RSSI display, settings page counters, favorites counters and frequencies now rendered via lightweight helpers or direct digit writes
+  * Consistent rendering behavior across all numeric displays
+
+* **[Optimized] Batched remaining small UI outputs to reduce I2C noise:**
+  * Added small buffers for short fragments that were printed via multiple `oled.write()` calls
+  * Slight Flash increase, but fewer I2C START/STOP events → less EMI / “bus noise” impact during redraws
+
+
+------------------------------------------------------------------------------------------------------------

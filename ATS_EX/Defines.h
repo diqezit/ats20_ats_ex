@@ -52,7 +52,8 @@ constexpr auto EEPROM_FAVORITES_COUNT = 381;            // Used: 1B   (381)
 constexpr auto APP_VERSION = 07;
 
 // Centralizes user-facing strings on main screen
-#define APP_NAME_LINE1 F("ATS-20+ V7.0.1")
+#define APP_NAME_LINE1 F("ATS-20+ V7.0.2")
+#define APP_NAME_LINE2 F("ATS EX")
 
 // I2C SCL base rate for shared bus (OLED + Si4735)
 // Fixed to 77 kHz as a compromise: faster OLED updates than 35/50 kHz,

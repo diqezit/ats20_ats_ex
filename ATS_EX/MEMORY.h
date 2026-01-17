@@ -226,7 +226,7 @@ static void loadBandState(uint8_t bandIndex) {
     // Boundary checks
     clamp_index(band.bwIdxSSB, g_bwSSBMaxIdx, true);
     clamp_index(band.bwIdxAM, g_maxFilterAM, true);
-    clamp_index(band.bwIdxFM, LEN(bw_fm_map), true);
+    clamp_index(band.bwIdxFM, (int8_t)MAX_INDEX(bw_fm_map), true);
     clamp_index(band.stepIdxAM, (int8_t)(AM_STEPS_COUNT - 1), true);
     clamp_index(band.stepIdxSSB, (int8_t)(SSB_STEPS_COUNT - 1), true);
     clamp_index(band.stepIdxFM, g_lastStepFM, true);
@@ -406,7 +406,7 @@ static void readAllReceiverInformation() {
     g_volume = header.volume;
     g_bandIndex = header.bandIndex;
 
-    if ((uint8_t)g_bandIndex > g_lastBand) g_bandIndex = 1; // clamp to valid range
+    if (g_bandIndex > g_lastBand) g_bandIndex = 1; // clamp to valid range
     g_currentMode = header.currentMode > FM ? AM : header.currentMode;
 
     g_currentBFO = header.currentBFO;

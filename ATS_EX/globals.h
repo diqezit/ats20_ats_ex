@@ -14,9 +14,6 @@
 // used to limit max AM step index as larger steps (like 9/10kHz)
 #define IS_LW_MW(bt) ((bt)==LW_BAND_TYPE || (bt)==MW_BAND_TYPE)
 
-// to get the last valid index of a zero-based array
-#define LEN(a) ((uint8_t)(sizeof(a) - 1))
-
 // timed checks
 #define now_ms()            (uint32_t)millis()
 #define since_ms(t)         (now_ms() - (uint32_t)(t))
@@ -304,8 +301,8 @@ constexpr uint16_t SW_MAX_FREQ = 30000;
 constexpr uint16_t SSB_MODE_MIN_FREQ = 150;
 constexpr uint16_t SSB_MODE_MAX_FREQ = 30000;
 
-// to track the current band where is 1 = MW
-int8_t g_bandIndex = 1;
+// to track the current band where is 1 = MW 
+uint8_t g_bandIndex = 1; // so that muls doesn spread across the code and without sbc r17, r17, uint is needed
 
 // Default step/bandwidth/bfo values for band initialization
 // stepIdxAM, stepIdxSSB, stepIdxFM, bwIdxAM, bwIdxSSB, bwIdxFM, bfoCal

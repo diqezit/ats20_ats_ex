@@ -883,7 +883,6 @@ static void handleDelayedFrequencyUpdate() {
 // skip AM polling when disabled or right after user action to avoid clicks
 inline static __attribute__((always_inline))
 bool amRssiPollingAllowed(uint32_t now_ms) {
-    if (getSettingParam(RSSI_AM_Off) == 1) return false;
     uint16_t now_s = (uint16_t)(now_ms / 1000);
     return (uint16_t)(now_s - g_lastUserActivityTime) >= 1;
 }
@@ -891,13 +890,17 @@ bool amRssiPollingAllowed(uint32_t now_ms) {
 // Fetches signal quality (RSSI) using mode-specific commands
 // SSB/CW poll RSQ (0x43) and return RSSI (RESP4) after SSB patch is loaded
 static uint8_t getSignalQuality() {
+    // RSSI disabled for AM-family (AM/SSB/CW)
+    if (g_currentMode != FM && getSettingParam(RSSI_AM_Off) == 1)
+        return UI_SIGNAL_NO_VALUE;
+
     switch (g_currentMode) {
     case AM:
         if (!amRssiPollingAllowed(millis()))
             return g_signalQualityValue;
 
-        g_si4735.getCurrentReceivedSignalQuality(0);  // AM_RSQ_STATUS (0x43)
-        return g_si4735.getCurrentRSSI();             // RSSI 
+        g_si4735.getCurrentReceivedSignalQuality(0);
+        return g_si4735.getCurrentRSSI();
 
     case FM: case LSB: case USB: case CW:
         g_si4735.getCurrentReceivedSignalQuality(1);

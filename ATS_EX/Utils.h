@@ -6,7 +6,7 @@
 
 // Converts an integer to a character string with options for padding and decimal points.
 // A lightweight alternative to sprintf to save flash space.
-void convertToChar(
+static inline void convertToChar(
     char* str,
     uint16_t value,
     uint8_t len,
@@ -41,7 +41,7 @@ void convertToChar(
 }
 
 // Measures integer digit length for display formatting
-uint8_t ilen(uint16_t n) {
+static inline uint8_t ilen(uint16_t n) {
     if (n < 100) return 1 + (n >= 10);
     if (n < 10000) return 3 + (n >= 1000);
     return 5;
@@ -53,7 +53,7 @@ uint8_t ilen(uint16_t n) {
 // =====================================================================================
 
 // Checks if the current mode is LSB, USB, or CW
-static bool isSSB() {
+static inline bool isSSB() {
     return g_currentMode > AM && g_currentMode < FM;
 }
 
