@@ -30,7 +30,10 @@ const uint8_t g_SettingsMaxPages = 5;       // pages number in settings menu
 const uint8_t MAX_FAVORITES = 20;
 #endif
 
-#include "Settings.h"
+#include "SettingsData.h"
+
+// First SW segment index used as SW master when SWLink is enabled
+constexpr uint8_t SW_MASTER_BAND_INDEX = 2;
 
 // =================================================================================================
 // Enums
@@ -81,10 +84,9 @@ static inline uint16_t freqDelta16(uint16_t, uint16_t);
 static inline bool freqRateLimitOk(uint32_t);
 static inline bool freqTimeElapsed(uint32_t);
 static inline bool freqForceUpdate(uint16_t);
-static inline bool applySafeEncoderDeltaAndTune();
 static inline void applyCompensatedVolume();
 static inline bool amRssiPollingAllowed(uint32_t);
-static inline uint32_t currentCmdTimeoutMs();
+uint16_t currentCmdTimeoutMs();
 static inline bool shouldSaveStateOnIdle(uint16_t);
 static inline uint16_t displayTimeoutS(uint8_t);
 static inline void persistModeSetting(ModeSettingType, SettingsIndex);
@@ -106,8 +108,8 @@ static void wakeUpDisplayIfNeeded();
 
 static void doSeek();
 static void cycleAmSsbCwModes();
-static void doFrequencyTuneSSB();
-static void doFrequencyTune();
+static void doFrequencyTune(int16_t delta);
+static inline void doFrequencyTuneSSB(int16_t encoder_delta);
 static void doVolume(int8_t v);
 static void doStep(int8_t v);
 static void doBandwidth(uint8_t v);
@@ -169,6 +171,11 @@ static inline void handleSettingsSave();
 static inline void checkDisplayTimeout();
 static void handlePeriodicTasks();
 
+#if ENABLE_RDS_MINI
+bool rdsMiniUiEnabled();
+void rdsMiniToggleUi();
+#endif
+
 // =================================================================================================
 // Core data structures (non-settings)
 // =================================================================================================
@@ -211,7 +218,7 @@ bool g_displayOn = true;
 // Used by seek callback / interrupt-driven stop logic
 volatile bool g_seekStop = false;
 
-uint32_t g_lastAdjustmentTime = 0;
+uint16_t g_lastAdjustmentTime = 0;    // low16 millis wrap-safe for short UI timeouts
 uint16_t g_lastUserActivityTime = 0;  // seconds
 bool g_stateIsDirty = false;
 
@@ -220,8 +227,8 @@ volatile CommandMode g_activeCommand = CMD_NONE;
 
 bool g_settingsActive = false;
 bool g_settingsDirty = false;
-int8_t g_SettingSelected = 0;
-int8_t g_SettingsPage = 1;
+uint8_t g_SettingSelected = 0;
+uint8_t g_SettingsPage = 1;
 bool g_SettingEditing = false;
 
 #if ENABLE_FAVORITES
@@ -240,7 +247,7 @@ bool g_cwViewActive = false;
 // =================================================================================================
 
 // Number of bands for seamless coverage - array size for Band g_bandList[g_bandCount] must be consistent
-const uint8_t g_bandCount = 36;
+const uint8_t g_bandCount = 44;
 const uint8_t g_lastBand = g_bandCount - 1;
 
 uint8_t g_signalQualityValue = 255;
@@ -319,49 +326,58 @@ Band g_bandList[g_bandCount] = {
 
     // --- SW broadcast & amateur bands ---
     { PACK_STR4("SW  "),     1711,    1799, SW_BAND_TYPE,  1750, BD },
-    { PACK_STR4("160m"),     1800,    1999, SW_BAND_TYPE,  1850, BD },  // 160m amateur
+    { PACK_STR4("160m"),     1800,    2000, SW_BAND_TYPE,  1900, BD },  // 160m amateur
+    { PACK_STR4("SW  "),     2001,    2299, SW_BAND_TYPE,  2100, BD },
 
-    { PACK_STR4("SW  "),     2000,    2299, SW_BAND_TYPE,  2100, BD },
     { PACK_STR4("120m"),     2300,    2495, SW_BAND_TYPE,  2400, BD },  // 120m broadcast
-
     { PACK_STR4("SW  "),     2496,    3199, SW_BAND_TYPE,  2800, BD },
+
     { PACK_STR4("90m "),     3200,    3399, SW_BAND_TYPE,  3300, BD },  // 90m broadcast
+    { PACK_STR4("SW  "),     3400,    3499, SW_BAND_TYPE,  3450, BD },
 
-    { PACK_STR4("80m "),     3400,    3999, SW_BAND_TYPE,  3700, BD },  // 80m amateur
-    { PACK_STR4("75m "),     4000,    4749, SW_BAND_TYPE,  4500, BD },  // 75m broadcast
-    { PACK_STR4("60m "),     4750,    5059, SW_BAND_TYPE,  4850, BD },  // 60m broadcast
+    { PACK_STR4("80m "),     3500,    3899, SW_BAND_TYPE,  3700, BD },  // 80m amateur
+    { PACK_STR4("75m "),     3900,    3999, SW_BAND_TYPE,  3950, BD },
+    { PACK_STR4("SW  "),     4000,    4749, SW_BAND_TYPE,  4500, BD },
 
-    { PACK_STR4("SW  "),     5060,    5350, SW_BAND_TYPE,  5200, BD },
-    { PACK_STR4("60H "),     5351,    5367, SW_BAND_TYPE,  5357, BD },  // 60m amateur
-    { PACK_STR4("SW  "),     5368,    5899, SW_BAND_TYPE,  5500, BD },
+    { PACK_STR4("60m "),     4750,    5060, SW_BAND_TYPE,  4850, BD },  // 60m broadcast
+    { PACK_STR4("SW  "),     5061,    5350, SW_BAND_TYPE,  5200, BD },
+    { PACK_STR4("60H "),     5351,    5366, SW_BAND_TYPE,  5357, BD },  // 60m amateur (WRC-15)
+    { PACK_STR4("SW  "),     5367,    5899, SW_BAND_TYPE,  5500, BD },
 
-    { PACK_STR4("49m "),     5900,    6199, SW_BAND_TYPE,  6000, BD },  // 49m broadcast
-    { PACK_STR4("41m "),     6200,    7299, SW_BAND_TYPE,  7100, BD },  // 41m broadcast
-    { PACK_STR4("40m "),     7300,    7599, SW_BAND_TYPE,  7400, BD },  // 40m amateur
-    { PACK_STR4("31m "),     7600,    9899, SW_BAND_TYPE,  9500, BD },  // 31m broadcast
+    { PACK_STR4("49m "),     5900,    6200, SW_BAND_TYPE,  6000, BD },  // 49m broadcast
+    { PACK_STR4("SW  "),     6201,    6999, SW_BAND_TYPE,  6500, BD },
 
-    { PACK_STR4("25m "),     9900,   10099, SW_BAND_TYPE, 10000, BD },
+    { PACK_STR4("40m "),     7000,    7200, SW_BAND_TYPE,  7100, BD },  // 40m amateur
+    { PACK_STR4("41m "),     7201,    7450, SW_BAND_TYPE,  7300, BD },
+    { PACK_STR4("SW  "),     7451,    9399, SW_BAND_TYPE,  8000, BD },
+
+    { PACK_STR4("31m "),     9400,    9900, SW_BAND_TYPE,  9600, BD },  // 31m broadcast
+    { PACK_STR4("SW  "),     9901,   10099, SW_BAND_TYPE, 10000, BD },
     { PACK_STR4("30m "),    10100,   10150, SW_BAND_TYPE, 10136, BD },  // 30m amateur
-    { PACK_STR4("25m "),    10151,   11599, SW_BAND_TYPE, 11000, BD },
+    { PACK_STR4("SW  "),    10151,   11599, SW_BAND_TYPE, 11000, BD },
 
-    { PACK_STR4("22m "),    11600,   13569, SW_BAND_TYPE, 12500, BD },  // 22m broadcast
+    { PACK_STR4("25m "),    11600,   12100, SW_BAND_TYPE, 11900, BD },  // 25m broadcast
+    { PACK_STR4("SW  "),    12101,   13569, SW_BAND_TYPE, 13000, BD },
 
-    { PACK_STR4("19m "),    13570,   13869, SW_BAND_TYPE, 13700, BD },  // 19m broadcast
-    { PACK_STR4("16m "),    13870,   13999, SW_BAND_TYPE, 13950, BD },  // 16m broadcast
+    { PACK_STR4("22m "),    13570,   13870, SW_BAND_TYPE, 13700, BD },  // 22m broadcast
+    { PACK_STR4("SW  "),    13871,   13999, SW_BAND_TYPE, 13900, BD },
 
     { PACK_STR4("20m "),    14000,   14350, SW_BAND_TYPE, 14200, BD },  // 20m amateur
-    { PACK_STR4("16m "),    14351,   15099, SW_BAND_TYPE, 15000, BD },  // 16m broadcast
+    { PACK_STR4("SW  "),    14351,   15099, SW_BAND_TYPE, 15000, BD },
 
-    { PACK_STR4("15m "),    15100,   17899, SW_BAND_TYPE, 17500, BD },  // 15m amateur
+    { PACK_STR4("19m "),    15100,   15800, SW_BAND_TYPE, 15400, BD },  // 19m broadcast
+    { PACK_STR4("SW  "),    15801,   17479, SW_BAND_TYPE, 17000, BD },
+    { PACK_STR4("16m "),    17480,   18067, SW_BAND_TYPE, 17600, BD },  // 16m broadcast
 
-    { PACK_STR4("13L "),    17900,   18067, SW_BAND_TYPE, 17950, BD },
     { PACK_STR4("17m "),    18068,   18168, SW_BAND_TYPE, 18100, BD },  // 17m amateur
-    { PACK_STR4("13H "),    18169,   21449, SW_BAND_TYPE, 21200, BD },
+    { PACK_STR4("SW  "),    18169,   20999, SW_BAND_TYPE, 19500, BD },
 
-    { PACK_STR4("11m "),    21450,   21849, SW_BAND_TYPE, 21600, BD },  // 11m broadcast
-    { PACK_STR4("SW  "),    21850,   24889, SW_BAND_TYPE, 23000, BD },  // SW
+    { PACK_STR4("15m "),    21000,   21450, SW_BAND_TYPE, 21200, BD },  // 15m amateur
+    { PACK_STR4("13m "),    21451,   21850, SW_BAND_TYPE, 21600, BD },  // 13m broadcast
+    { PACK_STR4("SW  "),    21851,   24889, SW_BAND_TYPE, 23000, BD },
 
-    { PACK_STR4("12m "),    24890,   26099, SW_BAND_TYPE, 25600, BD },  // 12m amateur
+    { PACK_STR4("12m "),    24890,   24990, SW_BAND_TYPE, 24940, BD },  // 12m amateur
+    { PACK_STR4("SW  "),    24991,   26099, SW_BAND_TYPE, 25600, BD },
     { PACK_STR4("CB  "),    26100,   27860, SW_BAND_TYPE, 27200, BD },  // CB radio
     { PACK_STR4("10m "),    27861,   30000, SW_BAND_TYPE, 28500, BD },  // 10m amateur
 
@@ -448,12 +464,3 @@ extern const char g_bandModeDesc[][4];
 #if ENABLE_FAVORITES
 FavoriteStation g_favorites[MAX_FAVORITES];
 #endif
-
-// =================================================================================================
-// Settings applicability predicates (used by Settings logic)
-// =================================================================================================
-
-static inline bool isAlwaysActive() { return true; }
-static inline bool isAMFamilyActive() { return g_currentMode != FM; }
-static inline bool isSSBActive() { return isSSB(); }
-static inline bool isFMActive() { return g_currentMode == FM; }

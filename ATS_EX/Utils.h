@@ -54,7 +54,10 @@ static inline uint8_t ilen(uint16_t n) {
 
 // Checks if the current mode is LSB, USB, or CW
 static inline bool isSSB() {
-    return g_currentMode > AM && g_currentMode < FM;
+    // g_currentMode is volatile read exactly once
+    const uint8_t m = (uint8_t)g_currentMode;
+    // AM 0 LSB 1 USB 2 CW 3 FM 4
+    return (uint8_t)(m - 1u) < 3u;
 }
 
 // Gets the current mode context for loading mode-specific settings
@@ -69,9 +72,16 @@ static inline ModeContext getModeContext() {
     }
 }
 
+// Store user activity time in seconds (16-bit) from a provided millis() snapshot
+// Kept out-of-line to deduplicate millis()/1000 + store sequences under -Os + LTO
+static void __attribute__((noinline))
+storeUserActivitySecondsFromMillis(uint32_t now_ms) {
+    g_lastUserActivityTime = (uint16_t)(now_ms / 1000UL);
+}
+
 // Marks receiver state as dirty to trigger an EEPROM save on idle
 static inline void markStateAsDirty() {
-    g_lastUserActivityTime = millis() / 1000;
+    storeUserActivitySecondsFromMillis(millis());
     g_stateIsDirty = true;
 }
 
@@ -90,9 +100,23 @@ static inline void splitFreq(uint16_t& khz, uint16_t& tail) {
     tail = r / 10;
 }
 
+// pointer math to save Flash
+// Single out of line helper for g_bandList at g_bandIndex
+// Keeps the idx times sizeof Band address math in one place under Os and LTO
+// Do not cache the returned pointer across code paths that modify g_bandIndex
+static Band* __attribute__((noinline)) currentBandPtr() {
+    return &g_bandList[g_bandIndex];
+}
+
+// pointer math to save Flash
+// BandType accessor built on currentBandPtr to keep band type queries compact
+static BandType __attribute__((noinline)) currentBandType() {
+    return currentBandPtr()->bandType;
+}
+
 // Aligns frequency to the current step grid. Keeps tuning predictable
 static inline void snapToNewStep(uint16_t* freq, bool isUp) {
-    uint8_t step_index = SSB_STEP_OFFSET + g_bandList[g_bandIndex].stepIdxSSB;
+    uint8_t step_index = (uint8_t)(SSB_STEP_OFFSET + (uint8_t)currentBandPtr()->stepIdxSSB);
     uint16_t step_khz = g_tabStep[step_index] / 1000;
     if (step_khz == 0) return;
 
@@ -119,13 +143,13 @@ static void doSwitchLogic(int8_t& param, int8_t low, int8_t high, int8_t step) {
 }
 
 // Helper to clamp an index to a valid range, resetting to 0 if out of bounds
-// 'strict' uses a > comparison, otherwise >= is used
+// strict uses a > comparison, otherwise >= is used
 static inline void clamp_index(int8_t& var, const int8_t max_val, bool strict = false) {
     if (strict ? (var > max_val) : (var >= max_val)) var = 0;
 }
 
 // generic helper to update a value and call a function if it has changed
-// avoids duplicating the "if (new_value != old_value)" pattern
+// avoids duplicating the if new_value != old_value pattern
 template<typename T>
 static inline __attribute__((always_inline))
 void updateIfChanged(T& old_value, T new_value, void (*update_fn)()) {
@@ -137,92 +161,11 @@ void updateIfChanged(T& old_value, T new_value, void (*update_fn)()) {
 
 static inline uint16_t adcReadAx(uint8_t analogPin) {
     uint8_t ch = (uint8_t)(analogPin - A0);      // A0..A7 -> 0..7
-    ADMUX = (1 << REFS0) | (ch & 0x07);         // опора AVcc
-    ADCSRA = (1 << ADEN) | (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0); // /128
-    ADCSRA |= (1 << ADSC);
-    while (ADCSRA & (1 << ADSC)) {}
+    ADMUX = (uint8_t)(_BV(REFS0) | (ch & 0x07));  // опора AVcc
+
+    // One write - enable ADC + start conversion + prescaler /128
+    ADCSRA = (uint8_t)(_BV(ADEN) | _BV(ADSC) | _BV(ADPS2) | _BV(ADPS1) | _BV(ADPS0));
+
+    while (ADCSRA & _BV(ADSC)) {}
     return ADC;
 }
-
-// pointer math to save Flash
-static BandType __attribute__((noinline)) currentBandType() {
-    return g_bandList[g_bandIndex].bandType;
-}
-
-#if DEBUG_MODE
-
-// =====================================================================================
-// Lighweight Debugger (replaces SerialPrint to save flash space)
-// =====================================================================================
-
-// UART (baud 9600)
-void initDebugUART() {
-    UBRR0H = 0;
-    UBRR0L = 103;
-    UCSR0A = 0;
-    UCSR0B = (1 << TXEN0);
-    UCSR0C = (1 << UCSZ01) | (1 << UCSZ00);
-}
-
-// Prints PROGMEM strings for debug. Usage: debugPrint_P(PSTR("Hello"));
-void debugPrint_P(const char* str) {
-    char c;
-    while ((c = pgm_read_byte(str++))) {
-        while (!(UCSR0A & (1 << UDRE0)));
-        UDR0 = c;
-    }
-}
-
-// Fast single-char print (RAM)
-static inline void debugPutChar(char c) {
-    while (!(UCSR0A & (1 << UDRE0)));
-    UDR0 = c;
-}
-
-// CRLF
-static inline void debugPrintCRLF() {
-    debugPutChar('\r'); debugPutChar('\n');
-}
-
-// Prints a character buffer
-void debugPrintBuf(const char* buf, uint8_t len) {
-    for (uint8_t i = 0; i < len; i++) {
-        while (!(UCSR0A & (1 << UDRE0)));
-        UDR0 = buf[i];
-    }
-}
-
-// Prints a number to UART
-void debugPrintNum(int16_t num) {
-    if (num == 0) {
-        debugPrint_P(PSTR("0"));
-        return;
-    }
-    bool negative = (num < 0);
-    if (negative) {
-        while (!(UCSR0A & (1 << UDRE0))); UDR0 = '-';
-        num = -num;
-    }
-    char buf[6];
-    uint8_t i = 0;
-    while (num > 0) {
-        buf[i++] = '0' + (num % 10);
-        num /= 10;
-    }
-    while (i--) {
-        while (!(UCSR0A & (1 << UDRE0))); UDR0 = buf[i];
-    }
-}
-
-// Prints a number in hexadecimal format
-void debugPrintHex(uint16_t num) {
-    debugPrint_P(PSTR("0x"));
-    for (int8_t i = 12; i >= 0; i -= 4) {
-        uint8_t digit = (num >> i) & 0xF;
-        char ch = (digit < 10) ? ('0' + digit) : ('A' + digit - 10);
-        while (!(UCSR0A & (1 << UDRE0))); UDR0 = ch;
-    }
-    debugPrint_P(PSTR("\n"));
-}
-
-#endif

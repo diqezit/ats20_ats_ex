@@ -1900,3 +1900,315 @@ This version introduces the ability to save your favorite FM stations.
 	
 
 ------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v7.1**
+
+`SI4735_fixed.h`, *new* `RDS.h`, `ATS_EX.ino`, `UI.h`, `MEMORY.h`, `Battery.h`,
+`Defines.h`, `Input.h`, `Globals.h`, `RadioControl.h`, *new* `Boot.h`,
+*new* `SMeter.h`, *new* `Favorites.h`, `SettingsData.h`, `SettingsLogic.h`,
+`microWire.h`, `microWire.cpp`
+
+---
+
+## **Added**
+
+* **[Added] RDS RadioText display for FM stations (`RDS.h`, `SI4735_fixed.h`):**
+  * Decodes RDS Group 2A and 2B packets to display station RadioText (song title, artist, promo messages)
+  * Text is shown on the bottom row and auto-scrolls when longer than 21 characters
+  * Clears on frequency change, signal loss (6 s timeout), or when the station updates its text
+  * Toggle on/off with long press MODE while in FM; status indicator **"RS"** shown when active
+  * Lightweight implementation (~500 bytes flash) and does not use the heavy PU2CLR RDS stack
+  * Compile-time switch `ENABLE_RDS_MINI` in `Defines.h` to disable if flash space is critical
+
+* **[Added] Mini Pong game (`Game.h`):**
+  * Simple single-player Pong game playable while listening to FM
+  * Paddle control via encoder; long press MODE to start/exit
+  * Text-based rendering using the existing compact font (no graphics buffer overhead)
+  * Compile-time switch `ENABLE_GAME` in `Defines.h`
+
+* **[Added] Boot sequence reorganization (`Boot.h`):**
+  * Hardware initialization (CPU clock, I2C speed, interrupts, EEPROM reset detection) moved into a dedicated module
+  * Makes the main sketch cleaner and startup logic easier to follow
+  * No additional compiled code; implemented as an include module
+
+* **[Added] S-meter display module (`SMeter.h`):**
+  * RSSI→S-point conversion logic moved out of UI code into its own module
+  * Simplifies tuning thresholds and enables future VHF/UHF scale support
+
+* **[Added] Favorites management module (`Favorites.h`):**
+  * Favorites features (add/delete/tune/list + EEPROM save/load) consolidated into one module
+  * Improves maintainability by keeping all favorites logic together
+
+* **[Added] Settings code split (`SettingsData.h`, `SettingsLogic.h`):**
+  * Setting metadata (names/defaults/types) separated from handler logic (`do*()` callbacks)
+  * Keeps structure cleaner without increasing firmware size
+
+* **[Added] SW Link (SWL) — link STEP and BW across all SW sub-bands (`SettingsData.h`, `SettingsLogic.h`, `RadioControl.h`, `MEMORY.h`, `Globals.h`):**
+  * New setting `SWL` (0/1) links **AM + SSB** step and bandwidth indices across all SW segments
+  * Master SW segment: `SW_MASTER_BAND_INDEX = 2`
+  * When enabled:
+    * Entering any SW segment applies master STEP/BW to the current SW band
+    * Changing STEP or BW in any SW segment updates the master values
+    * Enabling SWL normalizes all SW segments to the master
+    * Startup normalizes SW segments after EEPROM load
+  * No effect on LW/MW/FM bands
+  * Partial EEPROM saves also include the SW master band to preserve linked state across reboot
+  
+---
+
+## **Fixed**
+
+* **[Fixed] UI freeze during fast encoder tuning (`Input.h`, `RadioControl.h`, `Globals.h`):**
+  * Fast rotation could freeze the UI while audio continued playing due to encoder step accumulation during band crossings
+  * Each crossing triggered a full screen redraw (~300 ms) and FM↔AM transitions could trigger a 2 s SSB patch load, creating a cascade of queued steps
+  * Tuning functions now receive encoder delta as a direct parameter (one-way flow: ISR → buffer → handler)
+  * Removed unused `applySafeEncoderDeltaAndTune()` and the atomic include
+
+* **[Fixed] Occasional stall when tuning quickly (`ATS_EX.ino`):**
+  * RSSI polling could run before the new frequency was committed to the chip, causing I2C contention and ~1.5 s pause
+  * Polling now waits until the pending frequency update completes
+
+* **[Fixed] Battery indicator missing after selecting alternate pin (`Boot.h`, `ATS_EX.ino`):**
+  * Battery pin probe previously ran before EEPROM settings load, so it always checked default A2
+  * Probe now runs after EEPROM load, so alternate pin selections (e.g., A1) work reliably
+
+* **[Fixed] Band jumping through multiple SW sub-bands (`RadioControl.h`):**
+  * Near SW band edges, resolved frequency could fall into a gap and skip multiple bands in one step
+  * Frequency is now clamped to the destination band edge before switching bands
+
+* **[Fixed] Random resets on some bootloaders (`ATS_EX.ino`):**
+  * Some Optiboot builds leave the watchdog enabled; long operations (e.g., SSB patch load) could exceed timeout
+  * Watchdog is now disabled immediately at startup
+
+* **[Fixed] EEPROM reset sometimes missed on power on (`ATS_EX.ino`):**
+  * Added a short confirmation delay for the reset key combo (ENCODER or AGC held at boot) to handle contact bounce
+
+* **[Fixed] SW AFC settings not applied after band switch (`RadioControl.h`):**
+  * Switching between MW and SW now reapplies the correct AFC profile reliably
+
+* **[Fixed] I2C bus hang on signal loss or probe failure (`microWire.cpp`):**
+  * Replaced all infinite `while(!(TWCR & _BV(TWINT)))` loops with `twiWaitTwintOrReset()` (~40 ms timeout at 16 MHz)
+  * On timeout, TWI hardware is reset (`TWCR = _BV(TWEN)`) to release the bus
+  * Prevents permanent firmware hang when SDA/SCL is held low, a slave is stuck, or pull-ups are missing
+
+* **[Fixed] `read()` underflow when called more times than `requestFrom()` length (`microWire.cpp`):**
+  * `_requested_bytes` is `uint8_t`; decrementing from 0 previously wrapped to 255, causing 255 extra reads with ACK
+  * Added guard: `if (_requested_bytes == 0) return 0`
+
+* **[Fixed] SI4735 CTS polling could hang forever or spin for ~3 seconds when chip absent (`SI4735_fixed.h`):**
+  * Original library had no timeout; missing CTS could hang indefinitely
+  * With microWire, `read()` returns 0 on NACK (not 0xFF like standard Wire), so CTS bit never sets and the loop could spin the full 5000 iterations (~3 s)
+  * Added `Wire.available()` check after `requestFrom()` to detect NACK and exit immediately
+  * Added spin limit (5000 iterations) to prevent infinite loop if CTS never arrives
+  * Works correctly with standard Wire, old microWire, and microWire v2.3
+
+* **[Fixed] Comment typo in `endTransmission()` (`microWire.cpp`):**
+  * Corrected comment: `return 3` was incorrectly documented as returning 2
+
+* **[Fixed] I2C speed drift when changing CPU prescaler (`Boot.h`):**
+  * `Wire.setClock()` computes timing from compile-time `F_CPU` and ignores `CLKPR` division
+  * `applyI2CSpeed()` now writes `TWBR` directly based on the actual CPU clock so SCL stays correct after changing `CPUSpeed`
+  * `TWSR` forced to 0 (prescaler 1) to match the formula and microWire defaults
+  
+---
+
+## **Changed**
+
+* **[Changed] Band map expanded for finer SW segmentation (`Globals.h`):**
+  * `g_bandCount` increased from 38 to 44
+  * Additional SW sub-ranges added to make band navigation more granular
+  * LW/MW and FM entries unchanged
+
+* **[Changed] EEPROM map updated for 44 bands (`Defines.h`):**
+  * Band state block resized to `44 × 6` bytes
+  * All following EEPROM blocks shifted accordingly
+  * Note: this build requires an EEPROM reset after update (manual reset OK for dev builds)
+
+* **[Changed] OLED init path cleanup (`ATS_EX.ino`):**
+  * Removed redundant `setPower(true)` call after `oled.init()` (init sequence already enables display and charge pump)
+
+* **[Changed] Encoder pin init deduplicated (`ATS_EX.ino`):**
+  * Removed duplicate PD2/PD3 pin setup in `initHardwarePins()` (encoder pins are configured by the global `Rotary` constructor)
+
+* **[Changed] External interrupt setup made direct (`ATS_EX.ino`):**
+  * `initSi4735()` now writes final values to `EICRA/EIMSK` for INT0/INT1 CHANGE directly (no read-modify-write)
+
+* **[Changed] AMP control init centralized (`ATS_EX.ino`, `RadioControl.h`):**
+  * AMP pin DDR configured once at startup
+  * `setAmpState()` now toggles PORT only (no DDR writes at runtime)
+
+* **[Changed] Favorites UI + persistence moved into module boundary (`Favorites.h`, `UI.h`, `MEMORY.h`):**
+  * Favorites list rendering moved from `UI.h` to `Favorites.h`
+  * Favorites save/load helpers moved under `Favorites` module (still invoked by EEPROM orchestrators as before)
+  * Input dispatch remains in `Input.h` (menu open/close + controls), rendering and data ops delegated to module
+
+* **[Changed] Compact font updated for RDS RadioText readability (`CustomFonts.h`):**
+  * Added lowercase `a–z` glyph support in compact font map/lookup
+  * Improves readability of mixed-case RDS RadioText
+
+* **[Changed] Dead cross-band helper removed (`RadioControl.h`):**
+  * Removed unused `resolveCrossBandFreq()` and `currentBandStep()` (superseded by `tuneResolveCrossBandFreq()` after cascade fix)
+
+* **[Changed] microWire I2C library upgraded to v2.3 (`microWire.h`, `microWire.cpp`):**
+  * `begin()` uses direct port register init (DDRC/PORTC) instead of two `pinMode()` calls (≈140 bytes flash saved)
+  * Added `twiCommand()` helper for centralized TWI command dispatch with built-in timeout (replaces duplicated TWCR/while blocks)
+  * TWI status codes (0x20, 0x30, 0x48) replaced with named enum constants in write path
+  * Added SLA+R NACK (0x48) handling (prevents hang when slave does not ACK read request)
+  * `beginTransmission()` and `requestFrom()` skip `write()` after failed `start()` (avoids ~40ms wasted timeout on dead bus)
+  * Removed dead include `pins_arduino.h` (already provided by `Arduino.h`)
+
+* **[Changed] Boot code cleanup and helper split (`Boot.h`):**
+  * `initFast()` split into smaller helpers `initTimer0()` and `disableBootloaderUART()`
+  * Encoder interrupt init extracted into `initEncoderInterrupts()`
+  * EEPROM reset helpers made explicit (`clearEEPROMVersion()` etc.)
+  
+---
+
+## **Optimizations**
+
+* **[Optimized] Favorites header counter logic:**
+  * `oledPrintFavCounter()` rewritten to use fixed position buffer fill instead of right to left `b[i--]`
+  * Avoids heavy pointer/index arithmetic for variable index writes
+
+* **[Optimized] EEPROM save path (less repeated checks):**
+  * APP_ID and VERSION stored via single `eeprom_update_word()` instead of two `eeprom_update_byte()`
+  * Settings block stored via `eeprom_update_block()` instead of 29 individual `eeprom_update_byte()` calls
+  * Removed redundant `CHECK_EEPROM_WEAR()` from `saveBandState()` (guarded by `saveAllReceiverInformation()` early return)
+  * Removed redundant wear/bad EEPROM guards inside `saveBands()` and `handleModeSettingsEEPROM(true)` (already guarded by `saveAllReceiverInformation()`)
+
+* **[Optimized] Battery UI update timer uses 16-bit timestamp:**
+  * `updateAndShowBattery()` uses `uint16_t lastChargeShow16` (wrap safe for 10s interval)
+  * Avoids unnecessary 32-bit time arithmetic for this UI interval
+
+* **[Optimized] SI4735_fixed init path kept minimal (project specific):**
+  * `setup()` avoids redundant `Wire.begin()` since OLED init already calls it
+  * `getDeviceI2CAddress()` does not call `Wire.begin()` (depends on init order, documented in comments)
+
+* **[Optimized] SSB/CW BFO update path avoids heavy helper call:**
+  * `RadioControl.h` `updateBFO()` now sets BFO via `g_si4735.setProperty(SSB_BFO)` instead of calling `SI4735::setSSBBfo()`
+
+* **[Optimized] Favorites add path avoids redundant slot recompute:**
+  * `addFavorite()` rewritten to walk favorites with a pointer (`FavoriteStation* slot`) and reuse the final slot address for insertion
+
+* **[Optimized] Favorites delete compaction (`Favorites.h`):**
+  * `compactFavoritesFrom()` rewritten as flat forward byte copy (safe for overlapping regions)
+  * Simplified early exit logic
+
+* **[Optimized] Battery percent curve calculation deduplicated:**
+  * `Battery.h` `calculateRawPercent()` refactored to use a single noinline helper (`calcBatterySegmentPct()`) for all 4 piecewise linear zones
+  * Keeps the same battery curve output
+
+* **[Optimized] UI reduced duplicate band/mode checks in inversion logic:**
+  * `showBandTag()` and `showModulation()` avoid extra bandType checks for inversion decisions and use the mode invariant (`g_currentMode == FM`)
+
+* **[Optimized] UI timeout bookkeeping switched to 16-bit timer:**
+  * `g_lastAdjustmentTime` changed from `uint32_t` to `uint16_t` with 16-bit delta math for timeout checks
+  * `handleFavoritesTimeout()` simplified accordingly
+  * `handleCommandTimeout()` gated by active UI state instead of sentinel timestamp value
+
+* **[Optimized] `applyBandConfiguration()` FM configuration moved out of line:**
+  * `RadioControl.h` `configureFMMode()` marked noinline
+
+* **[Optimized] SI4735 disable FM debug noise command uses byte `Wire.write()` overload:**
+  * `SI4735.cpp` `disableFmDebug()` uses `Wire.write((uint8_t))` to avoid selecting a wider overload under microWire
+
+* **[Optimized] Custom minimal init replaces Arduino core `init()`:**
+  * `ATS_EX.ino` `main()` uses project local `initFast()` instead of calling Arduino core `init()`
+  * Keeps Timer0 timebase (millis/delay), disables UART (bootloader cleanup), skips non-required peripheral init
+
+* **[Optimized] Settings menu page computation simplified (`Input.h`):**
+  * `calculateSettingsPage()` replaced with compact math instead of an if-chain
+  * Guard: `static_assert(SETTINGS_MAX <= 131)`
+
+* **[Optimized] Frequency update housekeeping simplified (`ATS_EX.ino`):**
+  * `handleDelayedFrequencyUpdate()` simplified (encoder delta is already coalesced earlier in `loop()`)
+
+* **[Optimized] SEEK post-processing reduced (`SI4735_fixed.h`, `RadioControl.h`):**
+  * `executeHardwareSeek()` now uses the final frequency produced by the seek routine directly avoiding an extra post-seek frequency/status fetch
+
+* **[Optimized] Tuning size reduction (`RadioControl.h`):**
+  * `doFrequencyTune()` caches current band fields to reduce repeated `g_bandList[g_bandIndex]` address recomputation
+  * Simplified control flow (same behavior, slightly smaller code)
+
+* **[Optimized] Favorites EEPROM I/O (`Favorites.h`):**
+  * Switched Favorites save/load from per-item loops to bulk `eeprom_update_block()` / `eeprom_read_block()`
+  * Keeps `FavoriteStation` as a packed contiguous layout and writes only count times `sizeof(FavoriteStation)`
+  * Favorite count is still stored first via `EEPROM_FAVORITES_COUNT`
+
+* **[Optimized] Band state packing (`MEMORY.h`):**
+  * `saveBandState()` packs step/bw nibbles using swap based shift to reduce AVR codegen size
+
+* **[Optimized] Button FSM codegen (`SimpleButton.cpp`):**
+  * `SimpleButton::checkEvent()` uses an 8-bit state (4-bit field) to avoid 16-bit compares and dead high byte ops
+
+* **[Optimized] Activity timers (`ATS_EX.ino`, `Utils.h`):**
+  * Deduplicated millis()/1000 seconds bookkeeping via a small helper shared by `noteUserActivity()` and `markStateAsDirty()`
+
+* **[Optimized] Signal/stereo polling consolidated (`ATS_EX.ino`):**
+  * `handleSignalAndStereoUpdates()` uses a single `millis()` call reused by `updateFmStereoIndicator()`
+  * Early exits ordered from cheapest to most expensive check
+
+* **[Optimized] microWire TWI helpers reduce flash duplication (`microWire.cpp`):**
+  * `twiWaitTwintOrReset()` and `twiCommand()` marked noinline so a single copy is shared by 4 call sites instead of inlined duplicates
+  * `twiStatus()` marked inline and compiles to a single in plus andi pair cheaper than a function call
+  * Net effect: timeout protection added to all TWI operations with near zero flash overhead vs original infinite loop version
+
+* **[Optimized] Band pointer dedup (Utils.h, RadioControl.h, SettingsLogic.h, UI.h, Favorites.h, ATS_EX.ino):**
+  * Added `currentBandPtr()` helper to reduce repeated `g_bandList[g_bandIndex]` address recomputation and keep the idx×sizeof(Band) math in one place
+  * Migrated multiple hot paths to use `currentBandPtr()` instead of direct `g_bandList[g_bandIndex]` access
+  * Net effect: measurable Flash reduction and less repeated mul/pointer math boilerplate across UI and radio paths
+
+* **[Optimized] OLED cursor update (SSD1306_OLED.h):**
+  * `writeCore()` now updates x once using `x += FONT_TOTAL` instead of multiple `x++` sequences
+  * Reduces repeated 16-bit load/modify/store blocks for x
+
+* **[Optimized] ADC start sequence merged (Utils.h):**
+  * `adcReadAx()` now writes `ADCSRA` once with `ADEN|ADSC` and prescaler instead of assignment followed by `|= ADSC`
+  * Removes redundant read-modify-write on `ADCSRA`
+
+* **[Optimized] microWire int promotion cleanup (microWire.cpp):**
+  * `beginTransmission(uint8_t)` writes an 8-bit address to avoid selecting `write(int)` wrapper
+  * `requestFrom(uint8_t,uint8_t,bool)` keeps early return paths compact and avoids preserving return values across calls
+
+* **[Optimized] SSB mode gate (Utils.h):**
+  * `isSSB()` reads `g_currentMode` once and uses compact unsigned range check
+  * Reduces duplicate RAM loads and shortens codegen
+
+* **[Optimized] SI4735 fast reset delays dedup (SI4735_fixed.h):**
+  * Added small `delay10ms` helper used by `resetFastD12()` to deduplicate repeated delay setup
+
+* **[Optimized] I2C clock compensation is compile time and division free (Boot.h):**
+  * `TWBR_TABLE[]` precomputed at compile time from `I2C_BASE_HZ` and `F_CPU`
+  * Runtime path reduced to `CLKPR` clamp + `TWSR=0` + `TWBR=table[p]`
+  * Policy:
+    * `CLKPR 0–1`: target SCL = `I2C_BASE_HZ`
+    * `CLKPR 2+`: target SCL = `min(I2C_BASE_HZ, 50kHz)` for stability
+
+* **[Optimized] SI4735 SSB mode property send dedup (SI4735.cpp):**
+  * `sendSSBModeProperty()` now reuses `sendProperty(SSB_MODE, value)` instead of manual `SET_PROPERTY` framing
+  * Keeps the same I2C sequence and the same post-send delay (550 µs handled by `sendProperty`)
+
+* **[Optimized] SI4735 AM bandwidth property send dedup (SI4735.cpp):**
+  * `setBandwidth(AMCHFLT, AMPLFLT)` now packs bits per AN332 and calls `sendProperty(AM_CHANNEL_FILTER, packed)`
+  * Preserves guards: `currentTune == AM_TUNE_FREQ` and `AMCHFLT <= 6`; reserved bits kept clear
+
+* **[Optimized] SSB cutoff helper dedup under -Os + LTO (RadioControl.h):**
+  * Removed `always_inline` from `ssbCutoffForHwBw()` and forced a single shared body via `__attribute__((noinline))`
+  * Prevents duplicated cutoff logic at multiple call sites under LTO
+
+* **[Optimized] OLED seven segment local buffer drawing reduces int-promotions (SSD1306_OLED.h):**
+  * `local_setPixel()` and segment line helpers updated to keep operations 8-bit where possible
+  * Avoids heavier 16-bit shift loops under `-Os` caused by integer promotions
+
+* **[Optimized] SI4735 `sendProperty()` uses direct byte packing and forces `Wire.write(uint8_t)` (SI4735.cpp / SI4735_fixed.h):**
+  * Eliminates temporary `si47x_property` unions and `raw.byteHigh/byteLow` extraction
+  * Sends `SET_PROPERTY (0x12)`, `ARG1=0x00`, then `PROPH/PROPL/PROPDH/PROPDL` (MSB-first) per AN332
+  * Confirmed in `.lst`: calls `TwoWire::write(unsigned char)` (prevents promotion to `write(int)` under microWire)
+  * Retains post-send pacing delay (`delayMicroseconds(550)`) exactly as before
+
+* **[Optimized] SI4735 `setSSBConfig()` clears raw bytes before bitfield fill (SI4735.cpp / SI4735_fixed.h):**
+  * Clears `currentSSBMode.raw[0..1]` before setting `param.*` fields
+  * Ensures reserved bits are explicitly zeroed (“Reserved Always write to 0” per AN332)
+  * Can reduce AVR RMW sequences in some builds (LTO/codegen dependent)
+  * Confirmed in `.lst`: `ssbPatchFinalize` emits direct store of byte2 as `0x90` instead of an RMW chain

@@ -66,12 +66,20 @@ struct __attribute__((packed)) BandStatePacked {
 // ===== COMPILE-TIME EEPROM SAFETY CHECKS ==
 // ==========================================
 //
-// prevent silent EEPROM layout corruption when band count / structs / addresses change
+// These checks are meant to fail compilation early if EEPROM layout, struct packing,
+// or dependent constants change in a way that would corrupt persistent data.
+//
+// Rules:
+// - END values below are end-exclusive start plus size
+// - Monotonic block ordering must hold
+// - Each block must fit before the next one
+// - The final used address must not exceed device EEPROM size
 //
 
 #define FIELD_SIZE(T, f) (sizeof(((T*)0)->f))
 
 // ---------- Struct packing / binary format contracts ----------
+static_assert(sizeof(ReceiverHeader) == 7, "ReceiverHeader size must stay 7 bytes");
 static_assert(
     sizeof(ReceiverHeader) ==
     FIELD_SIZE(ReceiverHeader, volume) +
@@ -80,9 +88,10 @@ static_assert(
     FIELD_SIZE(ReceiverHeader, currentBFO) +
     FIELD_SIZE(ReceiverHeader, lastCWMode) +
     FIELD_SIZE(ReceiverHeader, lastSsbMode),
-    "ReceiverHeader packing changed"
+    "ReceiverHeader packing changed unexpected padding"
     );
 
+static_assert(sizeof(BandStatePacked) == 6, "BandStatePacked size must stay 6 bytes");
 static_assert(
     sizeof(BandStatePacked) ==
     FIELD_SIZE(BandStatePacked, currentFreq) +
@@ -90,14 +99,14 @@ static_assert(
     FIELD_SIZE(BandStatePacked, packed_ssb) +
     FIELD_SIZE(BandStatePacked, packed_fm) +
     FIELD_SIZE(BandStatePacked, bfoCal),
-    "BandStatePacked packing changed"
+    "BandStatePacked packing changed unexpected padding"
     );
 
-// g_modeSettings is a raw int8 table: MODE_SETTINGS_COUNT * MODE_CONTEXT_COUNT bytes
+// g_modeSettings is a raw int8 table MODE_SETTINGS_COUNT times MODE_CONTEXT_COUNT bytes
 static_assert(
     sizeof(g_modeSettings) ==
     (uint16_t)MODE_SETTINGS_COUNT * (uint16_t)MODE_CONTEXT_COUNT * sizeof(g_modeSettings[0][0]),
-    "g_modeSettings size mismatch (MODE_SETTINGS_COUNT/MODE_CONTEXT_COUNT changed?)"
+    "g_modeSettings size mismatch"
     );
 
 #if ENABLE_FAVORITES
@@ -106,7 +115,7 @@ static_assert(
     FIELD_SIZE(FavoriteStation, frequency) +
     FIELD_SIZE(FavoriteStation, modulation) +
     FIELD_SIZE(FavoriteStation, bfo),
-    "FavoriteStation packing changed (expected packed struct)"
+    "FavoriteStation packing changed expected packed struct"
     );
 #endif
 
@@ -115,10 +124,28 @@ static_assert(
 // ---------- Global sanity ----------
 static_assert(g_bandCount > 0, "g_bandCount must be > 0");
 static_assert(g_bandCount <= 255, "g_bandCount must fit in uint8_t");
-static_assert(g_lastBand == (g_bandCount - 1), "g_lastBand must be g_bandCount - 1");
+static_assert(g_lastBand == (g_bandCount - 1), "g_lastBand must equal g_bandCount - 1");
 static_assert(SETTINGS_MAX > 0, "SETTINGS_MAX must be > 0");
 
-// ---------- EEPROM address monotonicity (prevents overlaps by ordering) ----------
+// ---------- Derived block ends end-exclusive ----------
+constexpr uint16_t EEPROM_HEADER_END =
+(uint16_t)EEPROM_HEADER_START + (uint16_t)sizeof(ReceiverHeader);
+
+constexpr uint16_t EEPROM_BANDS_END =
+(uint16_t)EEPROM_BANDS_START + (uint16_t)g_bandCount * (uint16_t)sizeof(BandStatePacked);
+
+constexpr uint16_t EEPROM_SETTINGS_END =
+(uint16_t)EEPROM_SETTINGS_START + (uint16_t)SETTINGS_MAX;
+
+constexpr uint16_t EEPROM_MODE_SETTINGS_END =
+(uint16_t)EEPROM_MODE_SETTINGS_START + (uint16_t)sizeof(g_modeSettings);
+
+#if ENABLE_FAVORITES
+constexpr uint16_t EEPROM_FAVORITES_END =
+(uint16_t)EEPROM_FAVORITES_START + (uint16_t)MAX_FAVORITES * (uint16_t)sizeof(FavoriteStation);
+#endif
+
+// ---------- EEPROM address monotonicity prevents overlaps by ordering ----------
 static_assert(EEPROM_APP_ID_ADDRESS != EEPROM_VERSION_ADDRESS, "EEPROM core addresses must be distinct");
 static_assert(EEPROM_APP_ID_ADDRESS < EEPROM_VERSION_ADDRESS, "EEPROM core addresses order invalid");
 static_assert(EEPROM_VERSION_ADDRESS < EEPROM_HEADER_START, "EEPROM header must start after version byte");
@@ -129,45 +156,30 @@ static_assert(EEPROM_SETTINGS_START < EEPROM_MODE_SETTINGS_START, "EEPROM_SETTIN
 static_assert(EEPROM_MODE_SETTINGS_START < EEPROM_FAVORITES_START, "EEPROM_MODE_SETTINGS_START must be before favorites block");
 static_assert(EEPROM_FAVORITES_START < EEPROM_FAVORITES_COUNT, "EEPROM_FAVORITES_START must be before favorites count");
 
-// ---------- Block boundary checks (prevents overlaps by size math) ----------
+// ---------- Block boundary checks prevents overlaps by size math ----------
+static_assert(EEPROM_HEADER_END <= (uint16_t)EEPROM_BANDS_START,
+    "ReceiverHeader overlaps bands block");
 
-// Header must fit before bands
-static_assert(
-    (uint16_t)(EEPROM_HEADER_START + (uint16_t)sizeof(ReceiverHeader)) <= (uint16_t)EEPROM_BANDS_START,
-    "ReceiverHeader overlaps bands block"
-    );
+static_assert(EEPROM_BANDS_END <= (uint16_t)EEPROM_SETTINGS_START,
+    "Bands block overlaps settings block update EEPROM addresses in Defines.h");
 
-// Bands region must fit before settings
-static_assert(
-    (uint16_t)(EEPROM_BANDS_START + (uint16_t)g_bandCount * (uint16_t)sizeof(BandStatePacked)) <= (uint16_t)EEPROM_SETTINGS_START,
-    "Bands block overlaps settings block - update EEPROM map"
-    );
+static_assert(EEPROM_SETTINGS_END <= (uint16_t)EEPROM_MODE_SETTINGS_START,
+    "Settings block overlaps mode-settings block update EEPROM addresses in Defines.h");
 
-// Settings region must fit before mode settings
-static_assert(
-    (uint16_t)(EEPROM_SETTINGS_START + (uint16_t)SETTINGS_MAX) <= (uint16_t)EEPROM_MODE_SETTINGS_START,
-    "Settings block overlaps mode-settings block - update EEPROM map"
-    );
-
-// Mode settings must fit before favorites
-static_assert(
-    (uint16_t)(EEPROM_MODE_SETTINGS_START + (uint16_t)sizeof(g_modeSettings)) <= (uint16_t)EEPROM_FAVORITES_START,
-    "Mode-settings block overlaps favorites block - update EEPROM map"
-    );
+static_assert(EEPROM_MODE_SETTINGS_END <= (uint16_t)EEPROM_FAVORITES_START,
+    "Mode-settings block overlaps favorites block update EEPROM addresses in Defines.h");
 
 #if ENABLE_FAVORITES
 static_assert(MAX_FAVORITES > 0, "MAX_FAVORITES must be > 0");
 
-// Favorites list must fit before favorites count byte
-static_assert(
-    (uint16_t)(EEPROM_FAVORITES_START + (uint16_t)MAX_FAVORITES * (uint16_t)sizeof(FavoriteStation)) <= (uint16_t)EEPROM_FAVORITES_COUNT,
-    "Favorites block overlaps favorites count - update EEPROM map"
-    );
+static_assert(EEPROM_FAVORITES_END == (uint16_t)EEPROM_FAVORITES_COUNT,
+    "EEPROM_FAVORITES_COUNT must be placed immediately after favorites list");
 #endif
 
-// ---------- Device EEPROM size (hard limit) ----------
-// AVR EEPROM upper bound (ATmega328P: 0..1023)
-static_assert(EEPROM_FAVORITES_COUNT <= E2END, "EEPROM layout exceeds device EEPROM size");
+// ---------- Device EEPROM size hard limit ----------
+// AVR EEPROM last address ATmega328P 0..1023
+static_assert((uint16_t)EEPROM_FAVORITES_COUNT <= (uint16_t)E2END,
+    "EEPROM layout exceeds device EEPROM size");
 
 // ==========================================
 // ===== COMPONENT-LEVEL STATE HANDLERS =====
@@ -180,20 +192,42 @@ static_assert(EEPROM_FAVORITES_COUNT <= E2END, "EEPROM layout exceeds device EEP
 // --- Band State ---
 // Pack runtime band data into a compact struct and save to EEPROM
 static void saveBandState(uint8_t bandIndex) {
-    CHECK_EEPROM_WEAR();
 
     BandStatePacked state;
     const Band& band = g_bandList[bandIndex];
+
     state.currentFreq = band.currentFreq;
 
-    // Pack step and bandwidth indices into single bytes
-    state.packed_am = PACK4(band.stepIdxAM, band.bwIdxAM);
-    state.packed_ssb = PACK4(band.stepIdxSSB, band.bwIdxSSB);
-    state.packed_fm = PACK4(band.stepIdxFM, band.bwIdxFM);
+    // Pack 2x 4-bit values (lo/hi) into one byte
+    //   packed = (lo & 0x0F) | ((hi & 0x0F) << 4)
+    //
+    // use swap to implement (hi << 4) cheaply and avoid larger
+    // mul-by-16 codegen under -Os
+    uint8_t lo, hi;
+
+    // AM [stepIdxAM | bwIdxAM]
+    lo = (uint8_t)band.stepIdxAM & 0x0F;
+    hi = (uint8_t)band.bwIdxAM & 0x0F;
+    __asm__ __volatile__("swap %0" : "+r"(hi));   // hi = hi << 4
+    state.packed_am = (uint8_t)(lo | hi);
+
+    // SSB [stepIdxSSB | bwIdxSSB]
+    lo = (uint8_t)band.stepIdxSSB & 0x0F;
+    hi = (uint8_t)band.bwIdxSSB & 0x0F;
+    __asm__ __volatile__("swap %0" : "+r"(hi));
+    state.packed_ssb = (uint8_t)(lo | hi);
+
+    // FM [stepIdxFM | bwIdxFM]
+    lo = (uint8_t)band.stepIdxFM & 0x0F;
+    hi = (uint8_t)band.bwIdxFM & 0x0F;
+    __asm__ __volatile__("swap %0" : "+r"(hi));
+    state.packed_fm = (uint8_t)(lo | hi);
+
     state.bfoCal = band.bfoCal;
 
-    uint16_t addr = (uint16_t)EEPROM_BANDS_START
+    const uint16_t addr = (uint16_t)EEPROM_BANDS_START
         + (uint16_t)bandIndex * (uint16_t)sizeof(BandStatePacked);
+
     eeprom_update_block(&state, (void*)addr, sizeof(BandStatePacked));
 }
 
@@ -234,13 +268,19 @@ static void loadBandState(uint8_t bandIndex) {
 
 // On partial saves only write current band state to reduce EEPROM wear
 static inline void saveBands(bool full_save) {
-    CHECK_EEPROM_WEAR();
 
     if (full_save) {
         for (uint8_t i = 0; i < g_bandCount; ++i)
             saveBandState(i);
     } else {
         saveBandState(g_bandIndex);
+
+        // If SWLink is enabled and we are on SW band also save SW master band
+        if ((uint8_t)getSettingParam(SWLink) != 0 &&
+            currentBandPtr()->bandType == SW_BAND_TYPE &&
+            g_bandIndex != SW_MASTER_BAND_INDEX) {
+            saveBandState(SW_MASTER_BAND_INDEX);
+        }
     }
 }
 
@@ -250,54 +290,10 @@ static inline void loadBands() {
         loadBandState(i);
 }
 
-// --- Favorites ---
-#if ENABLE_FAVORITES
-// Write the entire list of favorite stations to EEPROM
-static void saveFavorites() {
-    CHECK_EEPROM_WEAR();
-
-    // Local clamped count to avoid EEPROM OOB writes if RAM gets corrupted
-    uint8_t count = (g_totalFavorites > MAX_FAVORITES) ? MAX_FAVORITES : g_totalFavorites;
-
-    eeprom_update_byte((uint8_t*)EEPROM_FAVORITES_COUNT, count);
-
-    for (uint8_t i = 0; i < count; ++i) {
-        uint16_t addr = (uint16_t)EEPROM_FAVORITES_START
-            + (uint16_t)i * (uint16_t)sizeof(FavoriteStation);
-        eeprom_update_block(&g_favorites[i], (void*)addr, sizeof(FavoriteStation));
-    }
-}
-
-// Read favorite stations from EEPROM, handling uninitialized data
-static void loadFavorites() {
-    g_totalFavorites = eeprom_read_byte((const uint8_t*)EEPROM_FAVORITES_COUNT);
-
-    // Sanity check favorite count to handle uninitialized EEPROM
-    if (g_totalFavorites == 0xFF || g_totalFavorites > MAX_FAVORITES) {
-        g_totalFavorites = 0;
-        g_favoriteSelected = 0;
-        if (!g_eepromBad) saveFavorites();
-        return;
-    }
-
-    for (uint8_t i = 0; i < g_totalFavorites; ++i) {
-        uint16_t addr = (uint16_t)EEPROM_FAVORITES_START
-            + (uint16_t)i * (uint16_t)sizeof(FavoriteStation);
-        eeprom_read_block(&g_favorites[i], (const void*)addr, sizeof(FavoriteStation));
-
-        // Clamp invalid modulation
-        if (g_favorites[i].modulation > FM)
-            g_favorites[i].modulation = AM;
-    }
-
-    g_favoriteSelected = 0;
-}
-#endif
-
 // Save or load mode-specific settings as a single block
 static inline void handleModeSettingsEEPROM(bool save) {
     if (save) {
-        CHECK_EEPROM_WEAR();
+
         eeprom_update_block(
             g_modeSettings,
             (void*)EEPROM_MODE_SETTINGS_START,
@@ -378,8 +374,10 @@ static void saveAllReceiverInformation(bool full_save = true) {
         return;
     }
 
-    eeprom_update_byte((uint8_t*)EEPROM_APP_ID_ADDRESS, EEPROM_APP_ID);
-    eeprom_update_byte((uint8_t*)EEPROM_VERSION_ADDRESS, APP_VERSION);
+    // Write APP_ID + VERSION as one 16-bit word
+    // EEPROM[0] = APP_ID (low byte), EEPROM[1] = APP_VERSION (high byte)
+    const uint16_t idver = (uint16_t)EEPROM_APP_ID | ((uint16_t)APP_VERSION << 8);
+    eeprom_update_word((uint16_t*)EEPROM_APP_ID_ADDRESS, idver);
 
     ReceiverHeader header;
     header.volume = g_muteVolume > 0 ? g_muteVolume : g_volume;
@@ -393,12 +391,14 @@ static void saveAllReceiverInformation(bool full_save = true) {
     saveBands(full_save);
 
     if (full_save) {
-        for (uint8_t i = 0; i < SETTINGS_MAX; ++i) {
-            eeprom_update_byte(
-                (uint8_t*)(EEPROM_SETTINGS_START + i),
-                getSettingParam(i)
-            );
-        }
+        // Settings params are stored as a contiguous int8_t array in RAM,
+        // and EEPROM settings block is contiguous as well
+        eeprom_update_block(
+            g_SettingsParams,
+            (void*)EEPROM_SETTINGS_START,
+            (uint16_t)SETTINGS_MAX
+        );
+
         handleModeSettingsEEPROM(true);
 
 #if ENABLE_FAVORITES

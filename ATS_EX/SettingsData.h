@@ -1,7 +1,7 @@
 #pragma once
 // ====================================================================================
 //
-// Settings.h
+// SettingsData.h
 //
 // Central place for ALL settings data:
 //
@@ -12,6 +12,8 @@
 //   - g_SettingsMeta[] (PROGMEM metadata: names, types, callbacks)
 //   - switch_setting_map[] + paramTexts[][] (PROGMEM tables used by UI formatting)
 //   - Navigation tables for column-first cursor movement
+//
+// Business logic (do*() callbacks) is in SettingsHandlers.h
 // 
 // ====================================================================================
 
@@ -87,6 +89,7 @@ enum SettingsIndex : uint8_t {
     BATT_PIN,
     ScanSwitch,
     FmVolAdjust,
+    SWLink,
 
     SETTINGS_MAX
 };
@@ -116,7 +119,7 @@ typedef void (*SettingCallback)(int8_t);
 typedef bool (*ActiveCheckFunc)();
 
 // =================================================================================================
-// Forward declarations (callbacks + applicability predicates)
+// Forward declarations for callbacks (defined in SettingsHandlers.h)
 // =================================================================================================
 
 void doAttenuation(int8_t v);
@@ -152,11 +155,13 @@ void doCPUSpeed(int8_t v);
 void doBatteryPinSelect(int8_t v);
 void doScanSwitch(int8_t v);
 void doFmVolAdjust(int8_t v);
+void doSwLink(int8_t v);
 
-static inline bool isAlwaysActive();
-static inline bool isAMFamilyActive();
-static inline bool isSSBActive();
-static inline bool isFMActive();
+// Forward declarations for applicability predicates (defined in SettingsLogic.h)
+static bool isAlwaysActive();
+static bool isAMFamilyActive();
+static bool isSSBActive();
+static bool __attribute__((noinline)) isFMActive();
 
 // =================================================================================================
 // Settings metadata (names, defaults, types, callbacks)
@@ -192,7 +197,7 @@ const SettingMeta g_SettingsMeta[SETTINGS_MAX] PROGMEM = {
     { "FMP", 1,  Switch,     doFMAudioProfile,    isFMActive       },
     { "FMO", 0,  Switch,     doForceMono,         isFMActive       },
     { "FSA", 22, Num,        doFmSoftMuteAtt,     isFMActive       },
-    { "FST", 10, Num,        doFmSoftMuteThr,     isFMActive       },
+    { "FST", 0,  Num,        doFmSoftMuteThr,     isFMActive       },
     { "SWA", 0,  Num,        doSwAfcProfile,      isAMFamilyActive },
 
     // --- Page 4: Display & UI ---
@@ -209,6 +214,7 @@ const SettingMeta g_SettingsMeta[SETTINGS_MAX] PROGMEM = {
     { "BAP", 0,  Switch,     doBatteryPinSelect,  isAlwaysActive   },
     { "SCN", 1,  Switch,     doScanSwitch,        isAlwaysActive   },
     { "FVA", 0,  Num,        doFmVolAdjust,       isAlwaysActive   },
+    { "SWL", 0,  Switch,     doSwLink,            isAlwaysActive   },
 };
 
 // RAM: Only mutable parameter values (menu edits this buffer)
@@ -316,7 +322,7 @@ const uint8_t g_navColFirstOrder[SETTINGS_MAX] PROGMEM = {
     NAV_PAGE6_ORDER(6),
     NAV_PAGE6_ORDER(12),
     NAV_PAGE6_ORDER(18),
-    NAV_PAGE5_ORDER(24)
+    NAV_PAGE6_ORDER(24)
 };
 
 // Physical settings index to Navigation position
@@ -325,7 +331,7 @@ const uint8_t g_navColFirstReverse[SETTINGS_MAX] PROGMEM = {
     NAV_PAGE6_REVERSE(6),
     NAV_PAGE6_REVERSE(12),
     NAV_PAGE6_REVERSE(18),
-    NAV_PAGE5_REVERSE(24)
+    NAV_PAGE6_REVERSE(24)
 };
 
 #undef NAV_PAGE6_ORDER
@@ -394,6 +400,7 @@ const SwitchMapEntry switch_setting_map[SETTINGS_MAX] PROGMEM = {
     /* BATT_PIN       */ {0,  false},
     /* ScanSwitch     */ {2,  true},
     /* FmVolAdjust    */ {0,  false},
+    /* SWLink         */ {2,  true},
 };
 
 // UI texts (PROGMEM), fixed width 3 + '\0'

@@ -84,6 +84,7 @@
       <FileType>CppCode</FileType>
       <DeploymentContent>true</DeploymentContent>
     </ClCompile>
+    <ClCompile Include="microWire.cpp" />
     <ClCompile Include="Rotary.cpp" />
     <ClCompile Include="SI4735.cpp" />
     <ClCompile Include="SimpleButton.cpp" />
@@ -93,15 +94,22 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Battery.h" />
+    <ClInclude Include="Boot.h" />
     <ClInclude Include="CW_decoder.h" />
     <ClInclude Include="Defines.h" />
     <ClInclude Include="CustomFonts.h" />
+    <ClInclude Include="Favorites.h" />
+    <ClInclude Include="Game.h" />
     <ClInclude Include="Globals.h" />
     <ClInclude Include="Input.h" />
     <ClInclude Include="Memory.h" />
+    <ClInclude Include="microWire.h" />
     <ClInclude Include="RadioControl.h" />
-    <ClInclude Include="Settings.h" />
+    <ClInclude Include="RDS.h" />
+    <ClInclude Include="SettingsData.h" />
+    <ClInclude Include="SettingsLogic.h" />
     <ClInclude Include="SI4735.h" />
+    <ClInclude Include="SMeter.h" />
     <ClInclude Include="SSD1306_OLED.h" />
     <ClInclude Include="patch_ssb_compressed.h" />
     <ClInclude Include="Rotary.h" />

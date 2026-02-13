@@ -308,17 +308,19 @@ public:
     inline void writeCore(uint8_t data) {
         if (_x + FONT_TOTAL > _maxX) return;  // Skip if beyond screen
 
+        const uint8_t inv = (uint8_t)_invState;
+
         // 5 columns from font table
         for (uint8_t col = 0; col < FONT_COLS; col++) {
             uint8_t bits = getFont(data, col);
-            if (_invState) bits = ~bits;
+            if (inv) bits = (uint8_t)~bits;
             sendByte(bits);
-            _x++;
         }
 
         // 1 column spacing
-        sendByte(_invState ? 0xFF : 0x00);
-        _x++;
+        sendByte(inv ? 0xFF : 0x00);
+
+        _x += FONT_TOTAL; // Update cursor once
     }
 
     // Single-char write
@@ -390,27 +392,35 @@ public:
     // =-=-=-=-=-=-=-=-= Low-level primitive drawing (buffer manipulation) =-=-=-=-=-=-=-=-=
 
     // Sets a single pixel in the local buffer (bitwise)
-    void local_setPixel(unsigned char* buf, uint8_t curr_x, uint8_t curr_y, uint8_t pages) {
-        uint8_t page = curr_y >> 3;
-        uint8_t bit = curr_y & 7;
-        int idx = curr_x * pages + page;
-        buf[idx] |= (1 << bit);
+    void local_setPixel(unsigned char* buf, uint8_t curr_x, uint8_t curr_y) {
+        // Keep shifts strictly 8-bit to avoid int-promotions turning this into 16-bit shift loops under -Os
+        uint8_t page = curr_y;
+        page >>= 3;
+        uint8_t bit = (uint8_t)(curr_y & 7);
+
+        // idx = curr_x * SEG_PAGES + page
+        // Here SEG_PAGES is constexpr and equals 4 for 32px high seven-seg glyph buffer
+        static_assert(SEG_PAGES == 4, "local_setPixel assumes SEG_PAGES == 4");
+        uint8_t idx = (uint8_t)((curr_x << 2) + page);
+
+        buf[idx] |= (uint8_t)(1u << bit);
     }
 
     // Renders horizontal segment in buffer (2px thick)
-    void draw_horizontal_line(unsigned char* buf, uint8_t s_x, uint8_t s_y, uint8_t s_len, uint8_t pages) {
+    void draw_horizontal_line(unsigned char* buf, uint8_t s_x, uint8_t s_y, uint8_t s_len) {
         for (uint8_t i = 0; i < s_len; i++) {
-            uint8_t curr_x = s_x + i;
-            local_setPixel(buf, curr_x, s_y, pages);
-            local_setPixel(buf, curr_x, s_y + 1, pages);
+            uint8_t curr_x = (uint8_t)(s_x + i);
+            local_setPixel(buf, curr_x, s_y);
+            local_setPixel(buf, curr_x, (uint8_t)(s_y + 1));
         }
     }
 
     // Renders vertical segment in buffer (2px thick)
-    void draw_vertical_line(unsigned char* buf, uint8_t s_x, uint8_t s_y, uint8_t s_len, uint8_t pages) {
+    void draw_vertical_line(unsigned char* buf, uint8_t s_x, uint8_t s_y, uint8_t s_len) {
         for (uint8_t i = 0; i < s_len; i++) {
-            local_setPixel(buf, s_x, s_y + i, pages);
-            local_setPixel(buf, s_x + 1, s_y + i, pages);
+            uint8_t curr_y = (uint8_t)(s_y + i);
+            local_setPixel(buf, s_x, curr_y);
+            local_setPixel(buf, (uint8_t)(s_x + 1), curr_y);
         }
     }
 
@@ -458,8 +468,8 @@ public:
                 uint8_t s_len = pgm_read_byte(ptr + 2);
                 uint8_t isHoriz = pgm_read_byte(ptr + 3);
 
-                if (isHoriz) draw_horizontal_line(buf, s_x, s_y, s_len, SEG_PAGES);
-                else        draw_vertical_line(buf, s_x, s_y, s_len, SEG_PAGES);
+                if (isHoriz) draw_horizontal_line(buf, s_x, s_y, s_len);
+                else        draw_vertical_line(buf, s_x, s_y, s_len);
             }
         }
     }

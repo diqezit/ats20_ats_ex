@@ -69,27 +69,34 @@ SimpleButton::SimpleButton(uint8_t pin) {
 }
 
 
-uint8_t SimpleButton::checkEvent(uint8_t(*_event)(uint8_t event, uint8_t pin)) {
+uint8_t SimpleButton::checkEvent(uint8_t(*eventHandler)(uint8_t event, uint8_t pin)) {
     uint8_t ret = 0;
-    uint16_t timeNow = millis() & 0x3f0;
-    uint16_t state = _PinDebounceState & 0xf;
-    uint16_t debounce = _PinDebounceState & 0x3f0;
-    uint8_t pinState;
-    uint16_t elapsed;
 
-    pinState = ((*_pinReg & _pinMask) ? HIGH : LOW);
+    // time in 16ms ticks (0x3F0 mask keeps it aligned and cheap)
+    uint16_t now = (uint16_t)(millis() & 0x3f0);
 
-    if (timeNow < debounce)
-        timeNow = timeNow + 0x400;
+    // Packed layout:
+    //   b15..b10: pin number
+    //   b9..b4  : timestamp (16ms ticks)
+    //   b3..b0  : state (0..15)
+    uint8_t  state = (uint8_t)(_PinDebounceState & 0x0F);     // 4-bit FSM state
+    uint16_t stamp = (uint16_t)(_PinDebounceState & 0x3f0);   // last change time
 
-    elapsed = timeNow - debounce;
+    const uint8_t pinState = ((*_pinReg & _pinMask) ? HIGH : LOW);
+
+    // handle wrap (0x400 == 1024ms window in 16ms ticks)
+    if (now < stamp) now = (uint16_t)(now + 0x400);
+
+    const uint16_t elapsed = (uint16_t)(now - stamp);
+
     switch (state) {
     case BUTTONSTATE_IDLE:
         if (!pinState) {
             state = BUTTONSTATE_DEBOUNCE;
-            debounce = timeNow;
+            stamp = now;
         }
         break;
+
     case BUTTONSTATE_DEBOUNCE:
         if (pinState) {
             state = BUTTONSTATE_IDLE;
@@ -97,33 +104,37 @@ uint8_t SimpleButton::checkEvent(uint8_t(*_event)(uint8_t event, uint8_t pin)) {
             state = BUTTONSTATE_PRESSED;
         }
         break;
+
     case BUTTONSTATE_PRESSED:
         if (pinState) {
-            debounce = timeNow;
+            stamp = now;
             state = BUTTONSTATE_SHORTRELEASE;
         } else if (elapsed >= BUTTONTIME_LONGPRESS1) {
             ret = BUTTONEVENT_FIRSTLONGPRESS;
             state = BUTTONSTATE_LONGPRESS;
-            debounce = timeNow;
+            stamp = now;
         }
         break;
+
     case BUTTONSTATE_LONGPRESS:
         if (pinState) {
             state = BUTTONSTATE_LONGRELEASE;
         } else if (elapsed >= BUTTONTIME_LONGPRESSREPEAT) {
-            debounce = timeNow;
+            stamp = now;
             ret = BUTTONEVENT_LONGPRESS;
         }
         break;
+
     case BUTTONSTATE_LONGRELEASE:
         if (pinState) {
             ret = BUTTONEVENT_LONGPRESSDONE;
             state = BUTTONSTATE_RELEASE;
-            debounce = timeNow;
+            stamp = now;
         } else {
             state = BUTTONSTATE_LONGPRESS;
         }
         break;
+
     case BUTTONSTATE_SHORTRELEASE:
         if (pinState) {
             ret = BUTTONEVENT_SHORTPRESS;
@@ -132,25 +143,27 @@ uint8_t SimpleButton::checkEvent(uint8_t(*_event)(uint8_t event, uint8_t pin)) {
             state = BUTTONSTATE_PRESSED;
         }
         break;
+
     case BUTTONSTATE_RELEASE:
         if (pinState) {
-            if (elapsed >= BUTTONTIME_RELEASEDEBOUNCE)//(millis() - (_debounce > (BUTTON_DEBOUNCE)))
+            if (elapsed >= BUTTONTIME_RELEASEDEBOUNCE)
                 state = BUTTONSTATE_IDLE;
         } else {
-            debounce = timeNow;
+            stamp = now;
         }
         break;
+
     default:
         break;
     }
 
-    _PinDebounceState = (_PinDebounceState & 0xfc00) | (debounce & 0x3f0) | state;
+    // write back packed state
+    _PinDebounceState = (uint16_t)((_PinDebounceState & 0xfc00) | (stamp & 0x3f0) | (uint16_t)state);
 
     if (ret) {
-        if (_event) {
-            // Lazy pin extract due pin number is only needed for callback events (Packed in b15..b10)
-            uint8_t pin = (uint8_t)(_PinDebounceState >> 10);
-            ret = _event(ret, pin);
+        if (eventHandler) {
+            const uint8_t pin = (uint8_t)(_PinDebounceState >> 10);
+            ret = eventHandler(ret, pin);
         }
     } else {
         if (state > BUTTONSTATE_RELEASE)
