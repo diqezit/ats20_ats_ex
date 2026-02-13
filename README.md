@@ -1,3 +1,5 @@
+
+
 ### **ATS-20+ Firmware Modifications (diqezit's Fork)**
 
 <p align="center">
@@ -101,10 +103,11 @@ You can find the original project here: [goshante/ats20_ats_ex](https://github.c
 
 ### **Key Modifications**
 
-This fork introduces two main branches of improvements over the original firmware:
+This fork introduces three main branches of improvements over the original firmware:
 
 1.  **Audio Pop/Click Elimination (Hardware & Software Mod):** A modification that completely removes pops and clicks when switching modes. It requires a minor physical change to the receiver circuit.
-2.  **`MOD_NO_RDS` Firmware Series:** An alternative firmware branch where the RDS feature was removed to free up program space (from first modifications). This enabled the addition of new functionality, most notably a **unified Favorites system for all bands (AM, FM, SSB, CW)**, along with dozens of other fixes and improvements in code.
+2.  **`MOD_NO_RDS` Firmware Series:** An alternative firmware branch where the original full-weight RDS feature was replaced with a lightweight **RDS MINI** decoder to stay within ATmega328P flash limits. This freed up program space for new functionality, most notably a **unified Favorites system for all bands (AM, FM, SSB, CW)**, along with dozens of other fixes and improvements in code.
+3.  **RDS MINI RadioText Decoder:** In newer Version returned 7.1+ minimal RDS implementation (500 bytes Flash) that decodes Group 2A/2B RadioText from FM broadcasts and displays scrolling text on OLED row 6. Toggled at runtime via long-press MODE in FM mode.
 
 **Important:** This audio improvement only affects the speaker output, as the headphone jack is connected before the amplifier.
 
@@ -219,7 +222,7 @@ Most ATS-20(+) receivers use a CH340 chip for USB communication. If your compute
 
     Your settings should look like this:
     <p align="center">
-      <img width="257" alt="xLoader Correct Settings" src="https://github.com/user-attachments/assets/1ccd9d42-bbe1-43e2-b944-6440cdca3477" />
+      <img width="257" alt="xLoader Correct Settings" src="https://github.com/user-attachments/assets/58aa3266-afcc-4910-84b4-2796d906ab66" />
     </p>
 
 #### **Step 6: Start the Upload**
@@ -257,6 +260,7 @@ This manual provides a comprehensive overview of the ATS-20+ EX firmware's featu
     *   [SSB Mode Operation](#21-ssb-mode-operation)
     *   [CW (Morse Code) Mode Operation](#22-cw-morse-code-mode-operation)
     *   [Bandwidth (BW) Filter Adjustment](#23-bandwidth-bw-filter-adjustment)
+    *   [RDS RadioText Display (FM)](#24-rds-radiotext-display-fm)
 4.  **Section 3: System Functions**
     *   [Station Scanning](#31-station-scanning)
     *   [Favorites Management](#32-favorites-management)
@@ -308,6 +312,7 @@ The firmware's UI is based on the **"Active Command"** paradigm. This model allo
 
 *   **Quick Jump:** Short-press **`BAND+`** then **rotate the encoder** to jump between pre-defined bands.
 *   **Seamless Tuning:** Tune past the edge of the current band to automatically switch to the adjacent one. Note: Crossing between AM/SW and FM bands will switch to the FM band edge frequency.
+*   **Band Coverage:** The firmware provides 38 pre-defined bands covering LW, MW, all ITU shortwave broadcast bands, all 10 ITU amateur bands (160m through 10m), CB radio, and the FM broadcast band.
 
 #### **1.5. Mode Switching (AM/SSB/CW)**
 
@@ -338,6 +343,28 @@ The firmware's UI is based on the **"Active Command"** paradigm. This model allo
 2.  **Rotate the encoder** to change the filter width.
     *   **Narrower (e.g. 1.8 kHz):** Rejects adjacent channel interference improving clarity in crowded bands.
     *   **Wider (e.g. 4.0 kHz):** Provides better audio fidelity on strong clear signals.
+
+#### **2.4. RDS RadioText Display (FM)**
+
+The receiver includes a lightweight RDS decoder that displays RadioText (RT) from FM broadcast stations directly on the OLED screen.
+
+*   **How to Enable:**
+    1.  Tune to an FM station.
+    2.  **Press and hold the `MODE` button** for 1-2 seconds. An **`R`** indicator will appear in the upper-right area of the screen confirming RDS is active.
+    3.  To disable, **press and hold `MODE`** again. The `R` indicator and the text line will disappear.
+
+*   **What It Shows:**
+    *   The bottom line of the display (row 6) shows the station's RadioText message. This is typically the current song title, artist name, or station slogan.
+    *   If the text is longer than 21 characters it will scroll automatically.
+
+*   **Important Notes:**
+    *   RDS is available **only in FM mode**. The decoder is automatically disabled when switching to AM/SSB/CW and re-enabled when returning to FM (if it was previously toggled on).
+    *   Not all FM stations transmit RadioText data. If no text appears after several seconds on a strong station, that station may not be broadcasting RT.
+    *   The RDS state (on/off) is **not saved to EEPROM** — it resets to off on every power cycle.
+    *   The decoder processes only **Group 2A and 2B** (RadioText). It does not display station name (PS), clock, or program type.
+    *   RDS decoding requires a reasonably strong FM signal. On weak or noisy signals the text may appear garbled or not appear at all. The decoder will clear stale text after 6 seconds of signal loss.
+
+*   **Compile-Time Control:** RDS MINI can be disabled entirely by setting `ENABLE_RDS_MINI 0` in `Defines.h`. This saves approximately 500 bytes of Flash. When disabled, the long-press MODE action in FM mode does nothing.
 
 ---
 
@@ -416,7 +443,7 @@ The Settings Menu provides access to all advanced receiver configurations. Think
 
 | Name | Detailed Description | Recommended Values | Mode Availability | Type | Range |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `BFO` | **Beat Frequency Oscillator Calibration**<br>Corrects frequency drift caused by component aging.<br>• Each step = 100 Hz correction<br>• Positive values: Increase displayed frequency<br>• Negative values: Decrease displayed frequency<br>**Usage:** If ALL SSB stations sound too high/low pitched on a specific band, adjust this.<br>**Important:** Saved per band (32 separate values). | **Default:** `0`<br>**Typical drift:** `±5` | AM/SSB/CW only<br>**"---" in FM** | Number | `-25`..`+25` |
+| `BFO` | **Beat Frequency Oscillator Calibration**<br>Corrects frequency drift caused by component aging.<br>• Each step = 100 Hz correction<br>• Positive values: Increase displayed frequency<br>• Negative values: Decrease displayed frequency<br>**Usage:** If ALL SSB stations sound too high/low pitched on a specific band, adjust this.<br>**Important:** Saved per band (38 separate values). | **Default:** `0`<br>**Typical drift:** `±5` | AM/SSB/CW only<br>**"---" in FM** | Number | `-25`..`+25` |
 | `SSM` | **SSB Soft Mute**<br>Reduces noise between SSB transmissions.<br>• `RSS`: Mutes based on signal strength<br>• `SNR`: Mutes based on signal-to-noise ratio<br>**Tip:** SNR mode works better for weak signal work. | **Default:** `SNR`<br>**DXing:** `RSS` | SSB only<br>**"---" in AM/FM/CW** | Switch | `RSS` / `SNR` |
 | `SVC` | **SSB Automatic Volume Control**<br>Stabilizes audio level on fading SSB/CW signals.<br>**When ON:** Reduces fading effects but may pump on noise<br>**When OFF:** Natural signal dynamics, better for strong signals | **Default:** `On`<br>**Weak signals:** `On`<br>**Local QSOs:** `Off` | SSB only<br>**"---" in AM/FM/CW** | Switch | `On` / `Off` |
 | `COF` | **SSB Audio Cutoff Filter**<br>Removes low-frequency rumble and noise.<br>• `AUT`: Automatically matches filter to bandwidth<br>• `1`: Mild filtering (fuller audio)<br>• `2`: Aggressive filtering (cleaner but thinner audio)<br>**Try:** Use `2` for noisy bands, `1` for local contacts. | **Default:** `AUT`<br>**Noisy bands:** `2` | SSB only<br>**"---" in AM/FM/CW** | Selection | `AUT`, `1`, `2` |
@@ -474,18 +501,19 @@ The Settings Menu provides access to all advanced receiver configurations. Think
 > **📝 Settings Memory:**
 > - **Global settings:** Saved once for entire radio
 > - **Mode-dependent:** ATT, AVC, SMA saved separately per mode
-> - **Band-specific:** BFO calibration saved per band (32 values)
+> - **Band-specific:** BFO calibration saved per band (38 values)
 > - **Auto-save:** Changes saved to EEPROM when exiting menu
 
 ---
 
 > **📌 Key Technical Notes:**
 > *   **Mode-Dependent Settings:** `ATT`, `AVC`, and `SMA` values are stored separately for AM, LSB, and USB modes. The displayed value changes automatically when you switch modes.
-> *   **Band-Specific BFO:** The `BFO` calibration is saved individually for each of the 32 bands, allowing precise crystal drift compensation per frequency range.
+> *   **Band-Specific BFO:** The `BFO` calibration is saved individually for each of the 38 bands, allowing precise crystal drift compensation per frequency range.
 > *   **Soft Mute Systems:** AM and FM use completely independent soft mute implementations with different parameter ranges (`SMA`/`SMT` for AM, `FSA`/`FST` for FM).
 > *   **SW AFC:** The `SWA` setting only activates on Shortwave bands (1.7-30 MHz) while in AM mode. It helps track drifting broadcast stations but should be disabled for SSB/CW.
 > *   **Navigation Styles:** The `NAV` setting affects only the Settings menu navigation, not the main screen or Favorites list.
 > *   **Mode Indicators:** Settings showing "---" are not functional in the current mode, helping you focus on relevant parameters only.
+> *   **RDS MINI:** The RDS RadioText feature is controlled via long-press MODE in FM mode, not through the Settings menu. Its state resets on power cycle. It costs approximately 500 bytes of Flash and can be disabled at compile time with `ENABLE_RDS_MINI 0`.
 
 ---
 
@@ -508,7 +536,7 @@ This procedure resets all settings, band states, and clears all saved favorites 
 
 #### **5.1. CW (Morse Code) Decoder** *(Experimental)*
 
-> **⚠️ IMPORTANT:** This feature requires hardware modification and disabling Favorites (`ENABLE_FAVORITES 0`) due to memory constraints (requires ~30KB flash).
+> **⚠️ IMPORTANT:** This feature requires hardware modification and disabling Favorites (`ENABLE_FAVORITES 0`) and RDS MINI (`ENABLE_RDS_MINI 0`) due to memory constraints (requires ~30KB flash).
 
 The firmware includes an experimental CW decoder using a fixed-point Goertzel algorithm for real-time Morse code to text conversion directly on the OLED display.
 
@@ -523,7 +551,7 @@ The firmware includes an experimental CW decoder using a fixed-point Goertzel al
 
 Connect speaker output to A6 with proper biasing:
 - **AC Coupling:** 2.2 µF capacitor in series with audio signal
-- **Bias Network:** 
+- **Bias Network:**
   - R1: 390 kΩ from +3.48V to A6 (470 kΩ also acceptable, provides ~0.5V bias)
   - R2: 75 kΩ from A6 to GND
   - This creates optimal DC bias for the 1.1V internal reference
@@ -533,8 +561,8 @@ Connect speaker output to A6 with proper biasing:
 
 **Operation Guide:**
 
-1. **Enable in firmware:** Set `ENABLE_CW_DECODER 1` and `ENABLE_FAVORITES 0` in Defines.h before compiling
-2. **Setup:** 
+1. **Enable in firmware:** Set `ENABLE_CW_DECODER 1`, `ENABLE_FAVORITES 0`, and `ENABLE_RDS_MINI 0` in Defines.h before compiling
+2. **Setup:**
    - Switch to CW mode
    - Set `CWP` (CW Pitch) in settings to match expected tone (600-700 Hz recommended)
 3. **Activate decoder:** Long-press `MODE` button to enter decoder view
@@ -547,7 +575,7 @@ Connect speaker output to A6 with proper biasing:
 - **Optimal reception:** 600 Hz tone at 25-30 WPM
 - **Pitch options:** 500, 600, 700, 800 Hz (selectable via `CWP` setting)
 - **Adaptive tracking:** Automatically adjusts to speed variations
-- **Best results with:** 
+- **Best results with:**
   - Stable signals (S5 or stronger)
   - Narrow bandwidth filter (0.5-1.0 kHz)
   - Minimal QRM/QRN
@@ -562,7 +590,7 @@ For professional-grade decoding performance:
 - **Android App:** [Morse Expert by VE3NEA](https://ve3nea.github.io/MorseExpert/)
 - Provides superior algorithm, adjustable filters, and logging capabilities
 
-**Test Signal:** 
+**Test Signal:**
 For decoder testing at 600Hz, 30WPM try: `A A A A A / T T T T T / E E E E E / N A N A N A / PARIS PARIS PARIS`
 
 **Additional Technical Details:**
@@ -618,7 +646,7 @@ For decoder testing at 600Hz, 30WPM try: `A A A A A / T T T T T / E E E E E / N 
 
 | Button | Short Press (Tap) | Long Press (Hold 1-2 sec) |
 | :--- | :--- | :--- |
-| **`MODE`** | Cycle Mode (`AM`→`SSB`→`CW`) | Toggle Sync *(SSB only)* or CW Decoder *(CW only)* |
+| **`MODE`** | Cycle Mode (`AM`→`SSB`→`CW`) | Toggle Sync *(SSB)* / CW Decoder *(CW)* / RDS *(FM)* |
 | **`STEP`** | Activate Step selection | Open/Close Favorites Menu |
 | **`BW`** | Activate Bandwidth selection | Switch Sideband *(SSB/CW only)* |
 | **`BAND+`** | Activate Band selection | Cycle bands up continuously |
