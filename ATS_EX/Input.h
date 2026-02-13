@@ -150,7 +150,6 @@ static inline void exitFavoritesMenu() {
         g_favoritesDirty = false;
     }
     g_favoritesActive = false;
-    g_lastAdjustmentTime = 0; // Reset auto-exit timer
     oled.clear();
     showStatus(true);
 }
@@ -362,6 +361,21 @@ static void handleModeLongDone() {
     }
 #endif
 
+    if (g_currentMode == FM) {
+#if ENABLE_RDS_MINI
+        // RDS takes priority over Game in FM mode
+        // Long-press MODE toggles RDS on/off
+        rdsMiniToggleUi();
+        showRfHints();
+        return;
+#elif ENABLE_GAME
+        // Game only available when RDS is compile-time disabled
+        gameToggle();
+        if (!gameIsActive()) showStatus(true);
+        return;
+#endif
+    }
+
     if (isSSB()) doSync(0);
 }
 
@@ -387,12 +401,8 @@ void switchCommand(CommandMode mode) {
     CommandMode newMode = (g_activeCommand != mode) ? mode : CMD_NONE;
     g_activeCommand = newMode;
 
-    // avoid volatile reread of g_activeCommand (use known written value)
-    if (newMode != CMD_NONE) {
-        noteUserActivity();
-    } else {
-        g_lastAdjustmentTime = 0;
-    }
+    // only update activity timestamp when entering a mode
+    if (newMode != CMD_NONE) noteUserActivity();
 
     refreshCommandIndicators();
 }
@@ -402,18 +412,17 @@ void switchCommand(CommandMode mode) {
 void resetCommandMode() {
     if (g_activeCommand != CMD_NONE) {
         g_activeCommand = CMD_NONE;
-        g_lastAdjustmentTime = 0;
         refreshCommandIndicators();
     }
 }
 
-// Calculate which settings page the index belongs to
+// Calculate which settings page the index belongs to pages are 1-based
+// Each page holds 6 items
+// This uses a small math trick instead of index / 6
+// Works correctly while SETTINGS_MAX is 131 or less
 inline uint8_t calculateSettingsPage(uint8_t index) {
-    if (index < 6) return 1;
-    if (index < 12) return 2;
-    if (index < 18) return 3;
-    if (index < 24) return 4;
-    return 5;
+    static_assert(SETTINGS_MAX <= 131, "calculateSettingsPage requires SETTINGS_MAX <= 131");
+    return (uint8_t)((((uint16_t)index * 43u) >> 8) + 1u);
 }
 
 // Draw updated settings on screen
@@ -432,7 +441,7 @@ static void navigateSettingsPage(int16_t encoder_delta) {
 
     uint8_t prev = g_SettingSelected;
 
-    // nav table in Settings.h
+    // nav table in SettingsData.h
     g_SettingSelected = getNextSettingIndex(prev, encoder_delta);
 
     uint8_t newPage = calculateSettingsPage(g_SettingSelected);
@@ -451,11 +460,13 @@ static void navigateSettingsPage(int16_t encoder_delta) {
 // Dispatch encoder actions in settings menu
 // rotation navigates list or edits a value
 static inline void processEncoderForSettings(int16_t encoder_delta) {
+    const uint8_t idx = (uint8_t)g_SettingSelected;
+
     if (g_SettingEditing) {
         // user expects inactive settings to be non-editable
-        if (isSettingActive(g_SettingSelected)) {
-            callSettingCallback(g_SettingSelected, encoder_delta);
-            DrawSetting(g_SettingSelected, false);
+        if (isSettingActive(idx)) {
+            callSettingCallback(idx, encoder_delta);
+            DrawSetting(idx, false);
         }
     } else {
         navigateSettingsPage(encoder_delta);
@@ -481,13 +492,10 @@ static inline bool processEncoderForCommands(int16_t encoder_delta) {
     case CMD_SLEEP:
         break;
     case CMD_NONE:
-        noInterrupts();
-        g_encoderCount = encoder_delta;
-        interrupts();
         if (isSSB()) {
-            doFrequencyTuneSSB();
+            doFrequencyTuneSSB(encoder_delta);
         } else {
-            doFrequencyTune();
+            doFrequencyTune(encoder_delta);
         }
         return true; // frequency change is a tuning event
     default: break;

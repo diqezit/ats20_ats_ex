@@ -9,12 +9,12 @@ public:
     // original version calls seekStation() inside the loop, which is inefficient
     // This version calls it only once, and then polls the status, which is correct
     // and much faster way to seek progress
-    void seekStationProgress(void (*showFunc)(uint16_t f), bool (*stopSeeking)(), uint8_t up_down) {
+    uint16_t seekStationProgressGetFrequency(void (*showFunc)(uint16_t f), bool (*stopSeeking)(), uint8_t up_down) {
         si47x_frequency freq;
-        long elapsed_seek = millis();
+        uint32_t elapsed_seek = millis();
 
         if (lastMode == SSB_CURRENT_MODE)
-            return;
+            return (uint16_t)currentWorkFrequency;
 
         seekStation(up_down, 0);
         delay(100); // Wait for seek to start
@@ -30,13 +30,13 @@ public:
 
             if (currentStatus.resp.ERR || (stopSeeking && stopSeeking())) {
                 getStatus(0, 1); // '1' in the second argument cancels the ongoing seek.
-                return;
+                return (uint16_t)currentWorkFrequency;
             }
 
             // Check timeout
             if ((millis() - elapsed_seek) > maxSeekTime) {
                 getStatus(0, 1); // Cancel on timeout
-                return;
+                return (uint16_t)currentWorkFrequency;
             }
 
         } while (!currentStatus.resp.STCINT); // Wait for Seek/Tune Complete Interrupt
@@ -46,24 +46,85 @@ public:
         freq.raw.FREQH = currentStatus.resp.READFREQH;
         freq.raw.FREQL = currentStatus.resp.READFREQL;
         currentWorkFrequency = freq.value;
+
+        return (uint16_t)currentWorkFrequency;
     }
 
-    // Overloaded version without stopSeeking callback (matches original library interface)
-    void seekStationProgress(void (*showFunc)(uint16_t f), uint8_t up_down) {
-        seekStationProgress(showFunc, nullptr, up_down);
+    void seekStationProgress(void (*showFunc)(uint16_t f), bool (*stopSeeking)(), uint8_t up_down) {
+        (void)seekStationProgressGetFrequency(showFunc, stopSeeking, up_down);
     }
+
+    // ====================================================================================
+    // ============================== RDS MINI ============================================
+    // ====================================================================================
+    //
+    // Minimal RDS support intended for ATmega328P size limits.
+    // Goals:
+    //  - enable RDS on FM without pulling full setRdsConfig()/getRdsStatus()/text buffers
+    //  - query FM_RDS_STATUS with a tiny routine
+    //  - provide accessors to BlockB/BlockC/BlockD for lightweight decoding in external module
+    //
+    // IMPORTANT:
+    //  - Do NOT call heavy RDS functions elsewhere (setRdsConfig/getRdsStatus/getRdsText*/getRdsAllData/getRdsTime),
+    //    otherwise LTO will link a lot more code and you will overflow Flash.
+    // ====================================================================================
+
+    void rdsEnableMini() {
+        // Enable RDS on FM with moderate error thresholds and FIFO count 1
+        if (currentTune != FM_TUNE_FREQ) return;
+
+        // FM_RDS_CONFIG:
+        //  - low byte: RDSEN=1 -> 0x01
+        //  - high byte: BLETHA/B/C/D = 2 -> 0xAA (10101010)
+        sendProperty(FM_RDS_CONFIG, 0xAA01);
+        sendProperty(FM_RDS_INT_FIFO_COUNT, 1);
+    }
+
+    bool rdsQueryMini() {
+        // Minimal equivalent of getRdsStatus(0,0,0)
+        // - no buffer clear
+        // - no ERR retry loop
+        // - reads 13 bytes into currentRdsStatus
+        if (currentTune != FM_TUNE_FREQ) return false;
+
+        waitToSend();
+
+        Wire.beginTransmission(deviceAddress);
+        Wire.write(FM_RDS_STATUS);
+        Wire.write((uint8_t)0x00); // INTACK=0, MTFIFO=0, STATUSONLY=0
+        Wire.endTransmission();
+
+        waitToSend();
+
+        Wire.requestFrom((uint8_t)deviceAddress, (uint8_t)13);
+        for (uint8_t i = 0; i < 13; i++) {
+            currentRdsStatus.raw[i] = (uint8_t)Wire.read();
+        }
+
+        return !currentRdsStatus.resp.ERR;
+    }
+
+    // Accessors for lightweight decoders
+    inline uint16_t rdsGetBlockB() const {
+        return (uint16_t)((uint16_t)currentRdsStatus.resp.BLOCKBH << 8) |
+            (uint16_t)currentRdsStatus.resp.BLOCKBL;
+    }
+    inline uint8_t rdsGetBlockDH() const { return currentRdsStatus.resp.BLOCKDH; }
+    inline uint8_t rdsGetBlockDL() const { return currentRdsStatus.resp.BLOCKDL; }
+    inline uint8_t rdsGetBlockCH() const { return currentRdsStatus.resp.BLOCKCH; }
+    inline uint8_t rdsGetBlockCL() const { return currentRdsStatus.resp.BLOCKCL; }
 
     // ====================================================================================
     // ============================== SSB PATCH LOGIC ====================================
     // ====================================================================================
     // This section implements compressed SSB (Single Side Band) patch loading for SI4735
     // The patch enables advanced SSB features and improves reception quality
-    // 
+    //
     // The compression algorithm works by:
     // 1. Storing only non-zero bytes from the original patch data
     // 2. Using offset tables to track special command positions (0x15 vs 0x16)
     // 3. Handling "cutoff" positions where data is split across two I2C transactions
-    // 
+    //
     // Data structure:
     // - compressed_ssb_patch_content: actual non-zero patch bytes
     // - cmd_0x15_offsets: positions where command 0x15 is used (otherwise 0x16)
@@ -109,12 +170,12 @@ private:
 
             // This compacts two pieces of information into one byte:
             // 1) the length 2) the number of zeros after a follow-up 0x15 command
-            if (non_zero_bytes < 100)   //Den
-              num_zero_after_0x15 = 2;  //Den
-            else {                      //Den
-              num_zero_after_0x15 = 1;  //Den
-              non_zero_bytes -= 100;    //Den
-            }                           //Den
+            if (non_zero_bytes < 100)       //Den
+                num_zero_after_0x15 = 2;    //Den
+            else {                          //Den
+                num_zero_after_0x15 = 1;    //Den
+                non_zero_bytes -= 100;      //Den
+            }                               //Den
 
         } else {
             non_zero_bytes = 8;
@@ -264,8 +325,8 @@ public:
         sendSSBModeProperty();
     }
 
-    #if TEST
-    // 
+#if TEST
+    //
     // -----------------------------------------------------------------------------
     // Fast SI4735 reset + setup without Arduino pinMode()/digitalWrite()
     // 1) Reduce Flash usage (avoid pulling wiring_digital.c.o when possible)
@@ -277,18 +338,22 @@ public:
     // - If you move RESET_PIN to another Arduino pin, you must change the port/bit
     // -----------------------------------------------------------------------------
 
+    static void __attribute__((noinline)) delay10ms() {
+        delay(10);
+    }
+
     static inline void resetFastD12() {
         // D12 = PB4 on ATmega328P
         // DDRB controls direction, PORTB controls output level
 
         DDRB |= _BV(4);      // set PB4 as OUTPUT
-        delay(10);
+        delay10ms();
 
         PORTB &= ~_BV(4);    // drive RESET LOW
-        delay(10);
+        delay10ms();
 
         PORTB |= _BV(4);     // drive RESET HIGH
-        delay(10);
+        delay10ms();
     }
 
     // -----------------------------------------------------------------------------
@@ -300,9 +365,7 @@ public:
     // - 1 = AM (LW/MW/SW)
     // -----------------------------------------------------------------------------
     void setup(uint8_t resetPin, uint8_t defaultFunction) {
-        Wire.begin();
-
-        this->resetPin = resetPin;
+        (void)resetPin;
 
         // Configure POWER_UP arguments exactly as intended by the original library:
         // CTSIEN   = 0 (no CTS interrupt)
@@ -342,7 +405,9 @@ public:
         // Assumes resetPin is D12 (PB4)
         resetFastD12();
 
-        Wire.begin();
+        // Wire.begin() is expected to be called by OLED init earlier in setup()
+        // (If init order changes, restore Wire.begin() here)
+        // Wire.begin();
 
         // Check 0x11 (SEN low)
         Wire.beginTransmission(SI473X_ADDR_SEN_LOW);
@@ -363,5 +428,5 @@ public:
         // Not found
         return 0;
     }
-    #endif
+#endif
 };

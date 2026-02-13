@@ -301,61 +301,47 @@ void SI4735::reset() {
 /**
  * @ingroup group06 Wait to send command
  *
- * @brief  Wait for the si473x is ready (Clear to Send (CTS) status bit have to be 1).
+ * @brief Wait for the si473x is ready (Clear to Send (CTS) status bit have to be 1)
  *
- * @details This function should be used before sending any command to a SI47XX device.
+ * @details This function should be used before sending any command to a SI47XX device
+ * @details Polls the status byte over I2C until CTS bit 7 is set
  *
- * @see Si47XX PROGRAMMING GUIDE; AN332 (REV 1.0); pages 63, 128
+ * @details Two fixes over the original code
+ *
+ * @details 1 Spin limit prevents infinite loop if CTS never arrives
+ *            Default 5000 iterations gives about 3 seconds timeout
+ *            This covers the slowest command POWER_UP (110ms) with 22x margin
+ *
+ * @details 2 available() check handles microWire NACK behavior
+ *            Standard Wire read() returns 0xFF on empty buffer so bit 0x80 exits the loop
+ *            microWire read() returns 0 on empty buffer so the loop would spin all 5000 times
+ *            Checking available() catches both cases and exits immediately when chip is absent
+ *
+ * @see Si47XX PROGRAMMING GUIDE AN332 REV 1.0 pages 63 73 142
+ * @see AN332 Section 10 Timing Tables 31 to 33
  */
-//void SI4735::waitToSend() {
-//    do {
-//        delayMicroseconds(MIN_DELAY_WAIT_SEND_LOOP); // Need check the minimum value.
-//        Wire.requestFrom(deviceAddress, 1);
-//    } while (!(Wire.read() & 0B10000000));
-//}
-
-// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
 #ifndef SI4735_CTS_SPINS
-// Max number of polls before we stop waiting for CTS
-// 5000 with 300 us delay is about 1.5 seconds + I2C
+ // Max number of CTS polls before giving up
+ // Each iteration takes about 500 to 630 us (300 us delay plus I2C at 61.5 kHz)
+ // 5000 spins is about 3 seconds which covers POWER_UP 110 ms with plenty of margin
 #define SI4735_CTS_SPINS 5000
 #endif
 
-// waitToSend waits until the SI4735 is ready for the next command
-// The chip reports readiness in one status byte
-// CTS bit 0x80 means "safe to send next command" (AN332)
-// ERR bit 0x40 means the previous command failed, but it is NOT a "ready" indicator
-// The original library could wait forever if CTS never becomes 1
-// This version limits the wait using a spin counter
-// Each loop waits MIN_DELAY_WAIT_SEND_LOOP then reads one status byte
-// If no byte was received it retries
-// It returns only when CTS is set or when the spin limit is reached
-// This does not fix a hard I2C lock where requestFrom itself blocks
-void SI4735::waitToSend(void) const {
+void SI4735::waitToSend() { // func partially not orig and edited
     uint16_t spins = SI4735_CTS_SPINS;
 
-    while (spins--) {
+    do {
         delayMicroseconds(MIN_DELAY_WAIT_SEND_LOOP);
+        Wire.requestFrom(deviceAddress, 1);
 
-        // Cast to int to force the intended microWire requestFrom overload
-        if (Wire.requestFrom((int)deviceAddress, (int)1) != 1)
-            continue;
+        // If chip did not ACK then it is not on the bus
+        // microWire zeros _requested_bytes on NACK so available() returns 0
+        // No point polling a missing chip so bail out right away
+        if (!Wire.available()) return;
 
-        uint8_t st = (uint8_t)Wire.read();
-
-        if (st & 0x80)  // CTS only
-            return;
-    }
-
-    // Timeout waiting for CTS
-    // Do NOT continue sending commands if CTS never arrived
-    wdt_enable(WDTO_15MS);
-    for (;;) {}
+    } while (!(Wire.read() & 0x80) && --spins);
 }
-
-// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-
 
 /** @defgroup group07 Device Setup and Start up */
 
@@ -894,32 +880,16 @@ void SI4735::setFM(uint16_t fromFreq, uint16_t toFreq, uint16_t initialFreq, uin
  * @param AMPLFLT Enables the AM Power Line Noise Rejection Filter.
  */
 void SI4735::setBandwidth(uint8_t AMCHFLT, uint8_t AMPLFLT) {
-    si47x_bandwidth_config filter;
-    si47x_property property;
-
     if (currentTune != AM_TUNE_FREQ) // Only for AM/SSB mode
         return;
 
     if (AMCHFLT > 6)
         return;
 
-    filter.raw[0] = filter.raw[1] = 0;
+    const uint16_t val = ((uint16_t)(AMPLFLT & 1) << 8) | (uint16_t)(AMCHFLT & 0x0F);
 
-    property.value = AM_CHANNEL_FILTER;
+    sendProperty(AM_CHANNEL_FILTER, val);
 
-    filter.param.AMCHFLT = AMCHFLT;
-    filter.param.AMPLFLT = AMPLFLT;
-
-    waitToSend();
-    this->volume = volume;
-    Wire.beginTransmission(deviceAddress);
-    Wire.write(SET_PROPERTY);
-    Wire.write(0x00);                  // Always 0x00
-    Wire.write(property.raw.byteHigh); // High byte first
-    Wire.write(property.raw.byteLow);  // Low byte after
-    Wire.write(filter.raw[1]);         // Raw data for AMCHFLT and
-    Wire.write(filter.raw[0]);         // AMPLFLT
-    Wire.endTransmission();
     waitToSend();
 }
 
@@ -1417,32 +1387,32 @@ void SI4735::setSeekFmRssiThreshold(uint16_t value) {
  */
 
  /**
-  * @ingroup group10 Generic send property
-  *
-  * @brief Sends (sets) property to the SI47XX
-  *
-  * @details This method is used for others to send generic properties and params to SI47XX
-  *
-  * @see Si47XX PROGRAMMING GUIDE; AN332 (REV 1.0); pages 68, 124 and  133.
-  * @see setProperty, sendCommand, getProperty, getCommandResponse
-  *
-  * @param propertyNumber property number (example: RX_VOLUME)
-  * @param parameter   property value that will be seted
-  */
-void SI4735::sendProperty(uint16_t propertyNumber, uint16_t parameter) {
-    si47x_property property;
-    si47x_property param;
-
-    property.value = propertyNumber;
-    param.value = parameter;
+   * @ingroup group10 Generic send property
+   *
+   * @brief Sends (sets) property to the SI47XX
+   *
+   * @details This method is used for others to send generic properties and params to SI47XX
+   *
+   * @see Si47XX PROGRAMMING GUIDE; AN332 (REV 1.0); pages 68, 124 and  133.
+   * @see setProperty, sendCommand, getProperty, getCommandResponse
+   *
+   * @param propertyNumber property number (example: RX_VOLUME)
+   * @param parameter   property value that will be seted
+   * 
+   * If you look at the asm code this function passes to write(uint8_t) and does not use union-temporary variables for now
+   */
+void SI4735::sendProperty(uint16_t propertyNumber, uint16_t parameter) { // func not orig and edited
     waitToSend();
     Wire.beginTransmission(deviceAddress);
-    Wire.write(SET_PROPERTY);
-    Wire.write(0x00);
-    Wire.write(property.raw.byteHigh); // Send property - High byte - most significant first
-    Wire.write(property.raw.byteLow);  // Send property - Low byte - less significant after
-    Wire.write(param.raw.byteHigh);    // Send the argments. High Byte - Most significant first
-    Wire.write(param.raw.byteLow);     // Send the argments. Low Byte - Less significant after
+    Wire.write((uint8_t)SET_PROPERTY);
+    Wire.write((uint8_t)0x00);
+
+    Wire.write((uint8_t)(propertyNumber >> 8));
+    Wire.write((uint8_t)(propertyNumber & 0xFF));
+
+    Wire.write((uint8_t)(parameter >> 8));              
+    Wire.write((uint8_t)(parameter & 0xFF));
+
     Wire.endTransmission();
     delayMicroseconds(550);
 }
@@ -1705,16 +1675,14 @@ void SI4735::setFmStereoOn() {
  *
  * @see Si47XX PROGRAMMING GUIDE; AN332 (REV 1.0); page 299.
  */
-void SI4735::disableFmDebug() {
-    Wire.beginTransmission(deviceAddress);
-    Wire.write(0x12);
-    Wire.write(0x00);
-    Wire.write(0xFF);
-    Wire.write(0x00);
-    Wire.write(0x00);
-    Wire.write(0x00);
-    Wire.endTransmission();
-    delayMicroseconds(2500);
+void SI4735::disableFmDebug() { // func not orig and edited
+    // The sequence 0x12 0x00 0xFF 0x00 0x00 0x00 is:
+    // SET_PROPERTY + reserved 0x00 + property 0xFF00 + value 0x0000
+    sendProperty((uint16_t)0xFF00, (uint16_t)0x0000);
+
+    // Original code delayed 2500 us after the transmission
+    // sendProperty already delays 550 us, so add the remaining time
+    delayMicroseconds(1950);
 }
 
 /** @defgroup group13 Audio setup */
@@ -2713,9 +2681,15 @@ void SI4735::setSSBBfo(int offset) {
  * @param SMUTESEL SSB Soft-mute Based on RSSI or SNR.
  * @param DSP_AFCDIS DSP AFC Disable or enable; 0=SYNC MODE, AFC enable; 1=SSB MODE, AFC disable.
  */
-void SI4735::setSSBConfig(uint8_t AUDIOBW, uint8_t SBCUTFLT, uint8_t AVC_DIVIDER, uint8_t AVCEN, uint8_t SMUTESEL, uint8_t DSP_AFCDIS) {
-    if (currentTune == FM_TUNE_FREQ) // Only AM/SSB mode
-        return;
+void SI4735::setSSBConfig(uint8_t AUDIOBW, uint8_t SBCUTFLT,
+    uint8_t AVC_DIVIDER, uint8_t AVCEN,
+    uint8_t SMUTESEL, uint8_t DSP_AFCDIS) { // func not orig and edited
+    if (currentTune == FM_TUNE_FREQ) return;
+
+    // Clear reserved bits explicitly before filling the bitfield
+    // Can reduce RMW sequences on AVR in some builds
+    currentSSBMode.raw[0] = 0;
+    currentSSBMode.raw[1] = 0;
 
     currentSSBMode.param.AUDIOBW = AUDIOBW;
     currentSSBMode.param.SBCUTFLT = SBCUTFLT;
@@ -2901,19 +2875,11 @@ void SI4735::setSSB(uint16_t fromFreq, uint16_t toFreq, uint16_t initialFreq, ui
  * @brief Just send the property SSB_MOD to the device.  Internal use (privete method).
  */
 void SI4735::sendSSBModeProperty() {
-    si47x_property property;
-    property.value = SSB_MODE;
-    waitToSend();
-    Wire.beginTransmission(deviceAddress);
-    Wire.write(SET_PROPERTY);
-    Wire.write(0x00);                  // Always 0x00
-    Wire.write(property.raw.byteHigh); // High byte first
-    Wire.write(property.raw.byteLow);  // Low byte after
-    Wire.write(currentSSBMode.raw[1]); // SSB MODE params; freq. high byte first
-    Wire.write(currentSSBMode.raw[0]); // SSB MODE params; freq. low byte after
+    // sendProperty already frames SET_PROPERTY and applies the required post-send delay
+    const uint16_t val = ((uint16_t)currentSSBMode.raw[1] << 8)
+        | (uint16_t)currentSSBMode.raw[0];
 
-    Wire.endTransmission();
-    delayMicroseconds(550);
+    sendProperty(SSB_MODE, val);
 }
 
 /**

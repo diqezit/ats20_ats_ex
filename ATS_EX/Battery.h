@@ -60,21 +60,41 @@ static inline uint8_t getBatteryPin() {
 
 // https://github.com/diqezit/ats20_ats_ex/issues/16
 
+static uint8_t __attribute__((noinline))
+calcBatterySegmentPct(uint16_t adc_value,
+    uint16_t start_adc,
+    uint8_t pct_delta,
+    uint8_t adc_delta) {
+    // Caller guarantees adc_value > start_adc in all segment paths
+    const uint16_t delta = (uint16_t)(adc_value - start_adc);
+    const uint16_t num = (uint16_t)(delta * (uint16_t)pct_delta);
+    return (uint8_t)(num / (uint16_t)adc_delta);
+}
+
 // useful capacity estimate by modeling the battery non-linear discharge curve
 static inline uint8_t calculateRawPercent(uint16_t adc_value) {
     if (adc_value >= BATT_ADC_FULL)  return 100;
     if (adc_value <= BATT_ADC_EMPTY) return 0;
 
     if (adc_value > BATT_ADC_SHOULDER) {
-        return BATT_PCT_AT_SHOULDER + ((uint16_t)(adc_value - BATT_ADC_SHOULDER) * PCT_DELTA_TOP_DROP) / ADC_DELTA_TOP_DROP;
+        return (uint8_t)(BATT_PCT_AT_SHOULDER +
+            calcBatterySegmentPct(adc_value, BATT_ADC_SHOULDER,
+                PCT_DELTA_TOP_DROP, ADC_DELTA_TOP_DROP));
     }
     if (adc_value > BATT_ADC_MID) {
-        return BATT_PCT_AT_MID + ((uint16_t)(adc_value - BATT_ADC_MID) * PCT_DELTA_UPPER_PLATEAU) / ADC_DELTA_UPPER_PLATEAU;
+        return (uint8_t)(BATT_PCT_AT_MID +
+            calcBatterySegmentPct(adc_value, BATT_ADC_MID,
+                PCT_DELTA_UPPER_PLATEAU, ADC_DELTA_UPPER_PLATEAU));
     }
     if (adc_value > BATT_ADC_KNEE) {
-        return BATT_PCT_AT_KNEE + ((uint16_t)(adc_value - BATT_ADC_KNEE) * PCT_DELTA_LOWER_PLATEAU) / ADC_DELTA_LOWER_PLATEAU;
+        return (uint8_t)(BATT_PCT_AT_KNEE +
+            calcBatterySegmentPct(adc_value, BATT_ADC_KNEE,
+                PCT_DELTA_LOWER_PLATEAU, ADC_DELTA_LOWER_PLATEAU));
     }
-    return 0 + ((uint16_t)(adc_value - BATT_ADC_EMPTY) * PCT_DELTA_FINAL_DROP) / ADC_DELTA_FINAL_DROP;
+
+    // FINAL DROP (base = 0)
+    return calcBatterySegmentPct(adc_value, BATT_ADC_EMPTY,
+        PCT_DELTA_FINAL_DROP, ADC_DELTA_FINAL_DROP);
 }
 
 // Persistent state variables for the filter
@@ -119,15 +139,27 @@ static inline void updateStablePercent() {
 // state and shows it on the display if the timer has elapsed or if forced.
 void updateAndShowBattery(bool forceShow) {
     if (!g_voltagePinConnected) return;
+
     updateStablePercent();
-    static uint32_t lastChargeShow = 0;
-    if ((millis() - lastChargeShow) > BATT_DISPLAY_UPDATE_INTERVAL_MS || forceShow) {
+
+    // 16-bit timestamp is enough for a 10s UI interval and saves code vs 32-bit math
+    // Wrap-around (65.5s) is harmless here
+    static uint16_t lastChargeShow16 = 0;
+
+    // Redraw immediately when percent changed 
+    static uint8_t lastShown = 255;
+    if (g_stableBatteryPercent != lastShown) forceShow = true;
+
+    const uint16_t now16 = (uint16_t)millis();
+
+    if ((uint16_t)(now16 - lastChargeShow16) > (uint16_t)BATT_DISPLAY_UPDATE_INTERVAL_MS || forceShow) {
 #if ENABLE_CW_DECODER
         if (!g_cwViewActive) showChargeOnDisplay();
 #else
         showChargeOnDisplay();
 #endif
-        lastChargeShow = millis();
+        lastChargeShow16 = now16;
+        lastShown = g_stableBatteryPercent;
     }
 }
 #endif

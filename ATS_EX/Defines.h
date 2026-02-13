@@ -15,16 +15,16 @@
 //
 // 10 - 25       | 16 B     | 7 B      | 9 B     | EEPROM_HEADER_START            | ReceiverHeader (7B) + reserve
 //
-// 26 - 241      | 216 B    | 216 B    | 0 B     | EEPROM_BANDS_START             | 36 bands state (36 * 6B)
+// 26 - 289      | 264 B    | 264 B    | 0 B     | EEPROM_BANDS_START             | 44 bands state (44 * 6B)
 //
-// 242 - 271     | 30 B     | 29 B     | 1 B     | EEPROM_SETTINGS_START          | Settings params (SETTINGS_MAX=29)
+// 290 - 319     | 30 B     | 30 B     | 0 B     | EEPROM_SETTINGS_START          | Settings params (SETTINGS_MAX=30)
 //
-// 272 - 280     | 9 B      | 9 B      | 0 B     | EEPROM_MODE_SETTINGS_START     | Mode-dependent settings (3*3)
+// 320 - 328     | 9 B      | 9 B      | 0 B     | EEPROM_MODE_SETTINGS_START     | Mode-dependent settings (3*3)
 //
-// 281 - 380     | 100 B    | 100 B    | 0 B     | EEPROM_FAVORITES_START         | Favorites (20 * 5B)  (*see note)
-// 381           | 1 B      | 1 B      | 0 B     | EEPROM_FAVORITES_COUNT         | Favorite count
+// 329 - 428     | 100 B    | 100 B    | 0 B     | EEPROM_FAVORITES_START         | Favorites (20 * 5B)  (*see note)
+// 429           | 1 B      | 1 B      | 0 B     | EEPROM_FAVORITES_COUNT         | Favorite count
 //
-// 382 - 1023    | 642 B    | 0 B      | 642 B   | (free)                         | Free space (ATmega328P EEPROM)
+// 430 - 1023    | 594 B    | 0 B      | 594 B   | (free)                         | Free space (ATmega328P EEPROM)
 //
 // =================================================================================================
 
@@ -42,29 +42,28 @@ constexpr auto EEPROM_VERSION_ADDRESS = 1;
 // --------------- EEPROM Block Start Addresses ----------------------------------------------------
 // =================================================================================================
 // ReceiverHeader:      7 bytes
-// BandStatePacked:     6 bytes (x36 bands = 216 bytes)
-// Settings:            29 bytes used (SETTINGS_MAX = 29 items * 1 byte each), 30 bytes reserved
+// BandStatePacked:     6 bytes (x44 bands = 264 bytes)
+// Settings:            30 bytes used (SETTINGS_MAX = 30 items * 1 byte each)
 // ModeSettings:        9 bytes (MODE_SETTINGS_COUNT * MODE_CONTEXT_COUNT = 3 * 3)
 // FavoriteStation:     5 bytes (x20 stations = 100 bytes)
 // FavoritesCount:      1 byte
 
 constexpr auto EEPROM_HEADER_START = 10;                // Used: 7B   (reserved block is 16B: 10..25)
-constexpr auto EEPROM_BANDS_START = 26;                 // Used: 216B (26..241)
-constexpr auto EEPROM_SETTINGS_START = 242;             // Used: 29B  (242..270), reserved up to 271
-constexpr auto EEPROM_MODE_SETTINGS_START = 272;        // Used: 9B   (272..280)
-constexpr auto EEPROM_FAVORITES_START = 281;            // Used: 100B (281..380)
-constexpr auto EEPROM_FAVORITES_COUNT = 381;            // Used: 1B   (381)
-
+constexpr auto EEPROM_BANDS_START = 26;                 // Used: 264B (26..289)
+constexpr auto EEPROM_SETTINGS_START = 290;             // Used: 30B  (290..319)
+constexpr auto EEPROM_MODE_SETTINGS_START = 320;        // Used: 9B   (320..328)
+constexpr auto EEPROM_FAVORITES_START = 329;            // Used: 100B (329..428)
+constexpr auto EEPROM_FAVORITES_COUNT = 429;            // Used: 1B   (429)
 
 // Increment APP_VERSION to force EEPROM reset due to layout changes
-constexpr auto APP_VERSION = 07;
+constexpr auto APP_VERSION = 71;
 
 
 // =================================================================================================
 // --------------- UI Strings ----------------------------------------------------------------------
 // =================================================================================================
 
-#define APP_NAME_LINE1 F("ATS-20+ V7.0.2")
+#define APP_NAME_LINE1 F("ATS-20+ V7.1")
 #define APP_NAME_LINE2 F("ATS EX")
 
 
@@ -72,11 +71,11 @@ constexpr auto APP_VERSION = 07;
 // --------------- I2C / Bus -----------------------------------------------------------------------
 // =================================================================================================
 
-// I2C SCL base rate for shared bus (OLED + Si4735)
-// Fixed to 77 kHz as a compromise: faster OLED updates than 35/50 kHz,
-// while keeping the fundamental below 150 kHz (Si4735 lower limit)
-// First harmonics: 77, 154, 231, 308 kHz
-constexpr uint32_t I2C_BASE_HZ = 77000UL;
+// I2C SCL base rate for the shared bus OLED and Si4735
+//
+// 61.5 kHz keeps main harmonics away from the LW band and common 9 kHz channel centers
+// At 16 MHz TWBR 122 gives real SCL about 61.5 kHz
+constexpr uint32_t I2C_BASE_HZ = 61500UL;
 
 
 // =================================================================================================
@@ -98,14 +97,14 @@ constexpr auto SEEK_TIME = 65535UL;                     // 65535 ms = 65.535 sec
 constexpr auto RSSI_POLL_INTERVAL_MS = 1000UL;          // How often to check RSSI/Stereo when idle.
 constexpr auto RSSI_POLL_DELAY_AFTER_TUNE_MS = 500UL;   // Debounce delay after tuning to let signal settle.
 
-// delay (in ms) to wait after the encoder stops turning before sending final frequency to the chip
-constexpr auto FREQ_UPDATE_DELAY_MS = 30UL;
+// Encoder stop delay before committing the new frequency to the chip
+constexpr auto FREQ_UPDATE_DELAY_MS = 50UL;
 
-// if the frequency change since chip update exceeds this threshold (kHz), send immediately
+// If the frequency jump is large send immediately
 constexpr auto FREQ_FORCE_UPDATE_THRESHOLD_KHZ = 50;
 
-// absolute minimum time between setFrequency calls (protect I2C / CTS wait)
-constexpr auto MIN_SETFREQ_INTERVAL_MS = 25UL;
+// Minimum time between setFrequency calls to protect I2C and CTS polling
+constexpr auto MIN_SETFREQ_INTERVAL_MS = 40UL;
 
 
 // =================================================================================================
@@ -148,7 +147,6 @@ constexpr auto MIN_SETFREQ_INTERVAL_MS = 25UL;
 
 // Features
 #define ENABLE_FAVORITES 1         // 1=Favorites enabled
-#define DISABLE_FM       0         // not implemented yet
 
 #define ENABLE_BATTERY_MONITOR 1   // 1=battery monitor enabled
 
@@ -167,6 +165,9 @@ constexpr auto MIN_SETFREQ_INTERVAL_MS = 25UL;
 // EXPERIMENTAL: CW (Morse) decoder view
 #define ENABLE_CW_DECODER 0
 
+#define ENABLE_RDS_MINI  1         // 1=RDS RadioText on FM (requires ~500B Flash)
+
+#define ENABLE_GAME 0              // 1=enable Pong mini game, 0=disable
 
 // =================================================================================================
 // --------------- Audio Enhancement Profile Constants ---------------------------------------------
@@ -197,8 +198,8 @@ constexpr uint16_t FM_PROP_SOFTMUTE_ATT_RATE = 32700;
 
 // FM Soft Mute defaults (AN332 safe defaults)
 // Used as fallback when EEPROM contains invalid data (0xFF)
-constexpr uint8_t FM_SOFT_MUTE_DEFAULT_ATT = 16;               // 16 dB attenuation
-constexpr uint8_t FM_SOFT_MUTE_DEFAULT_THR = 4;                // 4 dB SNR threshold
+constexpr uint8_t FM_SOFT_MUTE_DEFAULT_ATT = 16;               // dB attenuation
+constexpr uint8_t FM_SOFT_MUTE_DEFAULT_THR = 0;                // dB SNR threshold
 
 
 // -------------------------------------------------------------------------------------------------

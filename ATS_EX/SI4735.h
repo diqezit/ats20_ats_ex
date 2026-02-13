@@ -21,7 +21,7 @@
 #define _SI4735_H
 
 #include <Arduino.h>
-#include <microWire.h>
+#include "microWire.h"
 #include <avr/wdt.h>
 
 #define POWER_UP_FM 0  // FM
@@ -1116,7 +1116,7 @@ protected:
 public:
     SI4735();
     void reset(void);
-    void waitToSend(void) const;
+    void waitToSend();
 
     void setGpioCtl(uint8_t GPO1OEN, uint8_t GPO2OEN, uint8_t GPO3OEN);
     void setGpio(uint8_t GPO1LEVEL, uint8_t GPO2LEVEL, uint8_t GPO3LEVEL);
