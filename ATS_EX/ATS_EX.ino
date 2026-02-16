@@ -67,12 +67,12 @@ GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 
 // read-modify-write encoder counter under a short critical section
 // avoids ISR races and returns consumed delta in one shot
-inline int16_t getAndResetEncoderCount(volatile int16_t& counter) {
+int16_t __attribute__((noinline)) getAndResetEncoderCount(volatile int16_t& counter) {
     int16_t value;
     uint8_t oldSREG = SREG;
     cli();
     value = counter;
-    counter -= value;
+    counter = 0;
     SREG = oldSREG;
     return value;
 }
@@ -131,51 +131,39 @@ void syncModeDependentSettings(bool load) {
 // ===== TUNING CONTROLS ====================
 // ==========================================
 
-// handles tuning step adjustment
-// updates the current band state and applies it to the IC
+// adjust tuning step for current mode and apply to SI4735
 static __attribute__((noinline))
 void doStep(int8_t v) {
     Band* band = currentBandPtr();
-
     int8_t* idx;
-    int8_t     max;
-    const int16_t* table = nullptr;
+    int8_t  max;
 
     switch (g_currentMode) {
     case FM:
-        // cast address of unsigned index to a signed pointer
-        // tricks the type system allowing unified processing in doSwitchLogic
-        idx = &band->stepIdxFM;
+        idx = (int8_t*)&band->stepIdxFM;
         max = g_lastStepFM;
-        table = (const int16_t*)g_tabStepFM;
         break;
 
-    case LSB:
-    case USB:
-    case CW: // CW shares the same step settings as SSB
-        idx = &band->stepIdxSSB;
+    case LSB: case USB: case CW:
+        idx = (int8_t*)&band->stepIdxSSB;
         max = SSB_STEPS_COUNT - 1;
-        // for SSB/CW step is not sent to IC step register,
-        // as tuning is done via BFO adjustments
-        // table pointer remains null
         break;
 
     default: // AM
-        idx = &band->stepIdxAM;
+        idx = (int8_t*)&band->stepIdxAM;
         max = IS_LW_MW(band->bandType) ? 3 : (AM_STEPS_COUNT - 1);
-        table = (const int16_t*)g_tabStep;
         break;
     }
 
-    // idx is an int8_t pointer - dereferencing it provides a value
-    // that can be correctly passed by reference to doSwitchLogic
     doSwitchLogic(*idx, 0, max, v);
+    swLinkSyncCore(true);
 
-    // Link SW step settings across all SW segments if enabled
-    swLinkUpdateMasterFromCurrentBand();
-
-    // frequency step to the SI4735 only in AM/FM modes (SSB/CW use BFO, no hardware step)
-    if (table) g_si4735.setFrequencyStep((uint16_t)table[(uint8_t)(*idx)]);
+    // SSB/CW tunes via BFO adjustments so no hardware step needed
+    const uint8_t i = (uint8_t)*idx;
+    if (g_currentMode == FM)
+        g_si4735.setFrequencyStep((uint16_t)(uint8_t)g_tabStepFM[i]);
+    else if (g_currentMode == AM)
+        g_si4735.setFrequencyStep(g_tabStep[i]);
 
     showStep();
 }
@@ -214,7 +202,7 @@ static inline void doBandwidth(uint8_t v) {
     }
 
     // Link SW bandwidth settings across all SW segments if enabled
-    swLinkUpdateMasterFromCurrentBand();
+    swLinkSyncCore(true);
 
     showBandwidth();
 }
@@ -330,7 +318,7 @@ static inline void performFrequencyUpdateCheck(uint32_t now) {
 // =-=-=-=-=-=-=-=-= Encoder coalesce helper =-=-=-=-=-=-=-=-=
 
 // Handles the delayed frequency update for AM/FM to prevent flooding the chip
-static void handleDelayedFrequencyUpdate() {
+static void __attribute__((noinline)) handleDelayedFrequencyUpdate() {
     if (autoDisplayOff) return;              // only deep sleep mode
     if (!g_processFreqChange || isSSB()) return;
 
@@ -340,22 +328,21 @@ static void handleDelayedFrequencyUpdate() {
 // =-=-=-=-=-=-=-=-= RSSI helpers =-=-=-=-=-=-=-=-=
 
 // skip AM polling when disabled or right after user action to avoid clicks
-inline static __attribute__((always_inline))
-bool amRssiPollingAllowed(uint32_t now_ms) {
-    uint16_t now_s = (uint16_t)(now_ms / 1000);
+static inline __attribute__((always_inline))
+bool amRssiPollingAllowed(uint16_t now_s) {
     return (uint16_t)(now_s - g_lastUserActivityTime) >= 1;
 }
 
 // Fetches signal quality (RSSI) using mode-specific commands
 // SSB/CW poll RSQ (0x43) and return RSSI (RESP4) after SSB patch is loaded
-static uint8_t getSignalQuality() {
+static uint8_t getSignalQuality(uint16_t now_s) {
     // RSSI disabled for AM-family (AM/SSB/CW)
     if (g_currentMode != FM && getSettingParam(RSSI_AM_Off) == 1)
         return UI_SIGNAL_NO_VALUE;
 
     switch (g_currentMode) {
     case AM:
-        if (!amRssiPollingAllowed(millis()))
+        if (!amRssiPollingAllowed(now_s))
             return g_signalQualityValue;
 
         g_si4735.getCurrentReceivedSignalQuality(0);
@@ -372,8 +359,8 @@ static uint8_t getSignalQuality() {
 
 // Polls for new signal quality and updates UI only on change
 // also triggers squelch logic after each poll
-static inline void updateSignalQuality() {
-    uint8_t new_value = getSignalQuality();
+static inline void updateSignalQuality(uint16_t now_s) {
+    uint8_t new_value = getSignalQuality(now_s);
     updateIfChanged(g_signalQualityValue, new_value, showSignalQuality);
     handleSquelch();
 }
@@ -395,15 +382,15 @@ inline static __attribute__((always_inline)) bool uiBusy() {
 }
 
 // Checks for and handles signal quality and stereo indicator updates
-static inline void handleSignalAndStereoUpdates() {
+static void __attribute__((noinline))
+handleSignalAndStereoUpdates(uint32_t now, uint16_t now_s) {
     if (uiBusy() || g_processFreqChange) return;
 
-    const uint32_t now = millis();
     if (now - g_lastFreqChange < RSSI_POLL_DELAY_AFTER_TUNE_MS) return;
     if (now - g_lastRSSIUpdate < RSSI_POLL_INTERVAL_MS) return;
 
     g_lastRSSIUpdate = now;
-    updateSignalQuality();
+    updateSignalQuality(now_s);
     updateFmStereoIndicator(now);
 }
 
@@ -415,11 +402,11 @@ uint16_t currentCmdTimeoutMs() {
 }
 
 // provides auto-exit for both temporary adjustment modes and the main Settings menu
-static inline void handleCommandTimeout() {
+// now16 precomputed by handlePeriodicTasks
+static inline void handleCommandTimeout(uint16_t now16) {
     // Timeout is relevant only when a mode is active
     if (!g_settingsActive && g_activeCommand == CMD_NONE) return;
 
-    const uint16_t now16 = (uint16_t)millis();
     const uint16_t timeout = currentCmdTimeoutMs();
 
     if ((uint16_t)(now16 - g_lastAdjustmentTime) > timeout) {
@@ -441,7 +428,7 @@ bool shouldSaveStateOnIdle(uint16_t now_s) {
 }
 
 // Manages saving settings to EEPROM based on user activity
-static inline void handleSettingsSave() {
+static inline void handleSettingsSave(uint16_t now_s) {
     // save menu settings immediately on exit for predictable behavior
     if (g_settingsDirty) {
         saveAllReceiverInformation(true);
@@ -449,8 +436,6 @@ static inline void handleSettingsSave() {
         g_stateIsDirty = false;             // settings include state, reset both flags
         return;
     }
-
-    uint16_t now_s = (uint16_t)(millis() / 1000);
 
     // save frequency state on idle to prevent EEPROM wear during active tuning
     // and to ensure last frequency is saved before a potential power-off
@@ -495,16 +480,19 @@ static inline void checkDisplayTimeout() {
 }
 
 // for all time-based tasks
-static void handlePeriodicTasks() {
+static void __attribute__((noinline)) handlePeriodicTasks() {
+    const uint32_t now = millis();
+    const uint16_t now_s = (uint16_t)(now / 1000);
+
     if (g_displayOn) {
-        handleSignalAndStereoUpdates();
+        handleSignalAndStereoUpdates(now, now_s);
 #if ENABLE_BATTERY_MONITOR
         updateAndShowBattery(false);
 #endif
-        rdsMiniTask();
+        rdsMiniTask((uint16_t)now);
     }
-    handleCommandTimeout();
-    handleSettingsSave();
+    handleCommandTimeout((uint16_t)now);
+    handleSettingsSave(now_s);
 }
 
 // ==========================================
@@ -519,7 +507,7 @@ static inline void initBatteryProbe() {
 }
 
 // Initialize controller
-void setup() {
+void __attribute__((noinline)) setup() { // no iline to less bloated main func this is must be 
 #if DEBUG_MODE
     initDebugUART();
     debugPrint_P(PSTR("\n\n--- ATS_EX DEBUG START ---\n"));
@@ -563,7 +551,7 @@ static inline bool handleGameMode(int16_t encDelta) {
 #endif
 
 // main loop program in process order
-void loop() {
+void __attribute__((noinline)) loop() { // no iline to less bloated main func this is must be 
 
     updateEncoderState();
     checkDisplayTimeout();

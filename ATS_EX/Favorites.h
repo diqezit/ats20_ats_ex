@@ -175,67 +175,103 @@ static void deleteFavorite() {
 // ===== FAVORITES: TUNE TO STATION ===================================================
 // ====================================================================================
 
-// Finds the band index that matches favorites frequency and modulation
+// Finds the band index whose frequency range and modulation family match the favorite
+// Falls back to the current band if no match
 static inline uint8_t findBandForFavorite(const FavoriteStation& fav) {
+    const bool favIsFm = (fav.modulation == FM);
     for (uint8_t i = 0; i < g_bandCount; ++i) {
-        // Band must match both frequency range and modulation type (AM/SSB vs FM)
-        bool isFmMod = (fav.modulation == FM);
-        bool isFmBand = (g_bandList[i].bandType == FM_BAND_TYPE);
-
-        if (isFmMod == isFmBand &&
-            fav.frequency >= g_bandList[i].minimumFreq &&
-            fav.frequency <= g_bandList[i].maximumFreq) {
-            return i;   // Found a matching band
+        const Band& b = g_bandList[i];
+        if (favIsFm == (b.bandType == FM_BAND_TYPE) &&
+            fav.frequency >= b.minimumFreq &&
+            fav.frequency <= b.maximumFreq) {
+            return i;
         }
     }
-    return g_bandIndex; // Fallback to current band if no match is found
+    return g_bandIndex;
 }
 
-// Applies settings from selected favorite
-// Must handle AM to SSB mode switch, which requires a full SSB patch reload
-// to enable sideband reception
-void tuneToSelectedFavorite() {
-    if (!g_totalFavorites) return;
+/// Attempts a preset style FM retune without full reconfiguration
+///
+/// When the radio is already in FM and the selected favorite is FM in the same FM band
+/// setFrequency is enough and avoids the click caused by full reconfiguration
+///
+/// Limited to FM to FM with no band change
+/// Everything else returns false for the full path
+static inline bool fav_tryTuneFastFmToFm(const FavoriteStation& fav, uint8_t targetBand) {
+    if (g_currentMode != FM || fav.modulation != FM || targetBand != g_bandIndex) return false;
 
-    // Capture receiver state before any changes
-    BandType previousBandType = currentBandPtr()->bandType;
-    bool ssbWasLoaded = g_ssbLoaded;
+    Band* band = currentBandPtr();
+    if (band->bandType != FM_BAND_TYPE) return false;
 
-    const FavoriteStation& fav = g_favorites[g_favoriteSelected];
+    const uint16_t f = fav.frequency;
+
+    // Update band memory and live state so UI and saves stay consistent
+    band->currentFreq = f;
+    g_currentFrequency = f;
+    g_currentBFO = 0;
+
+    // Retune hardware without mode re init or amp toggling
+    g_si4735.setFrequency(f);
+
+    // Reset tune tracking so settle based tasks start fresh
+    g_lastFreqChange = millis();
+    g_processFreqChange = false;
+    g_previousFrequency = f;
+    g_signalQualityValue = INVALID_RSSI_VALUE;
+    g_stereoStatus = false;
+
+    return true;
+}
+
+/// Tunes to a favorite using the full reconfiguration path
+///
+/// Band or modulation changes require a complete hardware setup sequence
+/// Seek limits step spacing AFC bandwidth and SSB patch handling all depend on it
+/// The external amp is muted during the transition to reduce pops on mode switches
+static void fav_tuneFullReconfig(const FavoriteStation& fav, uint8_t targetBand) {
+    const BandType prevType = currentBandPtr()->bandType;
+    const bool ssbWasReady = g_ssbLoaded;
+
+    const uint8_t mod = fav.modulation;
+    const uint16_t freq = fav.frequency;
+    const int16_t bfo = fav.bfo;
+
     setAmpState(false);
-
-    // Update global state to match favorite station target
-    g_currentMode = fav.modulation;
-
-    // LSB/USB/CW are 1..3, FM is 4, AM is 0
-    bool wantSSB = (fav.modulation > AM && fav.modulation < FM);
-
-    uint8_t targetBand = findBandForFavorite(fav);
+    g_currentMode = mod;
 
     if (g_bandIndex != targetBand) {
         syncActiveStateToBand();
         g_bandIndex = targetBand;
     }
 
-    // After potential band switch
-    // use currentBandPtr() (now points to the correct band)
+    // currentBandPtr reflects target band after potential switch
     Band* band = currentBandPtr();
+    band->currentFreq = freq;
+    g_currentBFO = bfo;
 
-    band->currentFreq = fav.frequency;
-    g_currentBFO = fav.bfo;
+    // SSB modes sit between AM and FM in the modulation enum
+    const bool wantSSB = (mod > AM && mod < FM);
 
-    // Force full reconfig for FM/AM type switch or to load required SSB patch
-    bool forceReset =
-        favoriteNeedsFullReset(
-            previousBandType,
-            band->bandType,
-            wantSSB,
-            ssbWasLoaded
-        );
-
-    applyBandConfiguration(forceReset);
+    applyBandConfiguration(
+        favoriteNeedsFullReset(prevType, band->bandType, wantSSB, ssbWasReady)
+    );
 
     setAmpState(true);
+}
+
+/// Tunes to the selected favorite
+///
+/// Prefers the fast FM preset jump when it is safe
+/// All other cases use the full reconfiguration path
+void tuneToSelectedFavorite() {
+    if (!g_totalFavorites) return;
+
+    const FavoriteStation& fav = g_favorites[g_favoriteSelected];
+    const uint8_t targetBand = findBandForFavorite(fav);
+
+    if (fav_tryTuneFastFmToFm(fav, targetBand)) return;
+
+    fav_tuneFullReconfig(fav, targetBand);
 }
 
 // ====================================================================================
@@ -528,10 +564,12 @@ static void fav_updateCursors(uint8_t page) {
     uint8_t start, end;
     fav_unpackPageBounds(page, start, end);
 
+    const uint8_t sel = g_favoriteSelected;
+
     for (uint8_t i = start; i < end; ++i) {
         uint8_t row = fav_rowForIndex(i, start);
         oled.setCursor(0, row);
-        oled.write(i == g_favoriteSelected ? '>' : ' ');
+        oled.write(i == sel ? '>' : ' ');
     }
 }
 

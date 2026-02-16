@@ -5,10 +5,9 @@
 class SI4735_fixed : public SI4735 {
 public:
 
-    // optimized version of seekStationProgress
-    // original version calls seekStation() inside the loop, which is inefficient
-    // This version calls it only once, and then polls the status, which is correct
-    // and much faster way to seek progress
+    // Original seekStation() is called inside a loop which re-issues the command
+    // on every iteration. This version issues it once then polls status — correct
+    // per AN332 and much faster
     uint16_t seekStationProgressGetFrequency(void (*showFunc)(uint16_t f), bool (*stopSeeking)(), uint8_t up_down) {
         si47x_frequency freq;
         uint32_t elapsed_seek = millis();
@@ -17,10 +16,10 @@ public:
             return (uint16_t)currentWorkFrequency;
 
         seekStation(up_down, 0);
-        delay(100); // Wait for seek to start
+        delay(100);
 
         do {
-            delay(200); // Increased delay for stability
+            delay(200);
             getStatus(0, 0);
 
             freq.raw.FREQH = currentStatus.resp.READFREQH;
@@ -29,19 +28,17 @@ public:
             if (showFunc) showFunc(freq.value);
 
             if (currentStatus.resp.ERR || (stopSeeking && stopSeeking())) {
-                getStatus(0, 1); // '1' in the second argument cancels the ongoing seek.
+                getStatus(0, 1); // second arg = 1 cancels ongoing seek
                 return (uint16_t)currentWorkFrequency;
             }
 
-            // Check timeout
             if ((millis() - elapsed_seek) > maxSeekTime) {
-                getStatus(0, 1); // Cancel on timeout
+                getStatus(0, 1);
                 return (uint16_t)currentWorkFrequency;
             }
 
-        } while (!currentStatus.resp.STCINT); // Wait for Seek/Tune Complete Interrupt
+        } while (!currentStatus.resp.STCINT);
 
-        // Clear interrupt flag and get final result
         getStatus(1, 0);
         freq.raw.FREQH = currentStatus.resp.READFREQH;
         freq.raw.FREQL = currentStatus.resp.READFREQL;
@@ -58,40 +55,28 @@ public:
     // ============================== RDS MINI ============================================
     // ====================================================================================
     //
-    // Minimal RDS support intended for ATmega328P size limits.
-    // Goals:
-    //  - enable RDS on FM without pulling full setRdsConfig()/getRdsStatus()/text buffers
-    //  - query FM_RDS_STATUS with a tiny routine
-    //  - provide accessors to BlockB/BlockC/BlockD for lightweight decoding in external module
+    // Minimal RDS for ATmega328P flash limits
+    //  - enables RDS on FM without pulling full setRdsConfig()/getRdsStatus()/text buffers
+    //  - queries FM_RDS_STATUS with a tiny I2C routine
+    //  - provides block accessors for lightweight decoding in RDS.h
     //
-    // IMPORTANT:
-    //  - Do NOT call heavy RDS functions elsewhere (setRdsConfig/getRdsStatus/getRdsText*/getRdsAllData/getRdsTime),
-    //    otherwise LTO will link a lot more code and you will overflow Flash.
+    // IMPORTANT: do NOT call heavy RDS functions elsewhere
+    //   (setRdsConfig/getRdsStatus/getRdsText*/getRdsAllData/getRdsTime)
+    //   — LTO will link far more code and overflow Flash
+    //
     // ====================================================================================
 
     void rdsEnableMini() {
-        // Enable RDS on FM with moderate error thresholds and FIFO count 1
-        if (currentTune != FM_TUNE_FREQ) return;
-
-        // FM_RDS_CONFIG:
-        //  - low byte: RDSEN=1 -> 0x01
-        //  - high byte: BLETHA/B/C/D = 2 -> 0xAA (10101010)
         sendProperty(FM_RDS_CONFIG, 0xAA01);
         sendProperty(FM_RDS_INT_FIFO_COUNT, 1);
     }
 
     bool rdsQueryMini() {
-        // Minimal equivalent of getRdsStatus(0,0,0)
-        // - no buffer clear
-        // - no ERR retry loop
-        // - reads 13 bytes into currentRdsStatus
-        if (currentTune != FM_TUNE_FREQ) return false;
-
         waitToSend();
 
         Wire.beginTransmission(deviceAddress);
         Wire.write(FM_RDS_STATUS);
-        Wire.write((uint8_t)0x00); // INTACK=0, MTFIFO=0, STATUSONLY=0
+        Wire.write((uint8_t)0x00);
         Wire.endTransmission();
 
         waitToSend();
@@ -104,11 +89,16 @@ public:
         return !currentRdsStatus.resp.ERR;
     }
 
-    // Accessors for lightweight decoders
-    inline uint16_t rdsGetBlockB() const {
-        return (uint16_t)((uint16_t)currentRdsStatus.resp.BLOCKBH << 8) |
-            (uint16_t)currentRdsStatus.resp.BLOCKBL;
+    inline const uint8_t* rdsBlockCDPtr() const {
+        return &currentRdsStatus.raw[8];  // CH,CL,DH,DL
     }
+
+    inline uint16_t rdsGetBlockB() const {
+        uint8_t h = currentRdsStatus.raw[6];
+        uint8_t l = currentRdsStatus.raw[7];
+        return ((uint16_t)h << 8) | l;
+    }
+
     inline uint8_t rdsGetBlockDH() const { return currentRdsStatus.resp.BLOCKDH; }
     inline uint8_t rdsGetBlockDL() const { return currentRdsStatus.resp.BLOCKDL; }
     inline uint8_t rdsGetBlockCH() const { return currentRdsStatus.resp.BLOCKCH; }
@@ -117,23 +107,25 @@ public:
     // ====================================================================================
     // ============================== SSB PATCH LOGIC ====================================
     // ====================================================================================
-    // This section implements compressed SSB (Single Side Band) patch loading for SI4735
-    // The patch enables advanced SSB features and improves reception quality
     //
-    // The compression algorithm works by:
-    // 1. Storing only non-zero bytes from the original patch data
-    // 2. Using offset tables to track special command positions (0x15 vs 0x16)
-    // 3. Handling "cutoff" positions where data is split across two I2C transactions
+    // Compressed SSB patch loading for SI4735
     //
-    // Data structure:
-    // - compressed_ssb_patch_content: actual non-zero patch bytes
-    // - cmd_0x15_offsets: positions where command 0x15 is used (otherwise 0x16)
-    // - cutoff_places_offsets: positions requiring special split handling
-    // - cutoff_nonzero_lengths: number of non-zero bytes at cutoff positions
-    //   (values < 100 indicate next line uses 0x15, >= 100 means normal continuation)
+    // Compression saves over 6KB of Flash by storing only non-zero bytes and using
+    // small lookup tables to reconstruct 1105 original patch lines on the fly
     //
-    // The patch consists of 1105 lines, each sending 8 bytes via I2C
-    // Base addresses change at specific line boundaries (0, 129, 405, 758, 1023+)
+    // Algorithm:
+    //  1. Store only non-zero bytes from original patch data
+    //  2. Use offset tables to track special command positions (0x15 vs 0x16)
+    //  3. Handle "cutoff" positions where data splits across two I2C transactions
+    //
+    // Data layout:
+    //  - compressed_ssb_patch_content: non-zero patch bytes
+    //  - cutoff_places_offsets: positions requiring split handling
+    //  - cutoff_nonzero_lengths: encodes both data length and 0x15 follow-up flag
+    //    (values < 100 = next line uses 0x15, >= 100 = normal continuation)
+    //
+    // Base addresses change at line boundaries: 0, 129, 405, 758, 1023+
+    //
     // ====================================================================================
     // https://github.com/diqezit/ats20_ats_ex/issues/22#issuecomment-3237646622
     // Credit for the clever patch compression method goes to den3rats
@@ -141,12 +133,8 @@ public:
 
 #if PATCH_EX_SSB
 private:
-    // On-the-fly decompression logic for the SSB patch
-    // This approach saves over 6KB of Flash by storing only non-zero data
-    // and using small lookup tables to reconstruct the original 1105 patch lines
 
-    // The patch is structured in memory segments not a flat array
-    // This determines the correct base address for a given line index
+    // Patch memory is segmented — this maps line index to base address
     inline uint16_t getBaseForLine(uint16_t patch_line) {
         switch (patch_line) {
         case 0 ... 128:    return 0;
@@ -157,9 +145,8 @@ private:
         }
     }
 
-    // Calculates parameters for special "cutoff" lines that have variable data lengths
-    // This avoids storing padding zeros. A single byte from cutoff_nonzero_lengths encodes
-    // both the data length and whether a secondary 0x15 line must follow
+    // Cutoff lines have variable non-zero length — one byte from the length table
+    // encodes both data count and whether a secondary 0x15 line must follow
     inline void getCutoffParams(uint16_t patch_line, uint16_t base,
         const uint8_t* cutoff_places_offsets,
         const uint8_t* cutoff_nonzero_lengths,
@@ -168,8 +155,8 @@ private:
         if ((base + pgm_read_byte_near(cutoff_places_offsets + cutoff_place_idx)) == patch_line) {
             non_zero_bytes = pgm_read_byte_near(cutoff_nonzero_lengths + cutoff_place_idx++);
 
-            // This compacts two pieces of information into one byte:
-            // 1) the length 2) the number of zeros after a follow-up 0x15 command
+            // Two pieces of info packed into one byte:
+            // 1) actual data length  2) zeros after follow-up 0x15 command
             if (non_zero_bytes < 100)       //Den
                 num_zero_after_0x15 = 2;    //Den
             else {                          //Den
@@ -183,7 +170,7 @@ private:
         }
     }
 
-    // Unified function to send an 8-byte patch command via I2C
+    // Sends one 8-byte patch command via I2C with zero-padding outside data range
     inline bool sendPatchData(uint8_t cmd, uint8_t start_idx, uint8_t end_idx,
         const uint8_t* compressed_ssb_patch_content,
         uint16_t& patch_data_idx) {
@@ -191,9 +178,10 @@ private:
         Wire.write(cmd);
 
         for (uint8_t i = 1; i < 8; i++) {
-            Wire.write((i > start_idx && i < end_idx)
+            const uint8_t v = (uint8_t)((i > start_idx && i < end_idx)
                 ? pgm_read_byte_near(compressed_ssb_patch_content + patch_data_idx++)
-                : 0x00);
+                : 0);
+            Wire.write(v);
         }
 
         Wire.endTransmission();
@@ -203,7 +191,7 @@ private:
         return !(Wire.read() & 0B01000000);
     }
 
-    // Orchestrates decompression and sending for a single patch line
+    // Decompresses and sends a single patch line, handling cutoff splits
     inline bool processSinglePatchLine(uint16_t& patch_line,
         const uint8_t* compressed_ssb_patch_content,
         const uint8_t* cutoff_places_offsets,
@@ -231,7 +219,6 @@ private:
     }
 
 public:
-    // Main entry point to upload the entire compressed SSB patch
     bool downloadCompressedPatch(const uint8_t* compressed_ssb_patch_content,
         const uint8_t* cutoff_places_offsets,
         const uint8_t* cutoff_nonzero_lengths) {
@@ -252,30 +239,25 @@ public:
     }
 #endif
 
-    // Sets FM stereo/mono blend mode per AN332 specifications
-    // force_mono = true:  force mono reception (reduces hiss on weak signals)
-    // force_mono = false: automatic stereo/mono blend (default chip behavior)
+    // FM stereo/mono blend per AN332
+    // force_mono=true: force mono (hides hiss on weak signals)
+    // force_mono=false: automatic blend (default chip behavior)
     //
-    // AN332 blend logic:
-    // - RSSI/SNR: Higher threshold = more mono (127 = force mono, 0 = force stereo)
-    // - Multipath: INVERTED! Higher value = more stereo (0 = force mono, 100 = force stereo)
-    //
+    // AN332 quirk:
+    //  RSSI/SNR thresholds — higher = more mono (127=force mono, 0=force stereo)
+    //  Multipath threshold — INVERTED (0=force mono, 100=force stereo)
     void setFmStereoMode(bool force_mono) {
-        // Table format: {property_address, (auto_value << 8) | mono_value}
         static const uint16_t fm_settings[] PROGMEM = {
-            // RSSI-based blend
             FM_BLEND_RSSI_STEREO_THRESHOLD_PROP,
                 (FM_BLEND_RSSI_STEREO_DEFAULT << 8) | 127,
             FM_BLEND_RSSI_MONO_THRESHOLD_PROP,
                 (FM_BLEND_RSSI_MONO_DEFAULT << 8) | 127,
 
-                // SNR-based blend
                 FM_BLEND_SNR_STEREO_THRESHOLD_PROP,
                     (FM_BLEND_SNR_STEREO_DEFAULT << 8) | 127,
                 FM_BLEND_SNR_MONO_THRESHOLD_PROP,
                     (FM_BLEND_SNR_MONO_DEFAULT << 8) | 127,
 
-                    // Multipath-based blend (inverted logic)
                     FM_BLEND_MULTIPATH_STEREO_THRESHOLD_PROP,
                         (FM_MP_STEREO_THR_DEFAULT << 8) | 0,
                     FM_BLEND_MULTIPATH_MONO_THRESHOLD_PROP,
@@ -295,47 +277,41 @@ public:
         }
     }
 
-    // Set SSB audio BW + cutoff and commit once
+    // Set SSB audio bandwidth + sideband cutoff in one I2C send
     inline void setSSBAudioBwAndCutoff(uint8_t audioBw, uint8_t cutoff) {
-        currentSSBMode.param.AUDIOBW = audioBw;     // 0..5
-        currentSSBMode.param.SBCUTFLT = cutoff;     // 0/1
-        sendSSBModeProperty();                      // ONE send
+        currentSSBMode.param.AUDIOBW = audioBw;
+        currentSSBMode.param.SBCUTFLT = cutoff;
+        sendSSBModeProperty();
     }
 
-    // Batch SSB Mode Configuration - ONE I2C transaction instead of FIVE
+    // Batch SSB mode config — one I2C transaction instead of five
     inline void configureSSBModeBatch(
-        uint8_t avcen,      // SVC setting (0/1)
-        uint8_t dspAfcDis,  // 1 for CW, (1-sync) for SSB
-        uint8_t avcDiv,     // 0 for CW, (sync*3) for SSB
-        uint8_t audioBw,    // bandwidth index (0..5)
-        uint8_t smuteSel    // SSM setting (0/1)
+        uint8_t avcen,
+        uint8_t dspAfcDis,
+        uint8_t avcDiv,
+        uint8_t audioBw,
+        uint8_t smuteSel
     ) {
-        // clear to avoid stale reserved bits
+        // Clear to avoid stale reserved bits
         currentSSBMode.raw[0] = 0;
         currentSSBMode.raw[1] = 0;
 
-        // Collect ALL bits into a structure WITHOUT sending
         currentSSBMode.param.AVCEN = avcen;
         currentSSBMode.param.DSP_AFCDIS = dspAfcDis;
         currentSSBMode.param.AVC_DIVIDER = avcDiv;
         currentSSBMode.param.AUDIOBW = audioBw;
         currentSSBMode.param.SMUTESEL = smuteSel;
 
-        // ONE I2C call instead of five
         sendSSBModeProperty();
     }
 
 #if TEST
-    //
     // -----------------------------------------------------------------------------
-    // Fast SI4735 reset + setup without Arduino pinMode()/digitalWrite()
-    // 1) Reduce Flash usage (avoid pulling wiring_digital.c.o when possible)
-    // 2) Keep reset timing exactly like the original library
+    // Fast SI4735 reset via direct port manipulation
+    // Avoids Arduino pinMode()/digitalWrite() to keep wiring_digital.c.o unlinked
     //
-    // Notes:
-    // - This implementation is hard-wired for ATmega328P + RESET_PIN = D12
-    // - D12 on ATmega328P is port B, bit 4 (PB4)
-    // - If you move RESET_PIN to another Arduino pin, you must change the port/bit
+    // Hard-wired for ATmega328P D12 = PB4
+    // If RESET_PIN moves to another pin — change port/bit below
     // -----------------------------------------------------------------------------
 
     static void __attribute__((noinline)) delay10ms() {
@@ -343,37 +319,18 @@ public:
     }
 
     static inline void resetFastD12() {
-        // D12 = PB4 on ATmega328P
-        // DDRB controls direction, PORTB controls output level
-
-        DDRB |= _BV(4);      // set PB4 as OUTPUT
+        DDRB |= _BV(4);    // PB4 OUTPUT
         delay10ms();
-
-        PORTB &= ~_BV(4);    // drive RESET LOW
+        PORTB &= ~_BV(4);    // RESET LOW
         delay10ms();
-
-        PORTB |= _BV(4);     // drive RESET HIGH
+        PORTB |= _BV(4);    // RESET HIGH
         delay10ms();
     }
 
-    // -----------------------------------------------------------------------------
-    // Override setup(resetPin, defaultFunction) to avoid base class reset(),
-    // which uses pinMode()/digitalWrite()
-    //
-    // defaultFunction:
-    // - 0 = FM
-    // - 1 = AM (LW/MW/SW)
-    // -----------------------------------------------------------------------------
+    // Override setup() to use direct port reset instead of base class reset()
     void setup(uint8_t resetPin, uint8_t defaultFunction) {
         (void)resetPin;
 
-        // Configure POWER_UP arguments exactly as intended by the original library:
-        // CTSIEN   = 0 (no CTS interrupt)
-        // GPO2OEN  = 0 (GPO2 disabled)
-        // PATCH    = 0 (normal boot)
-        // XOSCEN   = XOSCEN_CRYSTAL (use 32.768 kHz crystal)
-        // FUNC     = defaultFunction (0=FM, 1=AM)
-        // OPMODE   = SI473X_ANALOG_AUDIO (analog LOUT/ROUT)
         setPowerUp(
             0,                    // CTSIEN
             0,                    // GPO2OEN
@@ -383,33 +340,21 @@ public:
             SI473X_ANALOG_AUDIO   // OPMODE
         );
 
-        // Hardware reset without pinMode()/digitalWrite()
-        // Assumes resetPin is D12 (PB4)
         resetFastD12();
-
         radioPowerUp();
-        setVolume(30);       // library default
-        getFirmware();       // cache firmware info
-        delay(250);          // legacy settle delay
+        setVolume(30);
+        getFirmware();
+        delay(250);
     }
 
-    // -----------------------------------------------------------------------------
-    // Override getDeviceI2CAddress(resetPin) to avoid base class reset(),
-    // which uses pinMode()/digitalWrite()
-    // Scans both possible SI47xx I2C addresses (0x11 and 0x63)
-    // -----------------------------------------------------------------------------
+    // Override getDeviceI2CAddress() to use direct port reset
+    // Scans both SI47xx addresses: 0x11 (SEN low) and 0x63 (SEN high)
     int16_t getDeviceI2CAddress(uint8_t resetPin) {
         this->resetPin = resetPin;
-
-        // Hardware reset without pinMode()/digitalWrite()
-        // Assumes resetPin is D12 (PB4)
         resetFastD12();
 
-        // Wire.begin() is expected to be called by OLED init earlier in setup()
-        // (If init order changes, restore Wire.begin() here)
-        // Wire.begin();
+        // Wire.begin() expected from OLED init earlier in startup sequence
 
-        // Check 0x11 (SEN low)
         Wire.beginTransmission(SI473X_ADDR_SEN_LOW);
         int16_t error = Wire.endTransmission();
         if (error == 0) {
@@ -417,7 +362,6 @@ public:
             return SI473X_ADDR_SEN_LOW;
         }
 
-        // Check 0x63 (SEN high)
         Wire.beginTransmission(SI473X_ADDR_SEN_HIGH);
         error = Wire.endTransmission();
         if (error == 0) {
@@ -425,7 +369,6 @@ public:
             return SI473X_ADDR_SEN_HIGH;
         }
 
-        // Not found
         return 0;
     }
 #endif

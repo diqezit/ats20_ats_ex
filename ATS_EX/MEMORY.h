@@ -337,6 +337,10 @@ static void validateLoadedSettings() {
     if ((uint8_t)getSettingParam(SQL) > SQUELCH_MAX_LEVEL)
         setSettingParam(SQL, 0);
 
+    // SPT (Signal display mode)
+    if ((uint8_t)getSettingParam(SMeter) > 3)
+        setSettingParam(SMeter, 0);
+
     // Mode-specific settings validation
     // These are stored separately from g_SettingsParams and need individual checks
     for (uint8_t ctx = 0; ctx < MODE_CONTEXT_COUNT; ++ctx) {

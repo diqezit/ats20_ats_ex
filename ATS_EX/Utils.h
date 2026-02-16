@@ -48,6 +48,26 @@ static inline uint8_t ilen(uint16_t n) {
 }
 
 
+// draw fixed 21-column window at row from RAM buffer
+template<typename TOled>
+static inline void uiScrollPrint21AtRow(TOled& o, uint8_t row,
+    const char* src, uint8_t len, uint8_t start) {
+    constexpr uint8_t WIN = 21;
+
+    char b[WIN + 1];
+    memset(b, ' ', WIN);
+    b[WIN] = 0;
+
+    if (start < len) {
+        uint8_t n = (uint8_t)(len - start);
+        if (n > WIN) n = WIN;
+        memcpy(b, &src[start], n);
+    }
+
+    o.setCursor(0, row);
+    o.print(b);
+}
+
 // =====================================================================================
 // Core State, Tuning & EEPROM Utilities
 // =====================================================================================
@@ -148,6 +168,12 @@ static inline void clamp_index(int8_t& var, const int8_t max_val, bool strict = 
     if (strict ? (var > max_val) : (var >= max_val)) var = 0;
 }
 
+// Unmute audio in hardware and clear squelch state flag
+static void __attribute__((noinline)) unmuteAndClearSquelchCutoff() {
+    g_si4735.setAudioMute(false);
+    g_squelchCutoff = false;
+}
+
 // generic helper to update a value and call a function if it has changed
 // avoids duplicating the if new_value != old_value pattern
 template<typename T>
@@ -169,3 +195,81 @@ static inline uint16_t adcReadAx(uint8_t analogPin) {
     while (ADCSRA & _BV(ADSC)) {}
     return ADC;
 }
+
+#if DEBUG_MODE
+
+// =====================================================================================
+// Lighweight Debugger (replaces SerialPrint to save flash space)
+// =====================================================================================
+
+// UART (baud 9600)
+void initDebugUART() {
+    UBRR0H = 0;
+    UBRR0L = 103;
+    UCSR0A = 0;
+    UCSR0B = (1 << TXEN0);
+    UCSR0C = (1 << UCSZ01) | (1 << UCSZ00);
+}
+
+// Prints PROGMEM strings for debug. Usage: debugPrint_P(PSTR("Hello"));
+void debugPrint_P(const char* str) {
+    char c;
+    while ((c = pgm_read_byte(str++))) {
+        while (!(UCSR0A & (1 << UDRE0)));
+        UDR0 = c;
+    }
+}
+
+// Fast single-char print (RAM)
+static inline void debugPutChar(char c) {
+    while (!(UCSR0A & (1 << UDRE0)));
+    UDR0 = c;
+}
+
+// CRLF
+static inline void debugPrintCRLF() {
+    debugPutChar('\r'); debugPutChar('\n');
+}
+
+// Prints a character buffer
+void debugPrintBuf(const char* buf, uint8_t len) {
+    for (uint8_t i = 0; i < len; i++) {
+        while (!(UCSR0A & (1 << UDRE0)));
+        UDR0 = buf[i];
+    }
+}
+
+// Prints a number to UART
+void debugPrintNum(int16_t num) {
+    if (num == 0) {
+        debugPrint_P(PSTR("0"));
+        return;
+    }
+    bool negative = (num < 0);
+    if (negative) {
+        while (!(UCSR0A & (1 << UDRE0))); UDR0 = '-';
+        num = -num;
+    }
+    char buf[6];
+    uint8_t i = 0;
+    while (num > 0) {
+        buf[i++] = '0' + (num % 10);
+        num /= 10;
+    }
+    while (i--) {
+        while (!(UCSR0A & (1 << UDRE0))); UDR0 = buf[i];
+    }
+}
+
+// Prints a number in hexadecimal format
+void debugPrintHex(uint16_t num) {
+    debugPrint_P(PSTR("0x"));
+    for (int8_t i = 12; i >= 0; i -= 4) {
+        uint8_t digit = (num >> i) & 0xF;
+        char ch = (digit < 10) ? ('0' + digit) : ('A' + digit - 10);
+        while (!(UCSR0A & (1 << UDRE0))); UDR0 = ch;
+    }
+    debugPrint_P(PSTR("\n"));
+}
+
+#endif

@@ -97,7 +97,9 @@ static void setCpuPrescaler(uint8_t prescaler) {
 
 // rotary encoder signals on D2 and D3
 ISR(INT0_vect) { rotaryEncoder(); }
-ISR(INT1_vect) { rotaryEncoder(); }
+
+// INT1 does the same as INT0, alias to avoid duplicated ISR prologue/epilogue code
+ISR(INT1_vect, ISR_ALIASOF(INT0_vect));
 
 // ==========================================
 // ===== BOOT HELPERS ======================

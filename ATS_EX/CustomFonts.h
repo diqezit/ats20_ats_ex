@@ -136,6 +136,7 @@ const uint8_t _charMap_min[][5] PROGMEM = {
     {0x44, 0x28, 0x10, 0x28, 0x44}, // 69: 'x'
     {0x0C, 0x50, 0x50, 0x50, 0x3C}, // 70: 'y'
     {0x44, 0x64, 0x54, 0x4C, 0x44}, // 71: 'z'
+    {0x80, 0x80, 0x80, 0x80, 0x80}, // 72: '_'
 };
 
 // maps ASCII values (minus 32) to the index in _charMap_min
@@ -204,7 +205,7 @@ const uint8_t _charLookup[] PROGMEM = {
     0xFF, // 92: '\'
     0xFF, // 93: ']'
     0xFF, // 94: '^'
-    0xFF, // 95: '_'
+    72,   // 95: '_'
     0xFF, // 96: '`'
     46,   // 97:  'a'
     47,   // 98:  'b'

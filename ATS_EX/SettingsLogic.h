@@ -113,10 +113,8 @@ void doAvc(int8_t v) {
 void doSquelch(int8_t v) {
     doSwitchLogic(settingRef(SQL), 0, SQUELCH_MAX_LEVEL, v);
 
-    if (getSettingParam(SQL) == 0 && g_squelchCutoff) {
-        g_si4735.setAudioMute(false);
-        g_squelchCutoff = false;
-    }
+    if (getSettingParam(SQL) == 0 && g_squelchCutoff)
+        unmuteAndClearSquelchCutoff();
 }
 
 // Settings: Soft Mute Attenuation
@@ -222,7 +220,7 @@ void doCWPitch(int8_t v) {
 void doDeEmp(int8_t v) {
     toggleSetting(DeEmp);
     if (g_currentMode == FM)
-        g_si4735.setFMDeEmphasis(getSettingParam(DeEmp) + 1);
+        applyFmDeEmphasisFromSetting();
 }
 
 // Settings: FM Audio Profile (Speaker EQ)
@@ -247,7 +245,7 @@ void doForceMono(int8_t v) {
 void doFmSoftMuteAtt(int8_t v) {
     doSwitchLogic(settingRef(FmSmAtt), 0, FM_SOFT_MUTE_MAX_ATTN_LEVEL, v);
     if (g_currentMode == FM)
-        g_si4735.setProperty(FM_PROP_SOFTMUTE_MAX_ATTN_ADDR, (uint16_t)(uint8_t)getSettingParam(FmSmAtt));
+        siSetProperty(FM_PROP_SOFTMUTE_MAX_ATTN_ADDR, (uint16_t)(uint8_t)getSettingParam(FmSmAtt));
 }
 
 // Settings: FM Soft Mute Threshold (FST)
@@ -257,7 +255,7 @@ void doFmSoftMuteAtt(int8_t v) {
 void doFmSoftMuteThr(int8_t v) {
     doSwitchLogic(settingRef(FmSmThr), 0, FM_SOFT_MUTE_MAX_SNR_LEVEL, v);
     if (g_currentMode == FM)
-        g_si4735.setProperty(FM_PROP_SOFTMUTE_SNR_THRESH_ADDR, (uint16_t)(uint8_t)getSettingParam(FmSmThr));
+        siSetProperty(FM_PROP_SOFTMUTE_SNR_THRESH_ADDR, (uint16_t)(uint8_t)getSettingParam(FmSmThr));
 }
 
 // Settings: Toggle handler for SW AFC menu item (SWA)
@@ -286,8 +284,20 @@ void doBrightness(int8_t v) {
 }
 
 // Settings: switcher - S-Point display to RSSI display
+// 0=RSSI, 1=SPT, 2=RSSI+BAR, 3=SPT+BAR
 void doSMeter(int8_t v) {
-    toggleSetting(SMeter);
+    enum : uint8_t { SM_UI_BAR = 2 };
+
+    int8_t& sm = settingRef(SMeter);
+    const uint8_t prev = (uint8_t)sm;
+
+    doSwitchLogic(sm, 0, 3, v);
+
+#if defined(ENABLE_SIGNAL_BAR) && ENABLE_SIGNAL_BAR
+    // Clear bar once when user turns it off
+    if ((prev & SM_UI_BAR) && !(((uint8_t)sm) & SM_UI_BAR))
+        smDrawSignalBar(255);
+#endif
 }
 
 //Settings: SW Units
@@ -350,7 +360,7 @@ void doSwLink(int8_t v) {
     toggleSetting(SWLink);
 
     if (swLinkEnabled()) {
-        swLinkUpdateMasterFromCurrentBand();
+        swLinkSyncCore(true);
         swLinkNormalizeAllSwBands();
     }
 }

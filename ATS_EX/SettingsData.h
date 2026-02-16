@@ -202,7 +202,7 @@ const SettingMeta g_SettingsMeta[SETTINGS_MAX] PROGMEM = {
 
     // --- Page 4: Display & UI ---
     { "SCR", 4,  Num,        doBrightness,        isAlwaysActive   },
-    { "SPT", 0,  Switch,     doSMeter,            isAMFamilyActive },
+    { "SPT", 0,  Switch,     doSMeter,            isAlwaysActive   },
     { "SWU", 0,  Switch,     doSWUnits,           isAMFamilyActive },
     { "DIS", 0,  Switch,     doDisplayOff,        isAlwaysActive   },
     { "RSI", 1,  Switch,     doRSSIAMOff,         isAMFamilyActive },
@@ -222,7 +222,8 @@ int8_t g_SettingsParams[SETTINGS_MAX];
 
 // Toggles a binary setting (0 or 1)
 static void toggleSetting(uint8_t settingIndex) {
-    g_SettingsParams[settingIndex] = 1 - g_SettingsParams[settingIndex];
+    // All callers use this only for true switch params (0/1)
+    g_SettingsParams[settingIndex] ^= 1;
 }
 
 // Precomputed page start indices
@@ -389,7 +390,9 @@ const SwitchMapEntry switch_setting_map[SETTINGS_MAX] PROGMEM = {
     /* SWAFC          */ {2,  true},
 
     /* Brightness     */ {0,  false},
-    /* SMeter         */ {2,  true},
+
+    /* SMeter         */ {17, false},   // 0..3: "RSS" "SPT" "R+B" "S+B"
+
     /* SWUnits        */ {5,  false},
     /* DisplayOff     */ {0,  false},
     /* RSSI_AM_Off    */ {1,  false},
@@ -408,5 +411,8 @@ const char paramTexts[][4] PROGMEM = {
   "AUT", " ON", "OFF", " 50", " 75", "kHz", "MHz",
   "RSS", "SNR", "100", "50%",
   "10m", "15m", "30m", "60m",
-  "ROW", "COL"
+  "ROW", "COL",
+
+  // SMeter UI mode (SMeter = 0..3)
+  "RSS", "SPT", "R+B", "S+B"
 };
