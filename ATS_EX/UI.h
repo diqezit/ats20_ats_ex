@@ -55,6 +55,7 @@ static constexpr uint8_t  UI_SPLASH_ANIM_ROW = 6;
 static constexpr uint8_t  UI_SPLASH_ANIM_STEPS = 21;
 static constexpr uint16_t UI_SPLASH_ANIM_DELAY_MS = 70;
 static constexpr uint16_t UI_SPLASH_HOLD_MS = 2000;
+static constexpr uint8_t  UI_SPLASH_LINE3_ROW = 5;
 
 // =-=-=-=-=-=-=-=-= Seek Delay =-=-=-=-=-=-=-=-=
 static constexpr uint16_t UI_SEEK_DELAY_MS = 100;
@@ -142,21 +143,6 @@ DivMod10 __attribute__((noinline)) divmod10_u8(uint8_t v) {
     return { q, (uint8_t)(v - (uint8_t)(q * 10)) };
 }
 
-// Print uint8_t with fixed width 2, space-padded (range 0-99)
-// Used for: RSSI raw value (not currently active, kept for consistency)
-static inline void oledPrintU8_2(uint8_t v) {
-    if (v >= 100) v = 99;
-
-    // one division only
-    const DivMod10 dm = divmod10_u8(v);
-
-    char b[3];
-    b[0] = dm.q ? (char)('0' + dm.q) : ' ';
-    b[1] = (char)('0' + dm.r);
-    b[2] = 0;
-    oled.print(b);
-}
-
 // Print uint8_t with fixed width 2 + separator (range 0-99)
 // Used for: RSSI with trailing separator "NN|"
 static inline void oledPrintU8_2sep(uint8_t v, char sep) {
@@ -220,21 +206,24 @@ static inline void oledPrintFreqFM(uint16_t freq) {
     char b[6];
     uint16_t ip = freq / 100;   // 88-108
     uint8_t dp = (uint8_t)((freq % 100) / 10);
-    uint8_t i = 0;
 
     if (ip >= 100) {
-        b[i++] = '1';
-        b[i++] = '0';
-        b[i++] = (char)('0' + (ip - 100));
+        // "100.0".."108.0"
+        b[0] = '1';
+        b[1] = '0';
+        b[2] = (char)('0' + (uint8_t)(ip - 100));
+        b[3] = '.';
+        b[4] = (char)('0' + dp);
+        b[5] = 0;
     } else {
-        // one division only
+        // "88.0".."99.0"
         const DivMod10 dm = divmod10_u8((uint8_t)ip);
-        b[i++] = (char)('0' + dm.q);
-        b[i++] = (char)('0' + dm.r);
+        b[0] = (char)('0' + dm.q);
+        b[1] = (char)('0' + dm.r);
+        b[2] = '.';
+        b[3] = (char)('0' + dp);
+        b[4] = 0;
     }
-    b[i++] = '.';
-    b[i++] = (char)('0' + dp);
-    b[i] = 0;
 
     oled.print(b);
 }
@@ -312,31 +301,6 @@ uint8_t getPageStartIndex(uint8_t page) {
     return pgm_read_byte(&g_pageStartIdx[page]);
 }
 
-// Calculate X position from local index (0=left column, 1=right column)
-static inline __attribute__((always_inline))
-uint8_t getSettingXOffset(uint8_t localIdx) {
-    return (localIdx & 1) ? UI_SETTINGS_RIGHT_COL_X : UI_SETTINGS_LEFT_COL_X;
-}
-
-// Calculate Y position from local index (row = localIdx / 2)
-static inline __attribute__((always_inline))
-uint8_t getSettingYOffset(uint8_t localIdx) {
-    return UI_SETTINGS_ROW_START + (localIdx >> 1) * UI_SETTINGS_ROW_STEP;
-}
-
-// position calculation for a setting
-static inline void calcSettingPosition(
-    uint8_t idx,
-    uint8_t page,
-    uint8_t& xOffset,
-    uint8_t& yOffset
-) {
-    uint8_t local = idx - getPageStartIndex(page);
-    xOffset = getSettingXOffset(local);
-    yOffset = getSettingYOffset(local);
-}
-
-
 // ====================================================================================
 // ===== UI: BRIGHTNESS ===============================================================
 // ====================================================================================
@@ -344,8 +308,8 @@ static inline void calcSettingPosition(
 // map 0..9 to non linear contrast
 // give finer control at low end where eyes are sensitive
 static inline uint8_t brightnessToContrast(uint8_t s) {
-    static uint8_t lut[10] = { 0, 24, 49, 75, 102, 131, 160, 190, 221, 254 };
-    return lut[s];
+    static const uint8_t lut[10] PROGMEM = { 0, 24, 49, 75, 102, 131, 160, 190, 221, 254 };
+    return pgm_read_byte(&lut[s]);
 }
 
 // apply contrast curve to OLED
@@ -470,52 +434,53 @@ static void showRfHints() {
 // ===== UI: SIGNAL QUALITY DISPLAY ===================================================
 // ====================================================================================
 
-// blank field on missing value so user does not see stale text
-static inline void uiSignalClear() {
-    oled.setCursor(UI_RSSI_X, UI_RSSI_ROW);
-    oled.print(F("   "));
-}
+// print RSSI field at current cursor
+// blank on missing value
+// FM always numeric, AM/SSB/CW numeric or S-point depending on SMeter setting
+static inline void uiPrintSignalValueAtCursor(uint8_t rssi, uint8_t sm, uint8_t mode) {
+    enum : uint8_t { SM_UI_SPOINT = 1 };
 
-// Switch between raw RSSI and S-meter scale
-// S scale on HF and numeric RSSI value on FM
-static inline void uiRenderSignalValue(uint8_t rssi, uint8_t useSMeter) {
-    oled.setCursor(UI_RSSI_X, UI_RSSI_ROW);
-
-    // FM always show numeric RSSI
-    if (g_currentMode == FM) {
-        oledPrintU8_2sep(rssi, UI_RSSI_SEPARATOR);
+    if (rssi == UI_SIGNAL_NO_VALUE) {
+        oled.print(F("   "));
         return;
     }
 
-    // AM/SSB/CW
-    if (useSMeter == 0) {
-        oledPrintU8_2sep(rssi, UI_RSSI_SEPARATOR);
-    } else {
+    if (mode != FM && (sm & SM_UI_SPOINT)) {
         char s_buffer[4];
         rssiToSLevel(s_buffer, rssi);
         oled.print(s_buffer);
+        return;
     }
+
+    oledPrintU8_2sep(rssi, UI_RSSI_SEPARATOR);
 }
 
 // skip while menus open and draw hints after value
 // keep UI free from mapping rules, use rssiToSLevel for S text
 static void showSignalQuality() {
+    enum : uint8_t { SM_UI_BAR = 2 };
+
     if (g_settingsActive
 #if ENABLE_FAVORITES
         || g_favoritesActive
 #endif
         ) return;
 
-    // Clear if no RSSI data (polling disabled in source)
-    if (g_signalQualityValue == UI_SIGNAL_NO_VALUE) {
-        uiSignalClear();
-    } else {
-        uiRenderSignalValue(g_signalQualityValue, (uint8_t)getSettingParam(SMeter));
-    }
+    const uint8_t sm = (uint8_t)getSettingParam(SMeter);
+    const uint8_t rssi = g_signalQualityValue;
+    const uint8_t mode = (uint8_t)g_currentMode;
+
+    // one cursor set for all paths
+    oled.setCursor(UI_RSSI_X, UI_RSSI_ROW);
+
+    uiPrintSignalValueAtCursor(rssi, sm, mode);
+
+#if defined(ENABLE_SIGNAL_BAR) && ENABLE_SIGNAL_BAR
+    if (sm & SM_UI_BAR) smDrawSignalBar(rssi);
+#endif
 
     showRfHints();
 }
-
 
 // ====================================================================================
 // ===== UI: BATTERY DISPLAY ==========================================================
@@ -1150,24 +1115,50 @@ void splashAnimStep(uint8_t i) {
 }
 #endif
 
-// show startup screen then clear
-// hold to let user read title before first draw
+#if defined(ENABLE_SPLASH_CREDITS_SCROLL) && ENABLE_SPLASH_CREDITS_SCROLL
+static const char s_splashCredits[] PROGMEM = APP_SPLASH_CREDITS_TEXT;
+
+// scrolling caption used as "loading bar" replacement
+static void splashCreditsScroll(uint16_t total_ms) {
+    char msg[sizeof(s_splashCredits)];
+    strcpy_P(msg, (PGM_P)s_splashCredits);
+
+    const uint8_t msgLen = (uint8_t)(sizeof(s_splashCredits) - 1);
+    const uint8_t steps = (uint8_t)(msgLen + 3);   // small gap at the end
+
+    uint16_t elapsed = 0;
+
+    for (uint8_t pos = 0; pos < steps; ++pos) {
+        uiScrollPrint21AtRow(oled, UI_SPLASH_ANIM_ROW, msg, msgLen, pos);
+
+        delay(SPLASH_CREDITS_STEP_MS);
+        elapsed = (uint16_t)(elapsed + SPLASH_CREDITS_STEP_MS);
+        if (elapsed >= total_ms) return;
+    }
+
+    // scroll ended early, keep splash visible for the rest
+    if (elapsed < total_ms) delay((uint16_t)(total_ms - elapsed));
+}
+#endif
+
+// show startup screen then hold to let user read title before first draw
 void showSplashScreen() {
     oled.clear();
 
-    drawInverted(UI_SPLASH_LINE1_X, UI_SPLASH_LINE1_ROW,
-        APP_NAME_LINE1, false);
-    drawInverted(UI_SPLASH_LINE2_X, UI_SPLASH_LINE2_ROW,
-        F("ATS EX"), false);
+    drawInverted(UI_SPLASH_LINE1_X, UI_SPLASH_LINE1_ROW, APP_NAME_LINE1, false);
+    drawInverted(UI_SPLASH_LINE2_X, UI_SPLASH_LINE2_ROW, APP_NAME_LINE2, false);
 
+#if defined(ENABLE_SPLASH_CREDITS_SCROLL) && ENABLE_SPLASH_CREDITS_SCROLL
+    splashCreditsScroll((uint16_t)SPLASH_CREDITS_TOTAL_MS);
+#else
 #if ANIMATE_SPLASH
-    for (uint8_t i = 0; i < UI_SPLASH_ANIM_STEPS; i++) {
+    for (uint8_t i = 0; i < UI_SPLASH_ANIM_STEPS; ++i) {
         splashAnimStep(i);
         delay(UI_SPLASH_ANIM_DELAY_MS);
     }
 #endif
-
     delay(UI_SPLASH_HOLD_MS);
+#endif
 }
 
 

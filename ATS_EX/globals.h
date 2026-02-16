@@ -73,6 +73,7 @@ void debugPrint_P(const char* str);
 void debugPrintNum(int16_t num);
 #endif
 
+void siSetProperty(uint16_t prop_addr, uint16_t prop_val);
 void syncActiveStateToBand();
 void loadActiveStateFromBand();
 void syncModeDependentSettings(bool load);
@@ -85,7 +86,7 @@ static inline bool freqRateLimitOk(uint32_t);
 static inline bool freqTimeElapsed(uint32_t);
 static inline bool freqForceUpdate(uint16_t);
 static inline void applyCompensatedVolume();
-static inline bool amRssiPollingAllowed(uint32_t);
+static inline bool amRssiPollingAllowed(uint16_t);
 uint16_t currentCmdTimeoutMs();
 static inline bool shouldSaveStateOnIdle(uint16_t);
 static inline uint16_t displayTimeoutS(uint8_t);
@@ -96,7 +97,7 @@ static inline void settingsExitAndSave();
 
 static bool isSSB();
 
-inline int16_t getAndResetEncoderCount(volatile int16_t& counter);
+int16_t getAndResetEncoderCount(volatile int16_t& counter);
 bool processEncoderActions(int16_t movement);
 void processButtonEvents();
 static void updateEncoderState();
@@ -109,7 +110,7 @@ static void wakeUpDisplayIfNeeded();
 static void doSeek();
 static void cycleAmSsbCwModes();
 static void doFrequencyTune(int16_t delta);
-static inline void doFrequencyTuneSSB(int16_t encoder_delta);
+static void doFrequencyTuneSSB(int16_t encoder_delta);
 static void doVolume(int8_t v);
 static void doStep(int8_t v);
 static void doBandwidth(uint8_t v);
@@ -130,6 +131,10 @@ static void deleteFavorite();
 static void saveFavorites();
 static void loadFavorites();
 void tuneToSelectedFavorite();
+#endif
+
+#if defined(ENABLE_SIGNAL_BAR) && ENABLE_SIGNAL_BAR
+void smDrawSignalBar(uint8_t rssi);
 #endif
 
 static void DrawSetting(uint8_t idx, bool full);
@@ -165,15 +170,19 @@ static void setAmpState(bool on);
 static void applyBrightness();
 static void loadSSBPatch();
 
-static inline void handleSignalAndStereoUpdates();
-static inline void handleCommandTimeout();
-static inline void handleSettingsSave();
+static void handleDelayedFrequencyUpdate();
+static void handleSignalAndStereoUpdates(uint32_t, uint16_t);
+static inline void handleCommandTimeout(uint16_t);
+static inline void handleSettingsSave(uint16_t);
 static inline void checkDisplayTimeout();
 static void handlePeriodicTasks();
 
 #if ENABLE_RDS_MINI
 bool rdsMiniUiEnabled();
 void rdsMiniToggleUi();
+void rdsMiniTask(uint32_t);
+#else
+inline void rdsMiniTask(uint32_t) {}
 #endif
 
 // =================================================================================================
@@ -256,7 +265,7 @@ uint32_t g_lastRSSIUpdate = 0;
 uint8_t g_muteVolume = 0;
 uint8_t g_volume = DEFAULT_VOLUME;
 
-volatile uint8_t g_currentMode = FM;
+uint8_t g_currentMode = FM;
 int16_t g_currentBFO = 0;
 
 int16_t g_savedSsbBfo[g_bandCount] = { 0 };
@@ -411,18 +420,6 @@ const uint8_t g_bwSSBIdx[] = { 4, 5, 0, 1, 2, 3 };
 const uint8_t g_bwSSBMaxIdx = 5;
 const uint8_t g_maxFilterAM = 6;
 const uint8_t g_bwAMIdx[] = { 4, 5, 3, 6, 2, 1, 0 };
-
-// =================================================================================================
-// S-meter tables (HF only)
-// =================================================================================================
-
-// dBuV thresholds for S0 through S9+50 on HF
-static const uint8_t THR_HF[] PROGMEM = { 1,2,3,4,10,16,22,28,34,44,54,64,74,84,94 };
-static constexpr uint8_t LEN_HF = sizeof(THR_HF);
-
-static inline uint8_t CREAD(const uint8_t* p, uint8_t i) {
-    return pgm_read_byte(&p[i]);
-}
 
 // =================================================================================================
 // Step tables (PROGMEM + RAM)

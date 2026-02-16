@@ -49,7 +49,7 @@ void TwoWire::begin() {
     pinMode(SCL, INPUT_PULLUP);
 #endif
 
-    TWBR = 72;
+    // TWBR = 72; - not for this project
     TWSR = 0;
 }
 
@@ -82,18 +82,18 @@ size_t TwoWire::write(uint8_t data) {
     TWDR = data;
 
     if (!twiCommand((uint8_t)(_BV(TWEN) | _BV(TWINT)))) {
-        TWI_FAIL(_data_nack);
+        failDataNack();
         return 1;
     }
 
     switch ((uint8_t)(TWSR & 0xF8)) {
     case TWI_ST_SLA_W_NACK:
     case TWI_ST_SLA_R_NACK:
-        TWI_FAIL(_address_nack);
+        failAddressNack();
         break;
 
     case TWI_ST_DATA_NACK:
-        TWI_FAIL(_data_nack);
+        failDataNack();
         break;
 
     default:
@@ -113,14 +113,14 @@ uint8_t TwoWire::read() {
 
     if (--_requested_bytes) {
         if (!twiCommand((uint8_t)(_BV(TWEN) | _BV(TWINT) | _BV(TWEA)))) {
-            TWI_FAIL(_data_nack);
+            failDataNack();
             return 0;
         }
         return TWDR;
     }
 
     if (!twiCommand((uint8_t)(_BV(TWEN) | _BV(TWINT)))) {
-        TWI_FAIL(_data_nack);
+        failDataNack();
         return 0;
     }
 
@@ -183,13 +183,22 @@ size_t TwoWire::write(const uint8_t* buffer, size_t size) {
 }
 
 void TwoWire::start() {
-    if (!twiCommand((uint8_t)(_BV(TWSTA) | _BV(TWEN) | _BV(TWINT)))) {
-        TWI_FAIL(_address_nack);
-    }
+    if (!twiCommand((uint8_t)(_BV(TWSTA) | _BV(TWEN) | _BV(TWINT))))
+        failAddressNack();
 }
 
 void TwoWire::stop() {
     TWCR = (uint8_t)(_BV(TWSTO) | _BV(TWEN) | _BV(TWINT));
+}
+
+void __attribute__((noinline)) TwoWire::failAddressNack() {
+    _address_nack = true;
+    _requested_bytes = 0;
+}
+
+void __attribute__((noinline)) TwoWire::failDataNack() {
+    _data_nack = true;
+    _requested_bytes = 0;
 }
 
 TwoWire Wire = TwoWire();

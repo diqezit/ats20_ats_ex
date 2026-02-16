@@ -63,9 +63,15 @@ constexpr auto APP_VERSION = 71;
 // --------------- UI Strings ----------------------------------------------------------------------
 // =================================================================================================
 
-#define APP_NAME_LINE1 F("ATS-20+ V7.1")
+#define APP_NAME_LINE1 F("ATS-20+ V7.1.1")
 #define APP_NAME_LINE2 F("ATS EX")
 
+#define APP_SPLASH_CREDITS_TEXT  APP_SPLASH_PAD "MOD_NO_RDS github.com/diqezit/ats20_ats_ex"
+
+// scroll timing (ms) bigger = slower / longer
+#define SPLASH_CREDITS_STEP_MS   140
+#define SPLASH_CREDITS_TOTAL_MS  4000
+#define APP_SPLASH_PAD "\x01\x01\x01\x01\x01"
 
 // =================================================================================================
 // --------------- I2C / Bus -----------------------------------------------------------------------
@@ -141,9 +147,10 @@ constexpr auto MIN_SETFREQ_INTERVAL_MS = 40UL;
 // =================================================================================================
 
 // Display options
-#define ENABLE_SPLASH_SCREEN    1  // 1=show splash screen, 0=disable
-#define ENABLE_EEPROM_RESET_MSG 1  // 1=show EEPROM reset message, 0=disable
-#define ANIMATE_SPLASH          0  // 1=animate splash, 0=disable
+#define ENABLE_SPLASH_SCREEN    1       // 1=show splash screen, 0=disable
+#define ENABLE_EEPROM_RESET_MSG 1       // 1=show EEPROM reset message, 0=disable
+#define ANIMATE_SPLASH          1       // 1=animate splash, 0=disable
+#define ENABLE_SPLASH_CREDITS_SCROLL 1  // splash credits (scrolling) set 0 to disable
 
 // Features
 #define ENABLE_FAVORITES 1         // 1=Favorites enabled
@@ -156,9 +163,6 @@ constexpr auto MIN_SETFREQ_INTERVAL_MS = 40UL;
 // Test / experimental flag (project-specific)
 #define TEST 1                     // Enables temporary test code paths / experiments
 
-// SSB frequency clamp (149..30001 kHz). Disable to save Flash if critical.
-#define ENABLE_SSB_FREQ_CLAMP 1
-
 // SSB patch compression
 #define PATCH_EX_SSB 1             // 1=highly compressed patch loader (recommended)
 
@@ -168,6 +172,8 @@ constexpr auto MIN_SETFREQ_INTERVAL_MS = 40UL;
 #define ENABLE_RDS_MINI  1         // 1=RDS RadioText on FM (requires ~500B Flash)
 
 #define ENABLE_GAME 0              // 1=enable Pong mini game, 0=disable
+
+#define ENABLE_SIGNAL_BAR 1        // 1=draw thin RSSI bar above frequency, 0=disable (~260B Flash)
 
 // =================================================================================================
 // --------------- Audio Enhancement Profile Constants ---------------------------------------------

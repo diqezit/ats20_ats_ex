@@ -52,18 +52,27 @@ void updateEncoderState() {
 // =============== INPUT: HELPERS ===========
 // ==========================================
 
+static void __attribute__((noinline))
+displayPowerOn() {
+    g_displayOn = true;
+    setCpuPrescaler(getSettingParam(CPUSpeed));
+    oled.setPower(true);
+    autoDisplayOff = false;
+}
+
+static void __attribute__((noinline))
+displayPowerOff() {
+    g_displayOn = false;
+    setCpuPrescaler(1);         // 8 MHz for responsive handler
+    oled.setPower(false);
+    autoDisplayOff = false;
+}
+
 // Helper function to manage display power and CPU speed
 // Consolidates logic for turning the display on or off
 static inline void setDisplayPower(bool on) {
-    g_displayOn = on;
-    if (on) {
-        setCpuPrescaler(getSettingParam(CPUSpeed));
-        oled.setPower(true);
-    } else {
-        setCpuPrescaler(1);         // 8 MHz for responsive handler
-        oled.setPower(false);
-    }
-    autoDisplayOff = false;         // always manual action or wake-up fo reset autoflag
+    if (on) displayPowerOn();
+    else    displayPowerOff();
 }
 
 // Wake display on user activity but only if it was turned off by timeout
@@ -384,7 +393,7 @@ static void handleModeLongDone() {
 // ==========================================
 
 // Update all command icons on screen at once to match current state
-void refreshCommandIndicators() {
+void __attribute__((noinline)) refreshCommandIndicators() {
     showVolume();
     showStep();
     showBandwidth();
