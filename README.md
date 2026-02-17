@@ -107,7 +107,7 @@ This fork introduces three main branches of improvements over the original firmw
 
 1.  **Audio Pop/Click Elimination (Hardware & Software Mod):** A modification that completely removes pops and clicks when switching modes. It requires a minor physical change to the receiver circuit.
 2.  **`MOD_NO_RDS` Firmware Series:** An alternative firmware branch where the original full-weight RDS feature was replaced with a lightweight **RDS MINI** decoder to stay within ATmega328P flash limits. This freed up program space for new functionality, most notably a **unified Favorites system for all bands (AM, FM, SSB, CW)**, along with dozens of other fixes and improvements in code.
-3.  **RDS MINI RadioText Decoder:** In newer Version returned 7.1+ minimal RDS implementation (500 bytes Flash) that decodes Group 2A/2B RadioText from FM broadcasts and displays scrolling text on OLED row 6. Toggled at runtime via long-press MODE in FM mode.
+3.  **RDS MINI RadioText Decoder:** Starting from the v7.1.x series this fork includes a minimal RDS implementation (~500 bytes Flash). It decodes Group 2A/2B RadioText on FM and shows it as scrolling text on OLED row 6. Toggled at runtime via long-press `MODE` in FM mode (shows `RS` hint when active).
 
 **Important:** This audio improvement only affects the speaker output, as the headphone jack is connected before the amplifier.
 
@@ -230,7 +230,7 @@ Most ATS-20(+) receivers use a CH340 chip for USB communication. If your compute
 1.  Click the **Upload** button
 2.  The receiver's lights may flash during the process. Wait for it to complete
 3.  xLoader will display a message like "30xxx bytes uploaded" at the bottom of the window when finished
-4.  Your receiver should restart automatically with the new firmware. If the screen shows "EEPROM RESET" on the first boot, this is normal
+4.  Your receiver should restart automatically with the new firmware. On the first boot after an update it may show **"MEM RESET"** (or **"MEM WEAR"** if EEPROM is worn) - this is normal.
 
 **Installation is complete!**
 
@@ -290,33 +290,90 @@ The firmware's UI is based on the **"Active Command"** paradigm. This model allo
 
 ### **Section 1: Main Screen Operations**
 
+This section describes what the buttons do on the main listening screen.  
+The UI is based on the **Active Command** concept: short-press a button to select what the encoder controls (STEP/BW/BAND/VOL), then rotate the encoder to change it.
+
+---
+
 #### **1.1. Power Management & Screen Control**
 
-*   **Screen Off Mode:** A short press on the **`AGC`** button toggles the screen's power. The receiver continues to operate with minimal power drain significantly extending battery life.
-*   **Wake Screen:** If the screen is off press any button to wake it. Note: the `AGC` button wake-up press does not trigger other actions; other buttons may also perform their normal action.
+* **Manual screen toggle (instant):**
+  * Short-press **`AGC`** to toggle the OLED power **On/Off**.
+  * The radio keeps working normally while the screen is off (audio stays on).
+  * When the screen is off, the firmware also changes CPU speed for better battery life.
+
+* **Auto screen-off timer:**
+  * Set `DIS` in Settings to enable automatic display timeout.
+  * When auto-off triggers, the screen is turned off and CPU goes into a low-power mode.
+  * To wake the screen: press any button or rotate the encoder.
+  * **Wake rule:** the first wake press does not always trigger a “real action” (to avoid accidental toggles). `AGC` is the “safe” wake button.
+
+---
 
 #### **1.2. Frequency Tuning & Step Control**
 
-*   **Tuning Step Selection:**
-    1.  Short-press **`STEP`**. The "STEP" value on the display will be highlighted.
-    2.  **Rotate the encoder** to select the desired step size.
-    3.  Short-press the **encoder button** to confirm and exit or wait for the timeout.
+* **Default behavior (no active command):**
+  * Rotate the encoder to tune frequency.
+  * In AM/FM tuning uses the current step grid (1k/5k/9k/10k… or FM 5/10/100).
+  * In SSB/CW tuning is fine-tuning via BFO logic (smooth rollover at band edges).
+
+* **Step selection (Active Command):**
+  1. Short-press **`STEP`** → the STEP label becomes highlighted (active command).
+  2. Rotate the encoder to change the step size.
+  3. Short-press the encoder button to exit immediately or wait for timeout (about 3 seconds).
+  
+* **Notes:**
+  * AM and FM steps are sent to the chip (hardware step).
+  * SSB/CW “step” controls BFO tuning resolution (the chip always uses 1 kHz base step internally).
+
+---
 
 #### **1.3. Volume Control & Mute**
 
-*   **Quick Adjustment:** Short-press **`VOL+`** then **rotate the encoder**.
-*   **Continuous Adjustment:** **Press and hold `VOL+`** or **`VOL-`**.
-*   **Mute:** Short-press **`VOL-`** to toggle mute. The volume level is replaced by " M".
+* **Quick adjustment (Active Command):**
+  * Short-press **`VOL+`** → volume becomes active (highlighted).
+  * Rotate the encoder to change volume.
+
+* **Continuous adjustment:**
+  * Press and hold **`VOL+`** or **`VOL-`** for repeated changes.
+
+* **Mute:**
+  * Short-press **`VOL-`** to toggle mute.
+  * When muted, the volume field shows **` M`** (not `0`).
+
+* **FM volume compensation:**
+  * `FVA` reduces FM volume in software so switching AM↔FM feels consistent.
+
+---
 
 #### **1.4. Band Navigation**
 
-*   **Quick Jump:** Short-press **`BAND+`** then **rotate the encoder** to jump between pre-defined bands.
-*   **Seamless Tuning:** Tune past the edge of the current band to automatically switch to the adjacent one. Note: Crossing between AM/SW and FM bands will switch to the FM band edge frequency.
-*   **Band Coverage:** The firmware provides 38 pre-defined bands covering LW, MW, all ITU shortwave broadcast bands, all 10 ITU amateur bands (160m through 10m), CB radio, and the FM broadcast band.
+* **Band selection (Active Command):**
+  * Short-press **`BAND+`** → band becomes active (highlighted).
+  * Rotate the encoder to jump between band slots.
+
+* **Continuous band cycling:**
+  * Press and hold **`BAND+`** or **`BAND-`** to cycle bands repeatedly.
+
+* **Seamless tuning across edges:**
+  * If you tune past the min/max of the current band, firmware can switch to the adjacent band and continue tuning.
+  * When crossing between AM/SW and FM, the frequency is clamped to the FM band edge (to keep tuning valid).
+
+* **Band coverage / memory:**
+  * Firmware uses **44 band slots** (LW, MW, many SW segments, plus FM).
+  * SW is split into segments so each slot can store its own memory (freq/step/BW/BFO calibration), while still allowing smooth tuning and scanning.
+
+---
 
 #### **1.5. Mode Switching (AM/SSB/CW)**
 
-*   **Short-press `MODE`** to cycle through reception modes: `AM` → `LSB`/`USB` → `CW` → `AM`. This function is disabled on FM bands.
+* **Short-press `MODE`** to cycle modes:
+  * `AM` → `LSB/USB` → `CW` → `AM`
+* Mode switching is disabled on FM bands (FM always stays FM).
+* Long-press `MODE` actions depend on mode:
+  * **LSB/USB:** Sync toggle
+  * **FM:** RDS MINI toggle (`RS` hint)
+  * **CW:** CW decoder view only if `ENABLE_CW_DECODER 1`
 
 ---
 
@@ -350,8 +407,8 @@ The receiver includes a lightweight RDS decoder that displays RadioText (RT) fro
 
 *   **How to Enable:**
     1.  Tune to an FM station.
-    2.  **Press and hold the `MODE` button** for 1-2 seconds. An **`R`** indicator will appear in the upper-right area of the screen confirming RDS is active.
-    3.  To disable, **press and hold `MODE`** again. The `R` indicator and the text line will disappear.
+    2.  **Press and hold the `MODE` button** for 1-2 seconds. An **`RS`** hint will appear on the screen confirming RDS MINI UI is active.
+    3.  To disable, **press and hold `MODE`** again. The `RS` indicator and the text line will disappear.
 
 *   **What It Shows:**
     *   The bottom line of the display (row 6) shows the station's RadioText message. This is typically the current song title, artist name, or station slogan.
@@ -372,58 +429,107 @@ The receiver includes a lightweight RDS decoder that displays RadioText (RT) fro
 
 #### **3.1. Station Scanning**
 
-*   **Enable First:** In the Settings Menu (`BAND-`) set the `SCN` item to `On`.
-*   **Start/Stop Scan:** In AM or FM mode short-press the **encoder button** to start scanning. Press the encoder button again or rotate the encoder to stop.
-*   **Scan Behavior:** The receiver will scan within the current band boundaries (or full SW range for shortwave bands) using predefined seek thresholds optimized for each mode.
+Scanning uses the SI4735 hardware seek. It is available only when the encoder button is configured for scanning.
+
+*   **Enable first:** In the Settings Menu set `SCN` to **On**.
+    *   `SCN = On`  → encoder short press starts scan *(AM/FM only)*
+    *   `SCN = Off` → encoder short press opens **STEP** command *(classic behavior)*
+
+*   **Start scan:** On **AM** or **FM**, short-press the **encoder button**.
+    *   Scan direction follows your last tuning direction (up/down).
+
+*   **Stop scan:** While scanning is running:
+    *   **press the encoder button**, or
+    *   **rotate the encoder** (any movement stops the scan instantly)
+
+*   **Where it scans:**
+    *   **LW/MW/FM:** within the current band limits
+    *   **SW:** scan uses the full SW search range and then maps the found frequency back to the correct SW segment, so band label/limits stay correct
+
+*   **Notes:**
+    *   Scan is **blocked in SSB/CW** (encoder short press opens STEP instead).
+    *   FM results are aligned to the 10 kHz grid to match expected spacing.
+    *   AM seek spacing is normalized to supported hardware steps (1/5/9/10 kHz).
+
+---
 
 #### **3.2. Favorites Management**
 
-This feature saves a complete station profile: frequency, mode (AM/LSB/USB/CW/FM), and the precise BFO offset for SSB/CW signals. The system supports up to **20 favorite stations** across all bands.
+Favorites store a complete station snapshot: **frequency + mode (AM/LSB/USB/CW/FM) + BFO** (for SSB/CW).  
+Maximum: **20 favorites** total (shared across all bands).
 
-*   **To Save a Station:**
-    1.  Tune to any station and adjust it for optimal reception (including fine-tuning the pitch in SSB/CW).
-    2.  **Press and hold `AGC`**. A "SAVED" confirmation will appear on the screen.
-    3.  **Note:** The system prevents saving duplicate entries (same frequency and mode).
+*   **Save current station:**
+    1. Tune and adjust the station (including BFO fine tune in SSB/CW).
+    2. **Press and hold `AGC`**.
+    3. A **"SAVED"** message is shown.
+    * Duplicate entries (same frequency + same mode) are not saved.
 
-*   **To Access and Use the Favorites List:**
-    1.  **Press and hold `STEP`** to open the Favorites menu.
-    2.  **Navigate:** **Rotate the encoder** to scroll through your saved stations (3 stations per page).
-    3.  **Tune:** Highlight the desired station and **short-press the encoder button**. The receiver will instantly reconfigure itself to match all the favorite's saved parameters.
-    4.  **Delete:** To remove a station, highlight it in the list and press the **`BW`** button.
-    5.  **Exit:** To close the menu without tuning, **short-press `STEP`**. The menu also closes automatically after 10 seconds of inactivity.
+*   **Open Favorites menu:**
+    * **Press and hold `STEP`** (from the main screen).
+
+*   **Navigate:**
+    * Rotate the encoder to move through the list (3 items per page).
+
+*   **Tune to selected favorite:**
+    * **Short-press the encoder button** → receiver reconfigures and tunes to the saved station.
+
+*   **Delete favorite:**
+    * **Short-press `BW`** in the Favorites menu (deletes the selected entry).
+
+*   **Exit Favorites:**
+    * **Short-press `STEP`** to exit without tuning.
+    * Auto-exit after ~10 seconds of inactivity.
+
+*   **EEPROM writes:**
+    * Favorites are written to EEPROM **only on exit** and only if something changed (reduces EEPROM wear).
 
 ---
 
 ### **3.3. The Settings Menu: A Deep Dive**
 
-The Settings Menu provides access to all advanced receiver configurations. Think of it as your control center for fine-tuning the radio's behavior to match your listening preferences and conditions.
+The Settings Menu is the main place to configure how the receiver behaves (audio, RF, FM tweaks, display, hardware options). It is designed to be fast: one button enters/exits, and the encoder does both navigation and editing.
 
 **How to Access:**
-- **Enter:** Short press **`BAND-`** button
-- **Exit:** Short press **`BAND-`** again, or wait 10 seconds for auto-exit
-- **Important:** All changes are automatically saved to EEPROM when you exit
+- **Enter / Exit:** Short press **`BAND-`**
+- **Auto exit:** If there is no activity for ~10 seconds, the menu closes automatically
+- **Saving:** Changes are written to EEPROM **when you exit** the menu (manual save is not required)
 
-**Menu Structure:**
-- **5 pages** with **6 settings each** (30 settings total)
-- Settings are arranged in a 2×3 grid on each page
-- Current page number shown in header (e.g., "SETTINGS 1|5")
+---
 
-**Navigation & Editing:**
-1. **Select Item:** Rotate the encoder to move between settings
-   - Movement pattern depends on `NAV` setting (row-wise or column-wise)
-2. **Enter Edit Mode:** Short-press the encoder button
-   - A `>` marker appears next to the value
-   - The setting is now ready to be changed
-3. **Change Value:** Rotate the encoder while in Edit Mode
-4. **Confirm:** Short-press encoder again to save and exit Edit Mode
-5. **Switch Pages:** Short-press **`BAND+`** to cycle through pages
+#### **Menu Layout**
+- **5 pages**, **6 items per page** (**30 settings total**)
+- Each page is a **2×3 grid**
+- The header shows the current page: `SETTINGS N|5`
 
-> **💡 Beginner's Tip:** Start with default values and change one setting at a time to understand its effect. You can always perform a factory reset if needed.
+---
 
-> **⚠️ Important Mode Display:** Settings that are not applicable to the current operating mode will display as **"---"** instead of their value. This visual indicator helps you quickly identify which settings are active in your current mode, simplifying the configuration process.
+#### **Controls (Navigation vs Editing)**
+The menu has two modes: **Navigate** and **Edit**.
 
-> **📝 Mode-Dependent Settings:** `ATT`, `AVC`, and `SMA` store different values for AM, LSB, and USB modes. When you switch modes, these values automatically change to match the current mode's stored settings.
+1) **Navigate (default when you enter)**
+- Rotate the encoder to move between items  
+- The movement order depends on `NAV`:
+  - `ROW`: left → right, then next row (reading order)
+  - `COL`: top → bottom, then next column
 
+2) **Edit**
+- **Short press the encoder button** to toggle Edit mode for the selected item
+- In Edit mode a `>` marker appears next to the value
+- Rotate the encoder to change the value
+- Short press encoder again to stop editing (stays in the menu)
+
+3) **Switch Pages**
+- Short press **`BAND+`** to cycle pages (1 → 2 → 3 → 4 → 5 → 1)
+
+---
+
+#### **Important Notes**
+- **Inactive items show `---`:** If a setting does not apply to the current mode/band (example: FM-only options while listening to AM), the value is replaced with `---`.
+- **Mode-dependent memory:** `ATT`, `AVC`, and `SMA` are stored separately for **AM**, **LSB**, and **USB**. When you switch mode, these values automatically change to the stored values for that mode.
+- **Per-band memory:** Some items (like `BFO` calibration) are stored per band slot, so different SW segments can have their own calibration.
+
+> **Tip:** Change one setting at a time and listen for the result. If you get lost, a factory reset always restores defaults.
+> 
 ---
 
 #### **Page 1: Core Audio & RF** *(Essential audio and reception controls)*
@@ -443,12 +549,12 @@ The Settings Menu provides access to all advanced receiver configurations. Think
 
 | Name | Detailed Description | Recommended Values | Mode Availability | Type | Range |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `BFO` | **Beat Frequency Oscillator Calibration**<br>Corrects frequency drift caused by component aging.<br>• Each step = 100 Hz correction<br>• Positive values: Increase displayed frequency<br>• Negative values: Decrease displayed frequency<br>**Usage:** If ALL SSB stations sound too high/low pitched on a specific band, adjust this.<br>**Important:** Saved per band (38 separate values). | **Default:** `0`<br>**Typical drift:** `±5` | AM/SSB/CW only<br>**"---" in FM** | Number | `-25`..`+25` |
-| `SSM` | **SSB Soft Mute**<br>Reduces noise between SSB transmissions.<br>• `RSS`: Mutes based on signal strength<br>• `SNR`: Mutes based on signal-to-noise ratio<br>**Tip:** SNR mode works better for weak signal work. | **Default:** `SNR`<br>**DXing:** `RSS` | SSB only<br>**"---" in AM/FM/CW** | Switch | `RSS` / `SNR` |
-| `SVC` | **SSB Automatic Volume Control**<br>Stabilizes audio level on fading SSB/CW signals.<br>**When ON:** Reduces fading effects but may pump on noise<br>**When OFF:** Natural signal dynamics, better for strong signals | **Default:** `On`<br>**Weak signals:** `On`<br>**Local QSOs:** `Off` | SSB only<br>**"---" in AM/FM/CW** | Switch | `On` / `Off` |
-| `COF` | **SSB Audio Cutoff Filter**<br>Removes low-frequency rumble and noise.<br>• `AUT`: Automatically matches filter to bandwidth<br>• `1`: Mild filtering (fuller audio)<br>• `2`: Aggressive filtering (cleaner but thinner audio)<br>**Try:** Use `2` for noisy bands, `1` for local contacts. | **Default:** `AUT`<br>**Noisy bands:** `2` | SSB only<br>**"---" in AM/FM/CW** | Selection | `AUT`, `1`, `2` |
-| `SYN` | **SSB Sync (AFC)**<br>Automatically tracks drifting SSB signals.<br>**Pros:** Reduces need to retune, handles fading better<br>**Cons:** Can lock onto wrong signal or noise<br>**Best for:** Stable broadcast stations, not recommended for ham bands. | **Default:** `Off`<br>**Broadcast:** `On`<br>**Ham bands:** `Off` | SSB only<br>**"---" in AM/FM/CW** | Switch | `On` / `Off` |
-| `CWP` | **CW Pitch**<br>The audio tone frequency for Morse code signals.<br>**Personal preference:** Most operators prefer 600-700 Hz<br>**Tip:** Match this to your transmitted sidetone if you're a ham operator. | **Default:** `600`<br>**Common:** `600-700` | AM/SSB/CW only<br>**"---" in FM** | Selection | `500`, `600`, `700`, `800` Hz |
+| `BFO` | **Beat Frequency Oscillator Calibration**<br>Corrects frequency drift caused by component aging.<br>• Each step = 100 Hz correction<br>• Positive values: Increase displayed frequency<br>• Negative values: Decrease displayed frequency<br>**Usage:** If SSB stations sound too high/low pitched on a specific band, adjust this.<br>**Important:** Saved per band slot. Not used in FM mode. | **Default:** `0`<br>**Typical drift:** `±5` | AM/SSB/CW only<br>**"---" in FM** | Number | `-25`..`+25` |
+| `SSM` | **SSB Soft Mute Mode**<br>Reduces noise between SSB/CW transmissions.<br>• `RSS`: mutes based on signal strength<br>• `SNR`: mutes based on signal-to-noise ratio | **Default:** `SNR`<br>**DXing:** `RSS` | SSB/CW only<br>**"---" in AM/FM** | Switch | `RSS` / `SNR` |
+| `SVC` | **SSB AVC**<br>Stabilizes audio level on fading SSB/CW signals.<br>**When ON:** reduces fading effects but may pump on noise<br>**When OFF:** natural signal dynamics, better for strong signals | **Default:** `On`<br>**Weak signals:** `On`<br>**Local QSOs:** `Off` | SSB/CW only<br>**"---" in AM/FM** | Switch | `On` / `Off` |
+| `COF` | **SSB Audio Cutoff Filter**<br>Removes low-frequency rumble and noise.<br>• `AUT`: auto match to bandwidth<br>• `1`: mild filtering<br>• `2`: aggressive filtering | **Default:** `AUT`<br>**Noisy bands:** `2` | SSB/CW only<br>**"---" in AM/FM** | Selection | `AUT`, `1`, `2` |
+| `SYN` | **SSB Sync (AFC)**<br>Helps track drifting SSB signals.<br>**Pros:** less retuning<br>**Cons:** can lock wrong signal/noise | **Default:** `Off`<br>**Broadcast:** `On` | SSB/CW menu item<br>**Note:** works only in LSB/USB. In CW it is forced OFF. | Switch | `On` / `Off` |
+| `CWP` | **CW Pitch**<br>Audio tone frequency for Morse code signals. | **Default:** `700`<br>**Common:** `600-700` | AM/SSB/CW only<br>**"---" in FM** | Selection | `500`, `600`, `700`, `800` Hz |
 
 ---
 
@@ -460,7 +566,7 @@ The Settings Menu provides access to all advanced receiver configurations. Think
 | `FMP` | **FM Audio Profile**<br>Tailors frequency response for your listening setup.<br>• `On`: Reduces treble for internal speaker (warmer sound)<br>• `Off`: Flat response for headphones/external speakers<br>**Try both:** The difference is quite noticeable. | **Speaker:** `On`<br>**Headphones:** `Off` | FM only<br>**"---" in AM/SSB/CW** | Switch | `On` / `Off` |
 | `FMO` | **Force Mono**<br>Disables stereo decoding on FM.<br>**Benefits:** 10-20dB noise reduction on weak stations<br>**Drawback:** Loses stereo separation<br>**Use when:** Station is barely receivable in stereo. | **Default:** `Off`<br>**Weak signals:** `On` | FM only<br>**"---" in AM/SSB/CW** | Switch | `On` / `Off` |
 | `FSA` | **FM Soft Mute Attenuation**<br>Volume reduction on weak FM signals (in dB).<br>**Higher values:** Quieter background when tuning<br>**Lower values:** Hear weak stations better<br>**Sweet spot:** 15-20 for most users. | **Default:** `22`<br>**DXing:** `0-10`<br>**Casual:** `15-22` | FM only<br>**"---" in AM/SSB/CW** | Number | `0`..`31` |
-| `FST` | **FM Soft Mute Threshold**<br>Signal level that triggers FM soft mute.<br>**Lower (0-5):** Only mute very weak signals<br>**Higher (10-15):** Aggressive muting for quiet tuning<br>**Tip:** Pair with FSA for best results. | **Default:** `10`<br>**Balanced:** `8-10` | FM only<br>**"---" in AM/SSB/CW** | Number | `0`..`15` |
+| `FST` | **FM Soft Mute Threshold**<br>Sets the SNR threshold that triggers FM soft mute.<br>Higher values = more aggressive muting. | **Default:** `0` | FM only<br>**"---" in AM/SSB/CW** | Number | `0`..`15` |
 | `SWA` | **Shortwave AFC** *(AM mode, SW bands only)*<br>Helps track drifting AM broadcast stations.<br>• `OFF`: No correction (best for amateur radio)<br>• `PPM`: Standard correction window<br>• `Hz1`: ±1600Hz pull range (normal)<br>• `Hz2`: ±2000Hz pull range (aggressive)<br>**Warning:** Turn OFF for SSB/CW listening! | **Default:** `0` (OFF)<br>**Broadcast:** `2` (Hz1)<br>**SSB/CW:** `0` (OFF) | AM/SSB/CW only<br>**"---" in FM** | Selection | `0`..`3` (0=OFF, 1=PPM, 2=Hz1, 3=Hz2) |
 
 ---
@@ -470,10 +576,10 @@ The Settings Menu provides access to all advanced receiver configurations. Think
 | Name | Detailed Description | Recommended Values | Mode Availability | Type | Range |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | `SCR` | **Screen Brightness**<br>OLED display brightness control.<br>• `1-3`: Night/dark room use<br>• `4-6`: Indoor daylight<br>• `7-10`: Bright conditions<br>**Battery tip:** Lower brightness significantly extends battery life. | **Indoor:** `4-6`<br>**Night:** `2-3`<br>**Daylight:** `7-9` | All modes | Number | `1`..`10` |
-| `SPT` | **Signal Meter Display**<br>How signal strength is shown.<br>• `Off`: Raw RSSI number (0-99)<br>• `On`: Traditional S-meter (S0..S9+)<br>**Ham operators:** Usually prefer `On`<br>**SWLs:** `Off` gives more resolution.<br>**Note:** Display only (does not affect reception). | **Default:** `Off`<br>**Hams:** `On` | All modes | Switch | `On` / `Off` |
+| `SPT` | **Signal Meter Display (4 modes)**<br>• `RSS`: raw RSSI number (0–99)<br>• `SPT`: S-meter (S0..S9+)<br>• `R+B`: RSSI + thin bar graph *(requires `ENABLE_SIGNAL_BAR 1`)*<br>• `S+B`: S-meter + thin bar graph *(requires `ENABLE_SIGNAL_BAR 1`)*<br>**Note:** If `ENABLE_SIGNAL_BAR 0`, bar modes behave like their non-bar variants. | **Default:** `RSS` | All modes | Selection | `RSS`, `SPT`, `R+B`, `S+B` |
 | `SWU` | **Shortwave Units**<br>Frequency display format for SW bands.<br>• `kHz`: 14205 kHz (traditional)<br>• `MHz`: 14.205 MHz (modern)<br>**Preference:** Purely cosmetic - choose what you're used to. | **Traditional:** `kHz`<br>**Modern:** `MHz` | AM/SSB/CW only<br>**"---" in FM** | Switch | `kHz` / `MHz` |
 | `DIS` | **Display Auto-Off Timer**<br>Saves battery by turning off screen after inactivity.<br>**Radio keeps playing** with screen off!<br>**Wake up:** Press any button<br>**Good practice:** Use 10-15 minutes for battery savings. | **Default:** `OFF`<br>**Battery save:** `10m` or `15m` | All modes | Selection | `OFF`, `10m`, `15m`, `30m`, `60m` |
-| `RSI` | **RSSI Polling in AM**<br>• `Off`: Normal RSSI updates<br>• `On`: Stops RSSI polling to prevent clicks<br>**Only change if:** You hear clicking sounds every second in AM mode. | **Default:** `On`<br>**If you want RSSI on AM:** `Off` | AM/SSB/CW only<br>**"---" in FM** | Switch | `On` (disabled) / `Off` (enabled) |
+| `RSI` | **AM RSSI polling** *(click/noise workaround)*<br>• `OFF`: disable AM-family RSSI updates (reduces periodic clicks)<br>• `ON`: enable AM-family RSSI updates | **Default:** `OFF` | AM/SSB/CW only<br>**"---" in FM** | Switch | `ON` / `OFF` |
 | `NAV` | **Menu Navigation Pattern**<br>How encoder moves through settings.<br>• `ROW`: Left→Right then down (like reading)<br>• `COL`: Top→Bottom in columns (traditional)<br>**Try both:** ROW is usually faster for accessing items. | **Default:** `ROW`<br>**Traditional:** `COL` | All modes | Switch | `ROW` / `COL` |
 
 ---
@@ -485,9 +591,10 @@ The Settings Menu provides access to all advanced receiver configurations. Think
 | `CAP` | **Antenna Tuning Capacitor**<br>Internal capacitor for antenna matching.<br>• `On`: Better for random wire, whip antennas<br>• `Off`: Better for 50Ω antennas, external tuners<br>**Test both:** See which gives stronger signals with your antenna. | **Wire antenna:** `On`<br>**50Ω antenna:** `Off` | All modes | Switch | `On` / `Off` |
 | `CPU` | **Processor Speed**<br>Trade-off between performance and battery life.<br>• `100%` (16MHz): Snappy UI response<br>• `50%` (8MHz): ~30% longer battery, slightly slower UI<br>**Note:** Radio performance is identical at both speeds. | **AC power:** `100%`<br>**Battery:** `50%` | All modes | Selection | `100%` / `50%` |
 | `BAP` | **Battery Monitor Pin**<br>Selects which analog pin reads battery voltage.<br>**Default firmware mapping:** A2<br>**Alternative:** A1<br>**How to test:** Battery % should show realistic values. | **Default:** `A2`<br>**Alternative:** `A1` | All modes | Selection | `A2` / `A1` |
-| `SCN` | **Encoder Button Function**<br>What happens when you short-press the encoder.<br>• `On`: Start frequency scanning<br>• `Off`: Open step size menu (classic)<br>**Preference:** Scanning is convenient for finding active stations. | **Recommended:** `On` | All modes | Switch | `On` / `Off` |
+| `SCN` | **Encoder Button Function**<br>What happens when you short-press the encoder.<br>• `On`: Start frequency scanning *(AM/FM only)*<br>• `Off`: Open step size menu (classic)<br>**Note:** Scan is blocked in SSB/CW. | **Recommended:** `On` | All modes | Switch | `On` / `Off` |
 | `FVA` | **FM Volume Compensation**<br>Reduces FM volume to match AM/SSB levels.<br>**Problem:** FM broadcasts are often much louder<br>**Solution:** Set to 5-10 to balance volume across modes<br>**Fine-tune:** Adjust until mode switches don't require volume changes. | **Default:** `0`<br>**Typical:** `5-10` | All modes | Number | `0`..`15` |
-| `I2C` | **OLED I2C Speed**<br>Sets the I2C clock speed used for OLED updates.<br>Lower values improve stability on noisy power lines, higher values improve refresh speed.<br>**Note:** OLED and SI4735 share the same I2C bus. | **Default:** `50`<br>**If glitches:** `35`<br>**Fast:** `400` | All modes | Selection | `35`, `50`, `100`, `250`, `400`, `500` kHz |
+| `SWL` | **SW Link**<br>Links **STEP** and **BW** settings across all SW band segments.<br><br>**What it does:**<br>• Shortwave (SW) is split into many segments (band slots). Normally each segment can store its own STEP/BW values.<br>• When `SWL` is **On**, all SW segments share the same STEP/BW values (they are kept in sync automatically).<br><br>**How it works:**<br>• Any STEP/BW change you make while you are on an SW segment becomes the “master” value and is copied to all other SW segments.<br>• This happens immediately after changing STEP/BW (no need to save/reboot).<br><br>**Why it is useful:**<br>• No surprise filter/step changes when you move between SW broadcast and ham segments.<br>• Keeps tuning behavior consistent across the entire 1.7–30 MHz range.<br><br>**Notes:**<br>• Affects only SW segments (LW/MW and FM are not linked).<br>• Frequency memories per segment stay independent — only STEP/BW are linked. | **Default:** `Off` | All modes | Switch | `On` / `Off` |
+
 ---
 
 > **🔧 Quick Setup Guide for New Users:**
@@ -501,14 +608,14 @@ The Settings Menu provides access to all advanced receiver configurations. Think
 > **📝 Settings Memory:**
 > - **Global settings:** Saved once for entire radio
 > - **Mode-dependent:** ATT, AVC, SMA saved separately per mode
-> - **Band-specific:** BFO calibration saved per band (38 values)
+> - **Band-specific:** BFO calibration saved per band slot (not used in FM)
 > - **Auto-save:** Changes saved to EEPROM when exiting menu
 
 ---
 
 > **📌 Key Technical Notes:**
 > *   **Mode-Dependent Settings:** `ATT`, `AVC`, and `SMA` values are stored separately for AM, LSB, and USB modes. The displayed value changes automatically when you switch modes.
-> *   **Band-Specific BFO:** The `BFO` calibration is saved individually for each of the 38 bands, allowing precise crystal drift compensation per frequency range.
+> *   **Band-Specific BFO:** The `BFO` calibration is saved per band slot (not used in FM). This allows precise drift compensation per frequency segment.
 > *   **Soft Mute Systems:** AM and FM use completely independent soft mute implementations with different parameter ranges (`SMA`/`SMT` for AM, `FSA`/`FST` for FM).
 > *   **SW AFC:** The `SWA` setting only activates on Shortwave bands (1.7-30 MHz) while in AM mode. It helps track drifting broadcast stations but should be disabled for SSB/CW.
 > *   **Navigation Styles:** The `NAV` setting affects only the Settings menu navigation, not the main screen or Favorites list.
@@ -526,13 +633,14 @@ This procedure resets all settings, band states, and clears all saved favorites 
 1.  Power the receiver **off**.
 2.  **Press and hold the encoder button**.
 3.  While holding the button, **power the receiver on**.
-4.  The screen will display "EEPROM RESET". The reset is complete.
+4.  The screen will display **"MEM RESET"** on first boot after reset (or **"MEM WEAR"** if EEPROM is worn).
 
 **Alternative Method:** If the encoder button is faulty, you can perform a reset by **holding the `AGC` button** during power-on instead.
 
 ---
 
-### **Section 5: Experimental Features**
+<details>
+<summary><b>Click to expand: Section 5 (Experimental Features)</b></summary>
 
 #### **5.1. CW (Morse Code) Decoder** *(Experimental)*
 
@@ -574,7 +682,7 @@ Connect speaker output to A6 with proper biasing:
 **Performance Characteristics:**
 - **Optimal reception:** 600 Hz tone at 25-30 WPM
 - **Pitch options:** 500, 600, 700, 800 Hz (selectable via `CWP` setting)
-- **Adaptive tracking:** Automatically adjusts to speed variations
+- **Adaptive timing:** Automatically adjusts to speed variations
 - **Best results with:**
   - Stable signals (S5 or stronger)
   - Narrow bandwidth filter (0.5-1.0 kHz)
@@ -638,6 +746,8 @@ For decoder testing at 600Hz, 30WPM try: `A A A A A / T T T T T / E E E E E / N 
 - **Capacitor value:** 2.2µF provides -3dB at ~7Hz (blocks DC, passes audio)
 - **Input impedance:** ~465kΩ (set by bias network)
 
+</details>
+
 ---
 
 ### **Quick Reference Button Chart**
@@ -646,7 +756,7 @@ For decoder testing at 600Hz, 30WPM try: `A A A A A / T T T T T / E E E E E / N 
 
 | Button | Short Press (Tap) | Long Press (Hold 1-2 sec) |
 | :--- | :--- | :--- |
-| **`MODE`** | Cycle Mode (`AM`→`SSB`→`CW`) | Toggle Sync *(SSB)* / CW Decoder *(CW)* / RDS *(FM)* |
+| **`MODE`** | Cycle Mode (`AM`→`SSB`→`CW`) | Toggle Sync *(LSB/USB)* / CW Decoder *(CW, only if `ENABLE_CW_DECODER 1`)* / Toggle RDS *(FM)* |
 | **`STEP`** | Activate Step selection | Open/Close Favorites Menu |
 | **`BW`** | Activate Bandwidth selection | Switch Sideband *(SSB/CW only)* |
 | **`BAND+`** | Activate Band selection | Cycle bands up continuously |
@@ -654,7 +764,7 @@ For decoder testing at 600Hz, 30WPM try: `A A A A A / T T T T T / E E E E E / N 
 | **`VOL+`** | Activate Volume control | Increase volume continuously |
 | **`VOL-`** | Toggle Mute | Decrease volume continuously |
 | **`AGC`** | Toggle Screen Power On/Off | Save Current Station to Favorites |
-| **Encoder** | Activate Step OR Start Scan (depends on `SCN`; scan not available in SSB/CW) | (No function) |
+| **`Encoder`** | Activate Step OR Start Scan (depends on `SCN`; scan not available in SSB/CW) | (No function) |
 
 ---
 
