@@ -1,5 +1,3 @@
-
-
 ### **ATS-20+ Firmware Modifications (diqezit's Fork)**
 
 <p align="center">
@@ -110,6 +108,12 @@ This fork introduces three main branches of improvements over the original firmw
 3.  **RDS MINI RadioText Decoder:** Starting from the v7.1.x series this fork includes a minimal RDS implementation (~500 bytes Flash). It decodes Group 2A/2B RadioText on FM and shows it as scrolling text on OLED row 6. Toggled at runtime via long-press `MODE` in FM mode (shows `RS` hint when active).
 
 **Important:** This audio improvement only affects the speaker output, as the headphone jack is connected before the amplifier.
+
+---
+
+### **Changelog**
+
+Full changelog is available here: [Changelog.md](https://github.com/diqezit/ats20_ats_ex/blob/mod_no_rds/Changelog.md)
 
 `I strongly recommend to connect the voltage divider as close to the pin as possible - use for this a two - 10kOm resistors.
 In order to eliminate possible interference with ADC readout distortion`
