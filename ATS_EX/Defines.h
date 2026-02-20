@@ -63,7 +63,7 @@ constexpr auto APP_VERSION = 71;
 // --------------- UI Strings ----------------------------------------------------------------------
 // =================================================================================================
 
-#define APP_NAME_LINE1 F("ATS-20+ V7.1.1")
+#define APP_NAME_LINE1 F("ATS-20+ V7.1.2")
 #define APP_NAME_LINE2 F("ATS EX")
 
 #define APP_SPLASH_CREDITS_TEXT  APP_SPLASH_PAD "MOD_NO_RDS github.com/diqezit/ats20_ats_ex"

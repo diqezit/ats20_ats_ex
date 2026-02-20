@@ -254,17 +254,17 @@ public:
     void clear() { fill(0); }
 
     // Erases specified rectangular area by writing zero bytes to defined window
-    void clear(int x0, int y0, int x1, int y1) {
+    void clear(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1) {
         x1++;
         y1++;
         y0 >>= 3;
-        y1 = (y1 - 1) >> 3;
+        y1 = (uint8_t)(y1 - 1) >> 3;
         y0 = OLED_CLAMP(y0, 0, _maxRow);
         y1 = OLED_CLAMP(y1, 0, _maxRow);
         x0 = OLED_CLAMP(x0, 0, _maxX);
         x1 = OLED_CLAMP(x1, 0, OLED_WIDTH);
 
-        setWindowRaw((uint8_t)x0, (uint8_t)y0, (uint8_t)x1, (uint8_t)y1);
+        setWindowRaw(x0, y0, x1, y1);
 
         beginData();
         uint16_t bytes = (uint16_t)(x1 - x0) * (y1 - y0 + 1);
@@ -373,13 +373,13 @@ public:
     // =================================================================================
 
     // Positions cursor in character grid coordinates (multiplies y by 8 for pixel alignment)
-    void setCursor(int x, int y) { setCursorXY(x, y << 3); }
+    void setCursor(uint8_t x, uint8_t y) { setCursorXY(x, (uint8_t)(y << 3)); }
 
     // Sets cursor to exact pixel coordinates for aligned drawing (assumes y multiple of 8)
-    void setCursorXY(int x, int y) {
+    void setCursorXY(uint8_t x, uint8_t y) {
         _x = x;
         _y = y;
-        setWindowRaw((uint8_t)x, (uint8_t)(y >> 3), _maxX, (uint8_t)(y >> 3));
+        setWindowRaw(x, (uint8_t)(y >> 3), _maxX, (uint8_t)(y >> 3));
     }
 
     // Toggles text inversion mode for white-on-black or black-on-white rendering
@@ -478,7 +478,7 @@ public:
 
     // render one seven-segment glyph into local buffer and push to display
     // split into helpers for clarity without flash size penalty
-    void drawDigit(char c, int px, int py) {
+    void drawDigit(char c, uint8_t px, uint8_t py) {
         uint8_t index;
         if (c == '.') index = 10;
         else if (c >= '0' && c <= '9') index = (uint8_t)(c - '0');
@@ -498,7 +498,7 @@ public:
         renderSegmentsToBuffer(localBuf, mask);
 
         // Push to panel
-        partialUpdate((uint8_t)px, (uint8_t)py, digitW, SEVEN_SEG_DIGIT_HEIGHT, localBuf);
+        partialUpdate(px, py, digitW, SEVEN_SEG_DIGIT_HEIGHT, localBuf);
     }
 
     // =================================================================================
@@ -537,12 +537,12 @@ public:
     }
 
     // Defines active window area for data writing on display
-    void setWindow(int x0, int y0, int x1, int y1) {
+    void setWindow(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1) {
         // keep safety clamps here (used by clear() etc.)
-        uint8_t cx0 = (uint8_t)OLED_CLAMP(x0, 0, _maxX);
-        uint8_t cx1 = (uint8_t)OLED_CLAMP(x1, 0, _maxX);
-        uint8_t cy0 = (uint8_t)OLED_CLAMP(y0, 0, _maxRow);
-        uint8_t cy1 = (uint8_t)OLED_CLAMP(y1, 0, _maxRow);
+        uint8_t cx0 = OLED_CLAMP(x0, 0, _maxX);
+        uint8_t cx1 = OLED_CLAMP(x1, 0, _maxX);
+        uint8_t cy0 = OLED_CLAMP(y0, 0, _maxRow);
+        uint8_t cy1 = OLED_CLAMP(y1, 0, _maxRow);
 
         // use raw to avoid repeating command code
         setWindowRaw(cx0, cy0, cx1, cy1);
@@ -580,7 +580,7 @@ public:
     static constexpr uint8_t _maxX = OLED_WIDTH - 1;
 
     bool _invState = 0;
-    int  _x = 0, _y = 0;
+    uint8_t _x = 0, _y = 0;
 
 private:
     // =================================================================================
