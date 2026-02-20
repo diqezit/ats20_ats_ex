@@ -129,11 +129,11 @@ uint8_t TwoWire::read() {
     return TWDR;
 }
 
-uint8_t TwoWire::requestFrom(uint8_t address, uint8_t length) {
+uint8_t __attribute__((noinline)) TwoWire::requestFrom(uint8_t address, uint8_t length) {
     return requestFrom(address, length, true);
 }
 
-uint8_t TwoWire::requestFrom(uint8_t address, uint8_t length, bool sendStop) {
+uint8_t __attribute__((noinline)) TwoWire::requestFrom(uint8_t address, uint8_t length, bool sendStop) {
     TWI_CLEAR_FLAGS();
 
     _stop_after_request = sendStop;

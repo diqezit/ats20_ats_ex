@@ -3,17 +3,36 @@
 #include "SI4735.h"
 
 class SI4735_fixed : public SI4735 {
+
+private:
+
+    // Read current frequency from last getStatus() response
+    // and sync internal tracking variable
+    uint16_t __attribute__((noinline)) readStatusFreq() {
+        si47x_frequency f;
+        f.raw.FREQH = currentStatus.resp.READFREQH;
+        f.raw.FREQL = currentStatus.resp.READFREQL;
+        currentWorkFrequency = f.value;
+        return f.value;
+    }
+
 public:
 
+    // ====================================================================================
+    // ============================== SEEK ================================================
+    // ====================================================================================
+    //
     // Original seekStation() is called inside a loop which re-issues the command
     // on every iteration. This version issues it once then polls status — correct
     // per AN332 and much faster
-    uint16_t seekStationProgressGetFrequency(void (*showFunc)(uint16_t f), bool (*stopSeeking)(), uint8_t up_down) {
-        si47x_frequency freq;
-        uint32_t elapsed_seek = millis();
 
+    uint16_t seekStationProgressGetFrequency(void (*showFunc)(uint16_t f),
+        bool (*stopSeeking)(),
+        uint8_t up_down) {
         if (lastMode == SSB_CURRENT_MODE)
             return (uint16_t)currentWorkFrequency;
+
+        uint32_t seekStart = millis();
 
         seekStation(up_down, 0);
         delay(100);
@@ -22,32 +41,27 @@ public:
             delay(200);
             getStatus(0, 0);
 
-            freq.raw.FREQH = currentStatus.resp.READFREQH;
-            freq.raw.FREQL = currentStatus.resp.READFREQL;
-            currentWorkFrequency = freq.value;
-            if (showFunc) showFunc(freq.value);
+            uint16_t f = readStatusFreq();
+            if (showFunc) showFunc(f);
 
-            if (currentStatus.resp.ERR || (stopSeeking && stopSeeking())) {
-                getStatus(0, 1); // second arg = 1 cancels ongoing seek
-                return (uint16_t)currentWorkFrequency;
-            }
-
-            if ((millis() - elapsed_seek) > maxSeekTime) {
+            if (currentStatus.resp.ERR
+                || (stopSeeking && stopSeeking())
+                || ((millis() - seekStart) > maxSeekTime)) {
+                // Cancel seek — response contains the actual chip frequency,
+                // which may have changed during showFunc delay
                 getStatus(0, 1);
-                return (uint16_t)currentWorkFrequency;
+                return readStatusFreq();
             }
 
         } while (!currentStatus.resp.STCINT);
 
-        getStatus(1, 0);
-        freq.raw.FREQH = currentStatus.resp.READFREQH;
-        freq.raw.FREQL = currentStatus.resp.READFREQL;
-        currentWorkFrequency = freq.value;
-
-        return (uint16_t)currentWorkFrequency;
+        getStatus(1, 0); // clear STCINT
+        return readStatusFreq();
     }
 
-    void seekStationProgress(void (*showFunc)(uint16_t f), bool (*stopSeeking)(), uint8_t up_down) {
+    void seekStationProgress(void (*showFunc)(uint16_t f),
+        bool (*stopSeeking)(),
+        uint8_t up_down) {
         (void)seekStationProgressGetFrequency(showFunc, stopSeeking, up_down);
     }
 
