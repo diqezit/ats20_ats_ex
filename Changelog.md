@@ -2937,3 +2937,67 @@ This modification completely eliminates the audio pops that occur when switching
 ------------------------------------------------------------------------------------------------------------
 
 
+### **MOD_NO_RDS v7.1.2**
+
+`SI4735_fixed.h / RadioControl.h / RDS.h`
+
+---
+
+## Fixed
+
+- **FM seek frequency desynchronization (rare)**
+  - After a hardware seek completed, the UI could display a stale intermediate frequency (e.g. 97.7 MHz) while the chip was actually tuned to the found station (e.g. 102.5 MHz)
+  - **Root cause:** when seek was interrupted by timeout or stop-button, `seekStationProgressGetFrequency()` returned the old `currentWorkFrequency` cached *before* the `showFunc()` callback and its 100 ms delay 
+	during which the chip could have already found and locked onto a station
+  - **Fix:** after `getStatus(0, 1)` (cancel), the actual chip frequency is now read from the cancel response (`READFREQH`/`READFREQL`) instead of returning the stale cached value
+  - Seek helper `readStatusFreq()` extracted to eliminate three identical frequency-read sequences
+
+- **Redundant `setFrequency()` after hardware seek**
+  - `finalizeSeekUpdate()` previously called `g_si4735.setFrequency(g_currentFrequency)` unconditionally after every seek — even though the chip was already tuned by the hardware seek itself
+  - This redundant FM_TUNE_FREQ / AM_TUNE_FREQ command could cause a race condition with the just-completed seek, contributing to the frequency desynchronization described above
+  - `setFrequency()` is now issued only when the band index actually changed (SW sub-band remap), where re-tuning is required
+
+- **Unnecessary `fmAlign10k()` after FM seek**
+  - `doSeek()` applied `fmAlign10k()` (floor-round to 10 kHz grid) to the FM seek result
+  - This was redundant because `setSeekFmSpacing(10)` already guarantees the chip returns a frequency on the correct 10 kHz grid
+  - In edge cases where the chip returned a frequency not perfectly aligned, `fmAlign10k()` could round it *away* from the actual tuned frequency, worsening the desync
+  - Removed the `fmAlign10k()` call and the now-unused helper function
+
+- **RDS text persisting after seek/tune**
+  - After seek or manual tuning to a new station, the previous station's RDS RadioText and clock remained on screen until the 6-second stale timeout expired
+  - Added `s_freq` tracking — RDS content is now cleared and redrawn instantly when `g_currentFrequency` changes
+
+- **RDS clock overwriting scrolling RadioText**
+  - Clock display ("HH:MM") was drawn over the rightmost 5 characters of the 21-column RadioText area, corrupting the scrolling text
+  - RT window is now limited to 16 characters (left zone), with clock pinned to the remaining 5 characters (right zone) — both on the same OLED row but never overlapping
+
+---
+
+## Changed
+
+- **`seekStationProgressGetFrequency()` cleanup**
+  - Three identical `READFREQH`/`READFREQL` read-and-pack sequences replaced by a single private `readStatusFreq()` helper
+  - Three separate abort conditions (ERR, stop-button, timeout) consolidated into one `if` block, eliminating duplicated cancel logic
+
+- **RDS clock placeholder when waiting for time**
+  - Previously the clock zone was blank until a Group 4A packet arrived
+  - Now shows `--:--` as soon as any RDS data is received (`s_ok != 0`), indicating the receiver is locked and waiting for time broadcast
+
+- **RDS rendering optimization (Single-pass I2C burst)**
+  - `rdsRedraw()` now builds the entire 21-character row (RT + Clock) in a local buffer using inline `rdsFillRT()` and `rdsFillClock()` helpers, sending it to the display via a single `oled.print()` call
+  - Eliminates 16 repetitive individual `oled.write()` calls per cycle, drastically reducing I2C bus overhead and freeing CPU cycles for the main `loop()`
+
+- **RDS internal refactoring**
+  - Extracted shared helpers to eliminate repeated patterns:
+    - `rdsHasData()` / `rdsHasValidClock()` — state query helpers (replace raw comparisons)
+    - `rdsElapsed(now, since)` — 16-bit millisecond delta (replaces inline casts)
+    - `rdsClearContent()` — clears RT + clock + `s_ok` without touching HW state
+    - `rdsClearAndRedraw()` / `rdsResetAndRedraw()` — combined state + draw helpers
+    - `fmtTime5()` — formats "HH:MM" into 5-char buffer (reuses `fmtDigit2`)
+  - Cached `g_si4735.rdsBlockCDPtr()` once in `rdsDecodeGroup2Chars()` instead of calling twice
+  - `rdsExtractCT()` minute calculation simplified from three statements to one expression
+  - `rdsDeactivateHw()` / `rdsActivateHw()` refactored to use early-return patterns
+  
+------------------------------------------------------------------------------------------------------------
+
+

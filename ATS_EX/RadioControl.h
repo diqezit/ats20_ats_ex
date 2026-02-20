@@ -904,15 +904,8 @@ static inline void swMapSeekToBand(uint16_t f) {
     swLinkSyncCore(false);
 }
 
-// align FM to 10 kHz grid so UI and spacing match what user expects
-static inline uint16_t fmAlign10k(uint16_t f) {
-    return (uint16_t)(f - (f % 10));
-}
-
 // apply DSP and UI after seek so audio and filters follow the new station
 static inline void finalizeSeekUpdate(bool bandChanged) {
-    g_si4735.setFrequency(g_currentFrequency);
-    applySwAfc(); // Recalculate AFC window for SW (AM) after seek
 
     // BW does not depend on frequency - reapply only when band changed (SW remap)
     if (bandChanged) {
@@ -920,6 +913,7 @@ static inline void finalizeSeekUpdate(bool bandChanged) {
         applyAgcSettings();
     }
 
+    applySwAfc(); // Recalculate AFC window for SW (AM) after seek
     syncActiveStateToBand();
     showStatus(true);
     markStateAsDirty();
@@ -928,7 +922,6 @@ static inline void finalizeSeekUpdate(bool bandChanged) {
 
 // manages hardware seek result and syncs state
 // SW remaps to sub-band for correct limits/labels
-// FM aligns to 10 kHz grid
 static void doSeek() {
     uint8_t oldBand = g_bandIndex;
 
@@ -937,21 +930,10 @@ static void doSeek() {
 
     g_currentFrequency = f;
 
-    // cache band type once (g_bandIndex may change only inside SW mapping below)
-    BandType bt = currentBandPtr()->bandType;
-
-    switch (bt) {
-    case SW_BAND_TYPE:
+    // SW seek can land in a different sub-band — remap for correct limits/labels
+    if (currentBandPtr()->bandType == SW_BAND_TYPE)
         swMapSeekToBand(f);
-        break;
-    case FM_BAND_TYPE:
-        g_currentFrequency = fmAlign10k(f);
-        break;
-    default:
-        break;
-    }
 
-    // BW does not depend on frequency - reapply only when band changed (SW remap)
     finalizeSeekUpdate(g_bandIndex != oldBand);
 }
 
