@@ -81,6 +81,7 @@ public:
     // ====================================================================================
 
     void rdsEnableMini() {
+        sendProperty(FM_RDS_INT_SOURCE, 0x0001);
         sendProperty(FM_RDS_CONFIG, 0xAA01);
         sendProperty(FM_RDS_INT_FIFO_COUNT, 1);
     }
@@ -117,6 +118,7 @@ public:
     inline uint8_t rdsGetBlockDL() const { return currentRdsStatus.resp.BLOCKDL; }
     inline uint8_t rdsGetBlockCH() const { return currentRdsStatus.resp.BLOCKCH; }
     inline uint8_t rdsGetBlockCL() const { return currentRdsStatus.resp.BLOCKCL; }
+    inline uint8_t rdsGetBLER()    const { return currentRdsStatus.raw[12]; }
 
     // ====================================================================================
     // ============================== SSB PATCH LOGIC ====================================

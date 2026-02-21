@@ -3009,3 +3009,33 @@ This modification completely eliminates the audio pops that occur when switching
 ------------------------------------------------------------------------------------------------------------
 
 
+### **MOD_NO_RDS v7.1.3**
+
+`RDS.h`, `SI4735_fixed.h`
+
+---
+
+## Added
+
+- **RDS Local Time Offset (`RDS.h`)**
+  - Added `rdsApplyLocalOffset()` — converts UTC from Group 4A to local time using station-transmitted offset (DL bits 5:0)
+  - Pure 8-bit math, no div/mod; handles half-hour zones (e.g. UTC+5:30) and midnight wraparound
+  - Enabled by default; comment out call in `rdsExtractCT()` to save ~30 bytes flash and display raw UTC
+
+- **BLER-gated Clock Time (`RDS.h`, `SI4735_fixed.h`)**
+  - CT (Group 4A) now accepted only when blocks C+D have BLER ≤ 1 (at most 1–2 bit corrected errors)
+  - Block B is skipped — its group-type field is already validated by `rdsIsGroup4A()`
+  - CT arrives once per minute — a single corrupted group means wrong clock for up to 60s, unlike RT which self-corrects on the next segment repeat within seconds
+  - Hardware pre-filter (`FM_RDS_CONFIG = 0xAA01`) rejects uncorrectable blocks (level 3) before they reach FIFO; software BLER gate provides additional protection for time-critical CT data
+  - Added `rdsGetBLER()` accessor in `SI4735_fixed.h` — reads raw[12] from FM_RDS_STATUS response
+
+## Fixed
+
+- **`rdsStoreChars` signed char comparison (`RDS.h`)**
+  - Changed `char c = *data++` to `uint8_t raw = *data++` — AVR `char` is signed, so bytes 0x80–0xFF were treated as negative and incorrectly replaced with spaces
+  - Practical impact minimal (most FM stations transmit ASCII 0x20–0x7F, and the OLED font only covers ASCII), but the comparison is now technically correct
+
+- **`rdsFillRT` pointer arithmetic (`RDS.h`)**
+  - Changed `s_rt[s_scrl]` pointer with separate index to `s_rt[s_scrl + i]` — avoids computing a pointer past array bounds when scroll position exceeds text length
+  
+------------------------------------------------------------------------------------------------------------
