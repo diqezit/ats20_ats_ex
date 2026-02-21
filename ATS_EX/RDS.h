@@ -7,6 +7,11 @@
 // Clears instantly on frequency change, A/B flag flip, or signal loss
 // Toggled via long-press MODE in FM mode
 // Uses only rdsQueryMini() from SI4735_fixed.h (no heavy PU2CLR RDS)
+//
+// BLER protection per AN332 §5.1.1 (FM_RDS_STATUS, RESP12) and §5.1.2 (FM_RDS_CONFIG):
+//   Hardware : FM_RDS_CONFIG = 0xAA01 — chip rejects uncorrectable blocks (level 3)
+//   Software : CT (Group 4A) accepted when blocks C+D have BLER ≤ 1 (minor corrections OK)
+//   RadioText: trusts chip filtering — level 1 corrections self-heal on next segment repeat
 
 #include "Arduino.h"
 #include "Defines.h"
@@ -115,10 +120,9 @@ static inline __attribute__((always_inline)) bool rdsIsGroup4A(uint16_t bB) { re
 static inline __attribute__((always_inline))
 void rdsFillRT(char* buf) {
     uint8_t remain = (s_len > s_scrl) ? (s_len - s_scrl) : 0;
-    const char* r = &s_rt[s_scrl];
 
     for (uint8_t i = 0; i < RDS_RT_WIN; i++)
-        *buf++ = (i < remain) ? *r++ : ' ';
+        *buf++ = (i < remain) ? s_rt[s_scrl + i] : ' ';
 }
 
 // Fill 5-char clock zone into buffer
@@ -226,8 +230,8 @@ static bool __attribute__((noinline)) rdsStoreChars(uint8_t pos, const uint8_t* 
     char* dst = &s_rt[pos];
 
     while (n--) {
-        char c = *data++;
-        if (c < RDS_CTRL_CHAR_MAX) c = ' '; // control chars cant be displayed
+        uint8_t raw = *data++;
+        char c = (raw >= RDS_CTRL_CHAR_MAX) ? (char)raw : ' ';
 
         if (*dst != c) {
             *dst = c;
@@ -250,16 +254,43 @@ static inline bool rdsDecodeGroup2Chars(uint16_t bB) {
     return false;
 }
 
-// Hour spans DH/CL boundary, minute spans DL/DH — per RDS standard bit layout
-// Local offset math skipped — costs too much flash on AVR for minimal benefit
+// =-=-=-=-=-=-=-=-= Time helpers =-=-=-=-=-=-=-=-=
+
+// Apply Local Time Offset from RDS Group 4A (DL bits 5:0)
+static inline void rdsApplyLocalOffset(uint8_t* hh, uint8_t* mm, uint8_t rds_offset) {
+    uint8_t val = rds_offset & 0x1F;
+    if (!val) return;
+
+    int8_t off_h = val >> 1;
+    int8_t off_m = (val & 1) ? 30 : 0;
+
+    if (rds_offset & 0x20) { off_h = -off_h; off_m = -off_m; }
+
+    int8_t m = (int8_t)*mm + off_m;
+    if (m >= 60) { m -= 60; off_h++; } else if (m < 0) { m += 60; off_h--; }
+
+    int8_t h = (int8_t)*hh + off_h;
+    if (h >= 24) h -= 24; else if (h < 0) h += 24;
+
+    *hh = (uint8_t)h;
+    *mm = (uint8_t)m;
+}
+
+// Extract UTC time from Group 4A + apply local offset
+// Hour spans DH/CL boundary, minute spans DL/DH per RDS spec
 static inline void rdsExtractCT(uint8_t* hh, uint8_t* mm) {
     const uint8_t dl = g_si4735.rdsGetBlockDL();
     const uint8_t dh = g_si4735.rdsGetBlockDH();
     const uint8_t cl = g_si4735.rdsGetBlockCL();
+
     uint8_t h = avrSwapNibbles(dh) & 0x0F;
     if (cl & 0x01) h |= 0x10;
+    uint8_t m = (uint8_t)((dh & 0x0F) << 2) | (uint8_t)(dl >> 6);
+
+    rdsApplyLocalOffset(&h, &m, dl & 0x3F);
+
     *hh = h;
-    *mm = (uint8_t)((dh & 0x0F) << 2) | (uint8_t)(dl >> 6);
+    *mm = m;
 }
 
 // =-=-=-=-=-=-=-=-= Gating and timing =-=-=-=-=-=-=-=-=
@@ -383,8 +414,18 @@ void __attribute__((noinline)) rdsMiniTask(uint16_t now16) {
 
     rdsMarkValid(n);
     uint16_t bB = g_si4735.rdsGetBlockB();
+
     rdsProcessGroup2(bB, n);
-    rdsProcessGroup4A(bB);
+
+    // CT accept only when blocks C and D have at most minor corrections (BLER ≤ 1)
+    // Block B group-type is already validated by rdsIsGroup4A(), so skip it
+    // RESP12 layout [BLEA 7:6] [BLEB 5:4] [BLEC 3:2] [BLED 1:0]
+    {
+        const uint8_t bler = g_si4735.rdsGetBLER();
+        if (((bler >> 2) & 0x03) <= 1 && (bler & 0x03) <= 1)
+            rdsProcessGroup4A(bB);
+    }
+
     rdsAdvanceScroll(n);
     rdsRedraw();
 }
