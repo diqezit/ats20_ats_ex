@@ -1,4 +1,10 @@
-### **ATS-20+ Firmware Modifications (diqezit's Fork)**
+# ATS-20 / ATS-20+ firmware (ATS_EX fork) — Favorites/Presets (station memory list)
+
+**diqezit’s fork of `goshante/ats20_ats_ex`** for **ATS-20 / ATS-20+ receivers** based on **ATmega328P + SI4732/SI4735** (OLED UI, AM/FM/SSB/CW).
+
+**Main feature:** a unified **Favorites / Presets / Station Memory / Bookmarks** list (**20 entries**) shared across **AM / FM / SSB / CW**, storing a full station snapshot: **frequency + mode + BFO** (so SSB/CW recall is accurate).
+
+**Also included:** `MOD_NO_RDS` (flash-saving build for ATmega328P), **RDS MINI RadioText**, **audio pop/click elimination (speaker path)**, plus many bug fixes and UI improvements.
 
 <p align="center">
   <img src="https://img.shields.io/badge/Firmware-ATS--20%2B-blueviolet?style=for-the-badge&logo=github" alt="Firmware ATS-20+">
@@ -9,105 +15,40 @@
   </a>
 </p>
 
-<div align="center">
-<table cellspacing="6" cellpadding="0">
-  <tr>
-    <td>
-      <a href="https://translate.google.com/translate?sl=en&tl=ru&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
-        <img src="https://img.shields.io/badge/Translate_to-Russian-3B82F6?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to Russian">
-      </a>
-    </td>
-    <td>
-      <a href="https://translate.google.com/translate?sl=en&tl=es&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
-        <img src="https://img.shields.io/badge/Translate_to-Spanish-EAB308?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to Spanish">
-      </a>
-    </td>
-    <td>
-      <a href="https://translate.google.com/translate?sl=en&tl=de&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
-        <img src="https://img.shields.io/badge/Translate_to-German-64748B?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to German">
-      </a>
-    </td>
-    <td>
-      <a href="https://translate.google.com/translate?sl=en&tl=fr&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
-        <img src="https://img.shields.io/badge/Translate_to-French-6366F1?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to French">
-      </a>
-    </td>
-    <td>
-      <a href="https://translate.google.com/translate?sl=en&tl=it&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
-        <img src="https://img.shields.io/badge/Translate_to-Italian-22C55E?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to Italian">
-      </a>
-    </td>
-  </tr>
-  <tr>
-    <td>
-      <a href="https://translate.google.com/translate?sl=en&tl=pl&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
-        <img src="https://img.shields.io/badge/Translate_to-Polish-F43F5E?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to Polish">
-      </a>
-    </td>
-    <td>
-      <a href="https://translate.google.com/translate?sl=en&tl=ja&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
-        <img src="https://img.shields.io/badge/Translate_to-Japanese-8B5CF6?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to Japanese">
-      </a>
-    </td>
-    <td>
-      <a href="https://translate.google.com/translate?sl=en&tl=zh-CN&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
-        <img src="https://img.shields.io/badge/Translate_to-Chinese-EF4444?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to Chinese (Simplified)">
-      </a>
-    </td>
-    <td>
-      <a href="https://translate.google.com/translate?sl=en&tl=pt&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
-        <img src="https://img.shields.io/badge/Translate_to-Portuguese-10B981?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to Portuguese">
-      </a>
-    </td>
-    <td>
-      <a href="https://translate.google.com/translate?sl=en&tl=ro&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
-        <img src="https://img.shields.io/badge/Translate_to-Romanian-06B6D4?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to Romanian">
-      </a>
-    </td>
-  </tr>
-  <tr>
-    <td>
-      <a href="https://translate.google.com/translate?sl=en&tl=uk&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
-        <img src="https://img.shields.io/badge/Translate_to-Ukrainian-84CC16?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to Ukrainian">
-      </a>
-    </td>
-    <td>
-      <a href="https://translate.google.com/translate?sl=en&tl=ar&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
-        <img src="https://img.shields.io/badge/Translate_to-Arabic-F97316?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to Arabic">
-      </a>
-    </td>
-    <td>
-      <a href="https://translate.google.com/translate?sl=en&tl=hi&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
-        <img src="https://img.shields.io/badge/Translate_to-Hindi-D946EF?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to Hindi">
-      </a>
-    </td>
-    <td>
-      <a href="https://translate.google.com/translate?sl=en&tl=tr&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex">
-        <img src="https://img.shields.io/badge/Translate_to-Turkish-0EA5E9?style=for-the-badge&logo=googletranslate&logoColor=white" alt="Translate to Turkish">
-      </a>
-    </td>
-  </tr>
-</table>
-</div>
+<details>
+  <summary><div align="center"><b>Translate this page (Google Translate)</b></div></summary>
+  <br>
+  <div align="center">
 
-This repository is a fork of the original `goshante/ats20_ats_ex` firmware, dedicated to custom modifications, bug fixes, and new features. All discussion regarding these new versions should take place here.
+[![Translate to Russian](https://img.shields.io/badge/Translate_to-Russian-3B82F6?style=for-the-badge&logo=googletranslate&logoColor=white)](https://translate.google.com/translate?sl=en&tl=ru&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex)
+[![Translate to Ukrainian](https://img.shields.io/badge/Translate_to-Ukrainian-84CC16?style=for-the-badge&logo=googletranslate&logoColor=white)](https://translate.google.com/translate?sl=en&tl=uk&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex)
+[![Translate to Polish](https://img.shields.io/badge/Translate_to-Polish-F43F5E?style=for-the-badge&logo=googletranslate&logoColor=white)](https://translate.google.com/translate?sl=en&tl=pl&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex)
+[![Translate to German](https://img.shields.io/badge/Translate_to-German-DC2626?style=for-the-badge&logo=googletranslate&logoColor=white)](https://translate.google.com/translate?sl=en&tl=de&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex)
+[![Translate to French](https://img.shields.io/badge/Translate_to-French-6366F1?style=for-the-badge&logo=googletranslate&logoColor=white)](https://translate.google.com/translate?sl=en&tl=fr&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex)
+[![Translate to Spanish](https://img.shields.io/badge/Translate_to-Spanish-EAB308?style=for-the-badge&logo=googletranslate&logoColor=white)](https://translate.google.com/translate?sl=en&tl=es&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex)
+[![Translate to Portuguese](https://img.shields.io/badge/Translate_to-Portuguese-10B981?style=for-the-badge&logo=googletranslate&logoColor=white)](https://translate.google.com/translate?sl=en&tl=pt&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex)
+[![Translate to Italian](https://img.shields.io/badge/Translate_to-Italian-22C55E?style=for-the-badge&logo=googletranslate&logoColor=white)](https://translate.google.com/translate?sl=en&tl=it&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex)
+[![Translate to Turkish](https://img.shields.io/badge/Translate_to-Turkish-0EA5E9?style=for-the-badge&logo=googletranslate&logoColor=white)](https://translate.google.com/translate?sl=en&tl=tr&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex)
+[![Translate to Arabic](https://img.shields.io/badge/Translate_to-Arabic-F97316?style=for-the-badge&logo=googletranslate&logoColor=white)](https://translate.google.com/translate?sl=en&tl=ar&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex)
+[![Translate to Hindi](https://img.shields.io/badge/Translate_to-Hindi-D946EF?style=for-the-badge&logo=googletranslate&logoColor=white)](https://translate.google.com/translate?sl=en&tl=hi&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex)
+[![Translate to Chinese](https://img.shields.io/badge/Translate_to-Chinese-EF4444?style=for-the-badge&logo=googletranslate&logoColor=white)](https://translate.google.com/translate?sl=en&tl=zh-CN&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex)
+[![Translate to Japanese](https://img.shields.io/badge/Translate_to-Japanese-8B5CF6?style=for-the-badge&logo=googletranslate&logoColor=white)](https://translate.google.com/translate?sl=en&tl=ja&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex)
+[![Translate to Korean](https://img.shields.io/badge/Translate_to-Korean-22C55E?style=for-the-badge&logo=googletranslate&logoColor=white)](https://translate.google.com/translate?sl=en&tl=ko&u=https%3A%2F%2Fgithub.com%2Fdiqezit%2Fats20_ats_ex)
 
-Your feedback and suggestions are welcome!
-**Please**, put a star on the repository to raise the firmware higher up on the global list. **Thanks :)**
-
-You can find the original project here: [goshante/ats20_ats_ex](https://github.com/goshante/ats20_ats_ex)
+  </div>
+</details>
 
 ---
 
-### **Key Modifications**
+## Key Modifications
 
 This fork introduces three main branches of improvements over the original firmware:
 
-1.  **Audio Pop/Click Elimination (Hardware & Software Mod):** A modification that completely removes pops and clicks when switching modes. It requires a minor physical change to the receiver circuit.
-2.  **`MOD_NO_RDS` Firmware Series:** An alternative firmware branch where the original full-weight RDS feature was replaced with a lightweight **RDS MINI** decoder to stay within ATmega328P flash limits. This freed up program space for new functionality, most notably a **unified Favorites system for all bands (AM, FM, SSB, CW)**, along with dozens of other fixes and improvements in code.
-3.  **RDS MINI RadioText Decoder:** Starting from the v7.1.x series this fork includes a minimal RDS implementation (~500 bytes Flash). It decodes Group 2A/2B RadioText on FM and shows it as scrolling text on OLED row 6. Toggled at runtime via long-press `MODE` in FM mode (shows `RS` hint when active).
+1. **Audio Pop/Click Elimination (Hardware & Software Mod):** a modification that removes pops/clicks when switching modes (requires a small physical change to the receiver circuit).
+2. **`MOD_NO_RDS` firmware series:** the original full RDS was replaced with a lightweight **RDS MINI** decoder to stay within ATmega328P flash limits. This freed program space for new functionality — most notably a **unified Favorites system for all bands (AM, FM, SSB, CW)** — plus many other fixes and improvements.
+3. **RDS MINI RadioText decoder:** starting from the **v7.1.x** series this fork includes a minimal RDS implementation (~500 bytes Flash). It decodes **Group 2A/2B RadioText** on FM and shows it as scrolling text on OLED row 6. Toggle at runtime via **long-press `MODE` in FM mode** (shows `RS` hint when active).
 
-**Important:** This audio improvement only affects the speaker output, as the headphone jack is connected before the amplifier.
+**Important:** the audio improvement affects only the **speaker output**, because the headphone jack is connected before the amplifier.
 
 ---
 
