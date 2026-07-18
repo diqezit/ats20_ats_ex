@@ -589,6 +589,7 @@ static void __attribute__((noinline)) configureFMMode(const Band& current_band) 
 static void configureAMMode(const Band& current_band, uint16_t minFreq,
     uint16_t maxFreq, ModeContext modeCtx) {
     g_currentMode = AM;
+    g_ssbLoaded = false;
 
     // Set primary mode and frequency
     g_si4735.setAM(

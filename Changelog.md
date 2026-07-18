@@ -3039,3 +3039,28 @@ This modification completely eliminates the audio pops that occur when switching
   - Changed `s_rt[s_scrl]` pointer with separate index to `s_rt[s_scrl + i]` — avoids computing a pointer past array bounds when scroll position exceeds text length
   
 ------------------------------------------------------------------------------------------------------------
+
+
+### **MOD_NO_RDS v7.1.4**
+
+`microWire.cpp`, `RadioControl.h`
+
+---
+
+## Fixed
+
+- **I2C NACK cascade and bus hang**
+	https://github.com/diqezit/ats20_ats_ex/issues/62
+	
+  - `write()` now returns `0` immediately if a NACK flag is already set, preventing cascading ~30ms TWINT timeouts on subsequent bytes
+  - `write(const uint8_t* buffer, size_t size)` breaks on first failed byte and returns actual bytes sent instead of blindly consuming the buffer
+  - `failAddressNack()` and `failDataNack()` now immediately issue a STOP condition to release the I2C bus, preventing TWI hardware stalls
+
+- **Favorites recall stuck in AM after SSB station**
+	https://github.com/diqezit/ats20_ats_ex/issues/63
+
+  - `configureAMMode()` did not clear `g_ssbLoaded`, unlike `configureFMMode()`
+  - Stale true flag caused `favoriteNeedsFullReset()` to skip `loadSSBPatch()` on next SSB recall UI showed LSB/USB while chip stayed in AM
+  - Fixed by clearing `g_ssbLoaded = false` on entry, matching the existing pattern in `configureFMMode()` and `performModeCycle()`
+  
+------------------------------------------------------------------------------------------------------------

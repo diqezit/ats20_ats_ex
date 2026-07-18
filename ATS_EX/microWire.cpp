@@ -12,7 +12,7 @@ enum : uint8_t {
 // Wait for TWINT with about 30ms timeout at 16MHz
 // On timeout: reset TWI hardware and return 0
 static uint8_t __attribute__((noinline)) twiWaitTwintOrReset() {
-    uint16_t n = 0;
+    uint16_t n = 60000; // 26 ms timeout upon 16 MHz
     do {
         if (TWCR & _BV(TWINT)) return 1;
     } while (--n);
@@ -79,22 +79,24 @@ uint8_t TwoWire::endTransmission(bool stop) {
 
 // Status 0x20 = SLA+W NACK, 0x48 = SLA+R NACK, 0x30 = data NACK
 size_t TwoWire::write(uint8_t data) {
+    if (_address_nack || _data_nack) return 0;
+
     TWDR = data;
 
     if (!twiCommand((uint8_t)(_BV(TWEN) | _BV(TWINT)))) {
         failDataNack();
-        return 1;
+        return 0;
     }
 
     switch ((uint8_t)(TWSR & 0xF8)) {
     case TWI_ST_SLA_W_NACK:
     case TWI_ST_SLA_R_NACK:
         failAddressNack();
-        break;
+        return 0;
 
     case TWI_ST_DATA_NACK:
         failDataNack();
-        break;
+        return 0;
 
     default:
         break;
@@ -178,8 +180,12 @@ uint8_t TwoWire::requestFrom(int address, int quantity, int sendStop) {
 }
 
 size_t TwoWire::write(const uint8_t* buffer, size_t size) {
-    for (size_t i = 0; i < size; ++i) write(buffer[i]);
-    return size;
+    size_t sent = 0;
+    while (sent < size) {
+        if (write(buffer[sent]) != 1) break;
+        ++sent;
+    }
+    return sent;
 }
 
 void TwoWire::start() {
@@ -194,11 +200,13 @@ void TwoWire::stop() {
 void __attribute__((noinline)) TwoWire::failAddressNack() {
     _address_nack = true;
     _requested_bytes = 0;
+    stop();
 }
 
 void __attribute__((noinline)) TwoWire::failDataNack() {
     _data_nack = true;
     _requested_bytes = 0;
+    stop();
 }
 
 TwoWire Wire = TwoWire();
