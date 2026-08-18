@@ -168,7 +168,6 @@ static inline void handleEEPROMReset() {
 #endif
     if (eepromResetKeysHeld()) {
         clearEEPROMVersion();
-        oled.clear();
     } else {
 #if ENABLE_SPLASH_SCREEN
         showSplashScreen();

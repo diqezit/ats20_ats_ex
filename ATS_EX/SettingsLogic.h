@@ -176,11 +176,17 @@ void doSSBSoftMuteMode(int8_t v) {
         g_si4735.setSSBSoftMute(getSettingParam(SSM));
 }
 
-//Settings: SSB AVC Switch
-void doSSBAVC(int8_t v) {
-    toggleSetting(SVC);
+// Common tail for SSB-related toggle settings (Sync, SVC)
+// reduce code duplication
+static void __attribute__((noinline)) toggleSettingAndSyncSSB(uint8_t idx) {
+    toggleSetting(idx);
 
     if (isSSB()) applyBandConfiguration(false);
+}
+
+//Settings: SSB AVC Switch
+void doSSBAVC(int8_t v) {
+    toggleSettingAndSyncSSB(SVC);
 }
 
 //Settings: SSB Cutoff filter
@@ -196,9 +202,7 @@ void doSync(int8_t v) {
     // Sync is not need in CW mode
     if (g_currentMode == CW) return;
 
-    toggleSetting(Sync);
-
-    if (isSSB()) applyBandConfiguration(false);
+    toggleSettingAndSyncSSB(Sync);
 }
 
 // Settings: CW Pitch

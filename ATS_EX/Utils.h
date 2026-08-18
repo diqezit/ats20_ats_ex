@@ -162,12 +162,6 @@ static void doSwitchLogic(int8_t& param, int8_t low, int8_t high, int8_t step) {
     }
 }
 
-// Helper to clamp an index to a valid range, resetting to 0 if out of bounds
-// strict uses a > comparison, otherwise >= is used
-static inline void clamp_index(int8_t& var, const int8_t max_val, bool strict = false) {
-    if (strict ? (var > max_val) : (var >= max_val)) var = 0;
-}
-
 // Unmute audio in hardware and clear squelch state flag
 static void __attribute__((noinline)) unmuteAndClearSquelchCutoff() {
     g_si4735.setAudioMute(false);

@@ -3064,3 +3064,81 @@ This modification completely eliminates the audio pops that occur when switching
   - Fixed by clearing `g_ssbLoaded = false` on entry, matching the existing pattern in `configureFMMode()` and `performModeCycle()`
   
 ------------------------------------------------------------------------------------------------------------
+
+### **MOD_NO_RDS v7.1.5**
+
+`Memory.h / RadioControl.h / ATS_EX.ino / Globals.h / SSD1306_OLED.h / Rotary.cpp / SI4735.cpp / SMeter.h / SettingsData.h / Favorites.h / Input.h`
+
+---
+
+## Fixed
+
+- **applyBrightness() missing on factory reset**
+  - Reset path never applied compiled default brightness, stayed at OLED default until reboot
+  - Moved call out of `readAllReceiverInformation()` (both branches) into `setup()` after `loadReceiverConfig()`, runs once unconditionally
+
+- **Rate-limit swallowing final BFO in SSB mode**
+  - `ssbChipRate()` had 40ms rate-limit that could leave chip tuned to previous BFO when encoder stops mid-window
+  - UI showed correct frequency/BFO while receiver stayed on previous values until next tuning event
+  - Added deferred `ssbChipRate()` call in `handlePeriodicTasks()` for SSB modes
+
+- **False "SAVED" confirmation on full/duplicate favorite**
+  - `addFavorite()` silently failed if the list was full (20/20) or the station already existed, but `showSavedConfirmation()` was called unconditionally
+  - `addFavorite()` now returns `bool` (true on success), `handleAgcLongDone()` only shows the confirmation screen if the station was actually added
+
+---
+
+## Changed
+
+- **saveLastFreq() helper**
+  - Duplicate `g_lastSavedFrequency = g_currentFrequency` in `bandSwitch()` / `saveAllReceiverInformation()` merged into one noinline function
+  - Declared in `Globals.h`, defined in `ATS_EX.ino` next to `getAndResetEncoderCount()`
+
+- **Brightness call unified**
+  - Single call in `setup()`, removed from valid EEPROM branch in `readAllReceiverInformation()`
+
+- **Removed `setI2CStandardMode()` call in `ssbPatchFinalize()`**
+  - `Wire.setClock(100000)` immediately overwritten by `applyI2CSpeed()` which writes TWBR based on CPU prescaler
+
+- **Settings validation table-driven**
+  - 8 separate if-blocks for settings clamping replaced with single PROGMEM table + loop
+  - `g_clampTable[]` stores `{index, max, default}` for CPUSpeed, Brightness, DisplayOff, FmSmAtt, FmSmThr, SoftMuteThr, SQL, SMeter
+  - `validateLoadedSettings()` now only validates mode-specific settings (AGC/SoftMute/AVC)
+
+- **Rotary encoder table moved to PROGMEM**
+  - `ttable` was allocated in SRAM (.data) and duplicated in FLASH
+  - Now stored in PROGMEM, read via `pgm_read_byte` in `Rotary::process()`
+- **RSQ response size type optimized**
+  - `int sizeResponse` changed to `uint8_t` in `getCurrentReceivedSignalQuality()`
+  - Removes 16-bit arithmetic in response loop, explicit `(int)` cast added for `Wire.requestFrom` to resolve ambiguous overload
+
+---
+
+## Optimizations
+
+- **EEPROM settings read** `eeprom_read_block()` replaces per byte loop
+- **Dead `g_previousFrequency` write removed** overwritten before use
+- **FM step index cast** `(uint8_t)` cast on `stepIdxFM` removes sign extend, matches existing AM/SSB pattern
+- **saveLastFreq() dedup** one shared helper instead of two inline copies
+- **Removed dead zero-gap check in S-meter interpolation**
+- **`main()` entry point attributes** `__attribute__((OS_main, used, noreturn))` added to `main()`. 
+  - Eliminates standard prologue/epilogue (push/pop Y-pointer and `ret`) reducing register pressure
+- **`loadBandState()` clamping refactored** Unpacked EEPROM values are now clamped in local registers before being committed to the `Band` struct. 
+  - Prevents GCC `-Os` from emitting redundant `movw` instructions to reload the `Band*` pointer (Z) before every field write
+
+- **GyverOLED core refactoring ** 
+  - `writeCore()` and `partialUpdate()` marked as `__attribute__((noinline))` to deduplicate their guards and window-setup code from `print()`, `write()`, `clearBox()`, and `drawDigit()` (-48 bytes FLASH)
+  - 8-bit shifts (`y >> 3`) forced via `BIT8_LSR3` macro to prevent GCC `-Os` from promoting them to 16-bit `asr/ror` loops
+  - Segment mask iteration (`renderSegmentsToBuffer`) changed to rotate the mask (`m >>= 1`) instead of shifting `1 << b` every loop
+  - `writeCore()` font pointer lookup hoisted to run once per character instead of once per column
+  
+- **Removed redundant per-line `clearBox()` from `fav_drawLine()`**
+  - The full-page clear in `fav_drawPageOrEmpty()` already covers all list rows (y=8..63), so clearing each row again before drawing was redundant on full redraws
+
+- **PROGMEM packed reads**
+  - `showChargeOnDisplay()` removed dead suffix ternary for 100% battery display `oledPrintU8_3suf` ignores suffix at v==100 anyway
+  - `renderSegmentsToBuffer()` in `GyverOLED` single `pgm_read_dword` for segment blueprints instead of 4×`pgm_read_byte`
+  
+- **SSB settings toggle dedup**: Extracted `toggleSettingAndSyncSSB()` helper for `doSync()` and `doSSBAVC()`
+
+------------------------------------------------------------------------------------------------------------

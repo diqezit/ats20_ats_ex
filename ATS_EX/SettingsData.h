@@ -10,6 +10,7 @@
 //   - g_modeSettings[][] (mode-dependent settings storage; synced with EEPROM)
 //   - g_SettingsParams[] (settings values buffer; menu edits this array)
 //   - g_SettingsMeta[] (PROGMEM metadata: names, types, callbacks)
+//   - g_clampTable[] (PROGMEM validation table for EEPROM load)
 //   - switch_setting_map[] + paramTexts[][] (PROGMEM tables used by UI formatting)
 //   - Navigation tables for column-first cursor movement
 //
@@ -215,6 +216,32 @@ const SettingMeta g_SettingsMeta[SETTINGS_MAX] PROGMEM = {
     { "SCN", 1,  Switch,     doScanSwitch,        isAlwaysActive   },
     { "FVA", 0,  Num,        doFmVolAdjust,       isAlwaysActive   },
     { "SWL", 0,  Switch,     doSwLink,            isAlwaysActive   },
+};
+
+// =================================================================================================
+// Settings validation table
+// =================================================================================================
+
+// Clamp table entry {setting index, max allowed value, default if exceeded}
+// Used to validate all settings after EEPROM load in single loop
+struct ClampEntry {
+    uint8_t idx;
+    uint8_t max;
+    uint8_t def;
+};
+
+static const ClampEntry g_clampTable[] PROGMEM = {
+    // Core settings
+    {CPUSpeed,    1,  0},
+    {Brightness,  BRIGHTNESS_MAX_LEVEL, 4},
+    {DisplayOff,  DISPLAY_OFF_TIMER_MAX_LEVEL, 0},
+
+    // Audio/RF settings
+    {FmSmAtt,     FM_SOFT_MUTE_MAX_ATTN_LEVEL, FM_SOFT_MUTE_DEFAULT_ATT},
+    {FmSmThr,     FM_SOFT_MUTE_MAX_SNR_LEVEL,  FM_SOFT_MUTE_DEFAULT_THR},
+    {SoftMuteThr, SOFT_MUTE_MAX_SNR_THRESHOLD, 0},
+    {SQL,         SQUELCH_MAX_LEVEL, 0},
+    {SMeter,      3, 0},
 };
 
 // RAM: Only mutable parameter values (menu edits this buffer)

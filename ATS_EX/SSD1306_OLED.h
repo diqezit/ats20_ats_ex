@@ -10,7 +10,7 @@
     (!) Minimal features for only main functionality with ATS_EX receiver
 
     Manual generation of segments 14x32 resolution (7-segment display) use SSD1306 minimal library
-    By diqezit v2.1
+    By diqezit v2.2
     Charset: '.', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
 
     My repos: https://github.com/diqezit/TestDisplay
@@ -86,6 +86,17 @@
         (OLED).invertText(false);                                          \
     } while (0)
 
+// Force 8-bit LSR instead of 16-bit ASR loop under -Os
+// Inline asm prevents integer promotion to 16-bit int
+#define BIT8_LSR3(val) \
+    do { \
+        asm volatile ( \
+            "lsr %0" "\n\t" \
+            "lsr %0" "\n\t" \
+            "lsr %0" \
+            : "+r" (val) \
+        ); \
+    } while (0)
 
 // =====================================================================================
 // ===== Constants =====================================================================
@@ -305,22 +316,29 @@ public:
     static constexpr uint8_t FONT_TOTAL = FONT_COLS + FONT_SPACER;
 
     // Core write without beginData()/endTransm() for batching
-    inline void writeCore(uint8_t data) {
-        if (_x + FONT_TOTAL > _maxX) return;  // Skip if beyond screen
+    // one glyph into an already open I2C data burst from print/write
+    __attribute__((noinline)) void writeCore(uint8_t data) {
+        if (_x + FONT_TOTAL > _maxX) return;  // clip so a long string cannot overwrite next UI field
 
-        const uint8_t inv = (uint8_t)_invState;
+        // invert fills pixels and gap as one cell
+        const uint8_t invMask = _invState ? 0xFFu : 0x00u;
 
-        // 5 columns from font table
-        for (uint8_t col = 0; col < FONT_COLS; col++) {
-            uint8_t bits = getFont(data, col);
-            if (inv) bits = (uint8_t)~bits;
-            sendByte(bits);
+        // missing RDS/RadioText char still occupies a cell
+        // space glyph is five zeros so it is the blank fallback
+        const uint8_t* glyphPtr = &_charMap_min[0][0];
+        if ((uint8_t)(data - 32u) < 95u) {
+            const uint8_t index = pgm_read_byte(&_charLookup[data - 32u]);
+            if (index != 0xFFu)
+                glyphPtr = &_charMap_min[index][0];
         }
 
-        // 1 column spacing
-        sendByte(inv ? 0xFF : 0x00);
+        uint8_t n = FONT_COLS;
+        do {
+            sendByte((uint8_t)(pgm_read_byte(glyphPtr++) ^ invMask));
+        } while (--n);
 
-        _x += FONT_TOTAL; // Update cursor once
+        sendByte(invMask);  // spacing not stored in flash
+        _x += FONT_TOTAL;
     }
 
     // Single-char write
@@ -379,7 +397,9 @@ public:
     void setCursorXY(uint8_t x, uint8_t y) {
         _x = x;
         _y = y;
-        setWindowRaw(x, (uint8_t)(y >> 3), _maxX, (uint8_t)(y >> 3));
+        uint8_t page = y;
+        BIT8_LSR3(page);
+        setWindowRaw(x, page, _maxX, page);
     }
 
     // Toggles text inversion mode for white-on-black or black-on-white rendering
@@ -395,7 +415,7 @@ public:
     void local_setPixel(unsigned char* buf, uint8_t curr_x, uint8_t curr_y) {
         // Keep shifts strictly 8-bit to avoid int-promotions turning this into 16-bit shift loops under -Os
         uint8_t page = curr_y;
-        page >>= 3;
+        BIT8_LSR3(page);
         uint8_t bit = (uint8_t)(curr_y & 7);
 
         // idx = curr_x * SEG_PAGES + page
@@ -403,7 +423,9 @@ public:
         static_assert(SEG_PAGES == 4, "local_setPixel assumes SEG_PAGES == 4");
         uint8_t idx = (uint8_t)((curr_x << 2) + page);
 
-        buf[idx] |= (uint8_t)(1u << bit);
+        uint8_t m = 1;
+        m <<= bit;
+        buf[idx] |= m;
     }
 
     // Renders horizontal segment in buffer (2px thick)
@@ -427,9 +449,14 @@ public:
     // =-=-=-=-=-=-=-=-= Mid-level data transfer =-=-=-=-=-=-=-=-=
 
     // send rectangular window of data to display
-    void partialUpdate(uint8_t x, uint8_t y, uint8_t w, uint8_t h, const unsigned char* data) {
-        uint8_t startPage = y >> 3;
-        uint8_t endPage = (y + h - 1) >> 3;
+    __attribute__((noinline))
+        void partialUpdate(uint8_t x, uint8_t y, uint8_t w, uint8_t h, const unsigned char* data) {
+        uint8_t startPage = y;
+        BIT8_LSR3(startPage);
+
+        uint8_t endPage = (y + h - 1);
+        BIT8_LSR3(endPage);
+
         setWindowRaw(x, startPage, (uint8_t)(x + w - 1), endPage);
 
         uint8_t pages = endPage - startPage + 1;
@@ -461,16 +488,25 @@ public:
     // mask mapping keeps glyph definitions compact in flash
     inline void renderSegmentsToBuffer(uint8_t* buf, uint8_t mask) {
         const uint8_t* ptr = _oled_segs;
+        uint8_t m = mask;
         for (uint8_t b = 0; b < 8; b++, ptr += 4) {
-            if (mask & (1 << b)) {
-                uint8_t s_x = pgm_read_byte(ptr);
-                uint8_t s_y = pgm_read_byte(ptr + 1);
-                uint8_t s_len = pgm_read_byte(ptr + 2);
-                uint8_t isHoriz = pgm_read_byte(ptr + 3);
+            if (m & 1) {
+
+                // Read 4 consecutive PROGMEM bytes in a single optimal sequence
+                // 
+                // prevents GCC from recalculating the Z pointer 4 times
+                //
+                uint32_t packed = pgm_read_dword(ptr);
+                uint8_t s_x     = (uint8_t)(packed);
+                uint8_t s_y     = (uint8_t)(packed >> 8);
+                uint8_t s_len   = (uint8_t)(packed >> 16);
+                uint8_t isHoriz = (uint8_t)(packed >> 24);
 
                 if (isHoriz) draw_horizontal_line(buf, s_x, s_y, s_len);
                 else        draw_vertical_line(buf, s_x, s_y, s_len);
             }
+            // Force 8-bit logical shift right (avoid 16-bit int-promotion asr/ror)
+            asm volatile ("lsr %0" : "+r" (m));
         }
     }
 
@@ -566,9 +602,9 @@ public:
     // retrieves font column byte using a lookup table for a compact font map
     // col range is guaranteed by write() loop, no bounds check needed
     uint8_t getFont(uint8_t font, uint8_t col) {
-        if (font < 32 || font > 126) return 0;
-        uint8_t index = pgm_read_byte(&(_charLookup[font - 32]));
-        return (index == 0xFF) ? 0 : pgm_read_byte(&(_charMap_min[index][col]));
+        if ((uint8_t)(font - 32u) >= 95u) return 0;
+        const uint8_t index = pgm_read_byte(&_charLookup[font - 32u]);
+        return (index == 0xFFu) ? 0 : pgm_read_byte(&_charMap_min[index][col]);
     }
 
     // =================================================================================

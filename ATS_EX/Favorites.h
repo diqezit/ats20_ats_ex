@@ -130,8 +130,8 @@ bool favoriteNeedsFullReset(
 }
 
 // Add current station details to RAM and set dirty flag
-static void addFavorite() {
-    if (g_totalFavorites >= MAX_FAVORITES) return;
+static bool addFavorite() {
+    if (g_totalFavorites >= MAX_FAVORITES) return false;
 
     // Snapshot volatile/non-volatile inputs once
     const uint16_t f = g_currentFrequency;
@@ -143,7 +143,10 @@ static void addFavorite() {
     uint8_t n = g_totalFavorites;
 
     while (n--) {
-        if (slot->frequency == f && slot->modulation == m) return;  // duplicate
+        if (slot->frequency == f
+            && slot->modulation == m) {
+            return false;  // duplicate
+        }
         ++slot;  // advances by sizeof(FavoriteStation) == 5
     }
 
@@ -154,6 +157,8 @@ static void addFavorite() {
 
     ++g_totalFavorites;
     g_favoritesDirty = true;
+
+    return true;
 }
 
 // Delete selected favorite from RAM and set dirty flag
@@ -263,15 +268,19 @@ static void fav_tuneFullReconfig(const FavoriteStation& fav, uint8_t targetBand)
 ///
 /// Prefers the fast FM preset jump when it is safe
 /// All other cases use the full reconfiguration path
+///
+/// Uncomment markStateAsDirty() to persist the recalled station after SAVE_ON_IDLE_TIMEOUT
+/// Instant power-off before that timeout still does not write EEPROM (no shutdown save)
 void tuneToSelectedFavorite() {
     if (!g_totalFavorites) return;
 
     const FavoriteStation& fav = g_favorites[g_favoriteSelected];
     const uint8_t targetBand = findBandForFavorite(fav);
 
-    if (fav_tryTuneFastFmToFm(fav, targetBand)) return;
+    if (!fav_tryTuneFastFmToFm(fav, targetBand))
+        fav_tuneFullReconfig(fav, targetBand);
 
-    fav_tuneFullReconfig(fav, targetBand);
+    // markStateAsDirty();  // idle-save last-freq after favorite recall
 }
 
 // ====================================================================================
@@ -471,13 +480,12 @@ static inline void fav_drawModeLabel(const FavoriteStation& fav,
 }
 
 // draw one favorite line
-// clear row to avoid leftovers from previous content
 static inline void fav_drawLine(uint8_t idx,
     uint8_t row,
     bool sel) {
     const auto& fav = g_favorites[idx];
 
-    clearBox(0, row * UI_CHAR_H, UI_SCREEN_W, UI_CHAR_H);
+    // clearBox(0, row * UI_CHAR_H, UI_SCREEN_W, UI_CHAR_H);
     oled.setCursor(0, row);
 
     oledPrintFavPrefix(idx, sel);

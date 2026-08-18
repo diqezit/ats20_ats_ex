@@ -380,8 +380,8 @@ static inline __attribute__((always_inline)) void ssbPatchFinalize() {
         g_bwSSBIdx[(uint8_t)band->bwIdxSSB],
         1, 0, 1, 0, 1
     );
-    g_si4735.setI2CStandardMode();
-    applyI2CSpeed(); // restore OLED speed after SSB patch
+
+    applyI2CSpeed(); // restore OLED speed after SSB patch / alr overwrites TWBR/TWSR
     g_ssbLoaded = true;
     setAmpState(true);
 }
@@ -390,8 +390,8 @@ static inline __attribute__((always_inline)) void ssbPatchFinalize() {
 // mute amp during patch + use fast I2C for throughput + restore band BW then unmute
 static void loadSSBPatch() {
     ssbPatchEnter();
-    ssbPatchDownload();
-    ssbPatchFinalize();
+    ssbPatchDownload();    // returns void, cannot check success
+    ssbPatchFinalize();    // sets g_ssbLoaded = true unconditionally
 }
 
 // Applies user-defined FM soft mute parameters
@@ -568,7 +568,7 @@ static void __attribute__((noinline)) configureFMMode(const Band& current_band) 
         current_band.minimumFreq,
         current_band.maximumFreq,
         current_band.currentFreq,
-        g_tabStepFM[current_band.stepIdxFM]
+        g_tabStepFM[(uint8_t)current_band.stepIdxFM]
     );
 
     applyFmSeekConfig(current_band.minimumFreq, current_band.maximumFreq);
@@ -739,7 +739,7 @@ static void applyBandConfiguration(bool extraSSBReset) {
     applyCompensatedVolume();
     applyBandAmpMute(switchingBetweenFMandAM, false);
 
-    g_previousFrequency = g_currentFrequency;
+    syncPreviousFreq();
 }
 
 // ==========================================
@@ -923,7 +923,7 @@ static inline void finalizeSeekUpdate(bool bandChanged) {
     syncActiveStateToBand();
     showStatus(true);
     markStateAsDirty();
-    g_previousFrequency = g_currentFrequency;
+    syncPreviousFreq();
 }
 
 // manages hardware seek result and syncs state
@@ -969,7 +969,7 @@ static inline void applySameFamilySwitchUI(BandType oldType, BandType newType) {
     showFrequency(clearUnits);
     showBandTag();
     showStep();
-    g_previousFrequency = g_currentFrequency;
+    syncPreviousFreq();
 }
 
 // switches band and applies radio state
@@ -997,7 +997,7 @@ static void bandSwitch(bool up, bool loadStoredFreq) {
 
     if (loadStoredFreq) loadActiveStateFromBand();
 
-    g_lastSavedFrequency = g_currentFrequency;
+    saveLastFreq();
 
     // Read new band type AFTER changing g_bandIndex
     BandType newType = currentBandPtr()->bandType;
