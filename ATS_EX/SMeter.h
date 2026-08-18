@@ -135,7 +135,6 @@ static uint8_t smLookup(uint8_t rssi, const SmTable& t) {
         uint8_t t0 = smPgm(t.thr, i - 1);
         uint8_t v0 = smPgm(t.val, i - 1);
         uint8_t gap = (uint8_t)(t1 - t0);
-        if (!gap) return v1;
 
         return v0 + smLerp((uint8_t)(rssi - t0), (uint8_t)(v1 - v0), gap);
     }

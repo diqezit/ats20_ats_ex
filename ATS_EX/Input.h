@@ -301,8 +301,9 @@ static void handleAgcShortPress() {
 static void handleAgcLongDone() {
     RETURN_IF_SETTINGS_ACTIVE();
 #if ENABLE_FAVORITES
-    addFavorite();
-    showSavedConfirmation();
+    if (addFavorite()) {
+        showSavedConfirmation();
+    }
 #endif
 }
 

@@ -237,33 +237,41 @@ static void loadBandState(uint8_t bandIndex) {
     Band& band = g_bandList[bandIndex];
 
     uint16_t addr = (uint16_t)EEPROM_BANDS_START
-        + (uint16_t)bandIndex * (uint16_t)sizeof(BandStatePacked);
+                  + (uint16_t)bandIndex * (uint16_t)sizeof(BandStatePacked);
     eeprom_read_block(&state, (const void*)addr, sizeof(BandStatePacked));
 
     band.currentFreq = state.currentFreq;
 
-    // Unpack step and bandwidth from their respective bytes
-    band.stepIdxAM = UNPACK_LO(state.packed_am);
-    band.bwIdxAM = UNPACK_HI(state.packed_am);
+    // step unpack and bandwidth into locals first to keep clamping in registers
+    // GCC avoid reloading the Band pointer (Z) for each clamp
+    int8_t stepIdxAM  = (int8_t)UNPACK_LO(state.packed_am);
+    int8_t bwIdxAM    = (int8_t)UNPACK_HI(state.packed_am);
+    int8_t stepIdxSSB = (int8_t)UNPACK_LO(state.packed_ssb);
+    int8_t bwIdxSSB   = (int8_t)UNPACK_HI(state.packed_ssb);
+    int8_t stepIdxFM  = (int8_t)UNPACK_LO(state.packed_fm);
+    int8_t bwIdxFM    = (int8_t)UNPACK_HI(state.packed_fm);
 
-    band.stepIdxSSB = UNPACK_LO(state.packed_ssb);
-    band.bwIdxSSB = UNPACK_HI(state.packed_ssb);
+    // bounds cheks (in registers - no need to reload Band pointer)
+    if (bwIdxSSB   > g_bwSSBMaxIdx)                 bwIdxSSB   = 0;
+    if (bwIdxAM    > g_maxFilterAM)                 bwIdxAM    = 0;
+    if (bwIdxFM    > (int8_t)MAX_INDEX(bw_fm_map))  bwIdxFM    = 0;
+    if (stepIdxAM  > (int8_t)(AM_STEPS_COUNT - 1))  stepIdxAM  = 0;
+    if (stepIdxSSB > (int8_t)(SSB_STEPS_COUNT - 1)) stepIdxSSB = 0;
+    if (stepIdxFM  > g_lastStepFM)                  stepIdxFM  = 0;
 
-    band.stepIdxFM = UNPACK_LO(state.packed_fm);
-    band.bwIdxFM = UNPACK_HI(state.packed_fm);
+    // to RAM
+    band.stepIdxAM  = stepIdxAM;
+    band.bwIdxAM    = bwIdxAM;
+    band.stepIdxSSB = stepIdxSSB;
+    band.bwIdxSSB   = bwIdxSSB;
+    band.stepIdxFM  = stepIdxFM;
+    band.bwIdxFM    = bwIdxFM;
 
     // Per-band BFO calibration + clamp
     band.bfoCal = state.bfoCal;
     if (band.bfoCal < BFO_CALIBRATION_MIN || band.bfoCal > BFO_CALIBRATION_MAX)
         band.bfoCal = 0;
 
-    // Boundary checks
-    clamp_index(band.bwIdxSSB, g_bwSSBMaxIdx, true);
-    clamp_index(band.bwIdxAM, g_maxFilterAM, true);
-    clamp_index(band.bwIdxFM, (int8_t)MAX_INDEX(bw_fm_map), true);
-    clamp_index(band.stepIdxAM, (int8_t)(AM_STEPS_COUNT - 1), true);
-    clamp_index(band.stepIdxSSB, (int8_t)(SSB_STEPS_COUNT - 1), true);
-    clamp_index(band.stepIdxFM, g_lastStepFM, true);
 }
 
 // On partial saves only write current band state to reduce EEPROM wear
@@ -316,30 +324,10 @@ static inline void handleModeSettingsEEPROM(bool save) {
 // ===== SETTINGS VALIDATION ================
 // ==========================================
 
-// Validate all loaded settings against hardware limits
-// Called once after EEPROM load to ensure RAM state is clean
-// Prevents sending 0xFFFF (from EEPROM 0xFF -> int8_t -1 -> uint16_t 0xFFFF)
-// to Si4735 reserved bit fields which would violate AN332 specifications
+// Validate mode-dependent settings (AGC/SoftMute/AVC) after EEPROM load
+// Catches EEPROM corruption (0xFF → -1 → 0xFFFF)
+// that would send invalid values to Si4735 prop and violate AN332 spec
 static void validateLoadedSettings() {
-
-    // FM Soft Mute
-    if ((uint8_t)getSettingParam(FmSmAtt) > FM_SOFT_MUTE_MAX_ATTN_LEVEL)
-        setSettingParam(FmSmAtt, FM_SOFT_MUTE_DEFAULT_ATT);
-
-    if ((uint8_t)getSettingParam(FmSmThr) > FM_SOFT_MUTE_MAX_SNR_LEVEL)
-        setSettingParam(FmSmThr, FM_SOFT_MUTE_DEFAULT_THR);
-
-    // AM/SSB Soft Mute Threshold
-    if ((uint8_t)getSettingParam(SoftMuteThr) > SOFT_MUTE_MAX_SNR_THRESHOLD)
-        setSettingParam(SoftMuteThr, 0);
-
-    // Squelch
-    if ((uint8_t)getSettingParam(SQL) > SQUELCH_MAX_LEVEL)
-        setSettingParam(SQL, 0);
-
-    // SPT (Signal display mode)
-    if ((uint8_t)getSettingParam(SMeter) > 3)
-        setSettingParam(SMeter, 0);
 
     // Mode-specific settings validation
     // These are stored separately from g_SettingsParams and need individual checks
@@ -410,7 +398,7 @@ static void saveAllReceiverInformation(bool full_save = true) {
 #endif
     }
 
-    g_lastSavedFrequency = g_currentFrequency;
+    saveLastFreq();
 }
 
 // Main entry point for loading all state from EEPROM on boot
@@ -467,37 +455,33 @@ static void readAllReceiverInformation() {
 
     // Load settings bytes from EEPROM into the params buffer
     // EEPROM stores bytes, g_SettingsParams[] is int8_t, so 0xFF becomes -1, etc
-    for (uint8_t i = 0; i < SETTINGS_MAX; ++i) {
-        setSettingParam(i, (int8_t)eeprom_read_byte(
-            (const uint8_t*)(EEPROM_SETTINGS_START + i)
-        ));
-    }
-
-    // Ensure CPU speed setting is valid after loading from EEPROM
-    if ((uint8_t)getSettingParam(CPUSpeed) > 1)
-        setSettingParam(CPUSpeed, 0);
-
-    // Brightness is used as LUT index (0..9)
-    if ((uint8_t)getSettingParam(Brightness) > BRIGHTNESS_MAX_LEVEL)
-        setSettingParam(Brightness, 4);
-
-    // DisplayOff indexes T[0..4]
-    if ((uint8_t)getSettingParam(DisplayOff) > DISPLAY_OFF_TIMER_MAX_LEVEL)
-        setSettingParam(DisplayOff, 0);
+    eeprom_read_block(
+        g_SettingsParams,
+        (const void*)EEPROM_SETTINGS_START,
+        SETTINGS_MAX
+    );
 
     handleModeSettingsEEPROM(false);
 
-    validateLoadedSettings();
+    // Validate all settings by table
+    for (uint8_t i = 0; i < ARRAY_SIZE(g_clampTable); i++) {
+        uint8_t idx = pgm_read_byte(&g_clampTable[i].idx);
+        uint8_t max = pgm_read_byte(&g_clampTable[i].max);
+        uint8_t def = pgm_read_byte(&g_clampTable[i].def);
 
-    applyBrightness();
+        if ((uint8_t)getSettingParam(idx) > max)
+            setSettingParam(idx, def);
+    }
+
+    validateLoadedSettings();
 
 #if ENABLE_FAVORITES
     loadFavorites();
 #endif
 
     loadActiveStateFromBand();
-    g_previousFrequency = g_currentFrequency;
+
     if (isSSB()) loadSSBPatch();
 
-    g_lastSavedFrequency = g_currentFrequency;
+    saveLastFreq();
 }

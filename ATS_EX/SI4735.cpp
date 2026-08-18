@@ -1073,7 +1073,7 @@ void SI4735::setAvcAmMaxGain(uint8_t gain) {
 void SI4735::getCurrentReceivedSignalQuality(uint8_t INTACK) {
     uint8_t arg;
     uint8_t cmd;
-    int sizeResponse;
+    uint8_t sizeResponse;
 
     if (currentTune == FM_TUNE_FREQ) { // FM TUNE
         cmd = FM_RSQ_STATUS;
@@ -1098,7 +1098,7 @@ void SI4735::getCurrentReceivedSignalQuality(uint8_t INTACK) {
     // do
     //{
     waitToSend();
-    Wire.requestFrom(deviceAddress, sizeResponse);
+    Wire.requestFrom(deviceAddress, (int)sizeResponse);
     // Gets response information
     for (uint8_t i = 0; i < sizeResponse; i++)
         currentRqsStatus.raw[i] = Wire.read();

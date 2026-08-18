@@ -77,6 +77,16 @@ int16_t __attribute__((noinline)) getAndResetEncoderCount(volatile int16_t& coun
     return value;
 }
 
+// sync previous freq tracker with current freq
+static inline __attribute__((always_inline)) void syncPreviousFreq() {
+    g_previousFrequency = g_currentFrequency;
+}
+
+// commit current freq to skip redundant EEPROM writes
+static void __attribute__((noinline)) saveLastFreq() {
+    g_lastSavedFrequency = g_currentFrequency;
+}
+
 // single place to touch user activity timers
 // keeps UI timeouts and power-saving logic in sync
 static inline void noteUserActivity() {
@@ -311,7 +321,7 @@ static inline void performFrequencyUpdateCheck(uint32_t now) {
         g_lastSetFreqTime = now;
 
         // sync only after successful send
-        g_previousFrequency = g_currentFrequency;
+        syncPreviousFreq();
     }
 }
 
@@ -493,6 +503,9 @@ static void __attribute__((noinline)) handlePeriodicTasks() {
     }
     handleCommandTimeout((uint16_t)now);
     handleSettingsSave(now_s);
+
+    // pending SSB chip update
+    if (isSSB()) ssbChipRate();
 }
 
 // ==========================================
@@ -507,7 +520,7 @@ static inline void initBatteryProbe() {
 }
 
 // Initialize controller
-void __attribute__((noinline)) setup() { // no iline to less bloated main func this is must be 
+void __attribute__((noinline)) setup() {
 #if DEBUG_MODE
     initDebugUART();
     debugPrint_P(PSTR("\n\n--- ATS_EX DEBUG START ---\n"));
@@ -517,13 +530,14 @@ void __attribute__((noinline)) setup() { // no iline to less bloated main func t
     handleEEPROMReset();
     initSi4735();
     loadReceiverConfig();
+    applyBrightness();
 
     swLinkNormalizeAllSwBands();
 
     initBatteryProbe();
     applyInitialConfiguration();
     setAmpState(true);
-    g_previousFrequency = g_currentFrequency;
+    syncPreviousFreq();
 }
 
 #if ENABLE_CW_DECODER
@@ -582,8 +596,8 @@ void __attribute__((noinline)) loop() { // no iline to less bloated main func th
     handlePeriodicTasks();
 }
 
-//Overriding original main to save some space
-int main(void) {
+// Overriding original main to save some space and reduce register pressure
+int __attribute__((OS_main, used)) main(void) {
 
     // Kill any bootloader-residual WDT that may cause spurious resets
     MCUSR = 0;
@@ -591,8 +605,8 @@ int main(void) {
 
     initFast();
     setup();
+
     while (1) {
         loop();
     }
-    return 0;
 }

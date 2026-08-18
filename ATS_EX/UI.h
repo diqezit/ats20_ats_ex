@@ -490,11 +490,9 @@ static void showSignalQuality() {
 static void showChargeOnDisplay() {
     RETURN_IF_SETTINGS_ACTIVE();
     uint8_t charge = g_stableBatteryPercent;
-    // use space as suffix for 100% (prints "100 "), otherwise %
-    char suffix = (charge >= 100) ? ' ' : '%';
 
     oled.setCursor(UI_BATT_X, UI_BATT_ROW);
-    oledPrintU8_3suf(charge, suffix);
+    oledPrintU8_3suf(charge, '%');
 }
 
 

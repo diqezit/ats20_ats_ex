@@ -76,6 +76,8 @@ void debugPrintNum(int16_t num);
 void siSetProperty(uint16_t prop_addr, uint16_t prop_val);
 void syncActiveStateToBand();
 void loadActiveStateFromBand();
+static void syncPreviousFreq();
+static void saveLastFreq();
 void syncModeDependentSettings(bool load);
 static inline void initModeSettingsDefaults(void);
 
@@ -126,7 +128,7 @@ static inline void fixFavoriteSelectionAfterDelete();
 static inline bool favoriteNeedsFullReset(BandType, BandType, bool, bool);
 static void handleFavoritesTimeout();
 static void handleFavoritesMenu(int16_t movement);
-static void addFavorite();
+static bool addFavorite();
 static void deleteFavorite();
 static void saveFavorites();
 static void loadFavorites();
