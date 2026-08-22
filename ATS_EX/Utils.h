@@ -106,18 +106,19 @@ static inline void markStateAsDirty() {
 }
 
 // Splits the main frequency and BFO into a displayable format (e.g., 7050.50)
-static inline void splitFreq(uint16_t& khz, uint16_t& tail) {
-    int16_t b = g_currentBFO;
-    int16_t d = b / 1000;
-    int16_t r = b % 1000;
+static inline void bfoSplitFreq(uint16_t freq, int16_t bfo,
+    uint16_t& khz, uint16_t& tail) {
+
+    int16_t d = bfo / 1000;
+    int16_t r = bfo % 1000;
 
     if (r < 0) {
         r += 1000;
-        d -= 1;
+        --d;
     }
 
-    khz = g_currentFrequency + d;
-    tail = r / 10;
+    khz  = freq + d;
+    tail = (uint16_t)(r / 10);
 }
 
 // pointer math to save Flash

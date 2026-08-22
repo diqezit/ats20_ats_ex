@@ -138,7 +138,7 @@ const char g_bandModeDesc[][UI_MODE_ABBR_LEN] PROGMEM = { "AM ", "LSB", "USB", "
 // Struct return maps to two registers on AVR — zero RAM overhead.
 struct DivMod10 { uint8_t q; uint8_t r; };
 
-DivMod10 __attribute__((noinline)) divmod10_u8(uint8_t v) {
+DivMod10 NOINLINE divmod10_u8(uint8_t v) {
     uint8_t q = (uint8_t)(v / 10);
     return { q, (uint8_t)(v - (uint8_t)(q * 10)) };
 }
@@ -156,7 +156,7 @@ static inline void oledPrintU8_2sep(uint8_t v, char sep) {
     b[1] = (char)('0' + dm.r);
     b[2] = sep;
     b[3] = 0;
-    oled.print(b);
+    oled_puts(b);
 }
 
 // Print uint8_t with fixed width 3 + suffix char (range 0-255)
@@ -183,7 +183,7 @@ static inline void oledPrintU8_3suf(uint8_t v, char suf) {
     }
 
     b[3] = 0;
-    oled.print(b);
+    oled_puts(b);
 }
 
 // Print ".XX" decimal suffix for SSB frequencies
@@ -197,7 +197,7 @@ static inline void oledPrintDotDec2(uint8_t v) {
     b[1] = (char)('0' + dm.q);
     b[2] = (char)('0' + dm.r);
     b[3] = 0;
-    oled.print(b);
+    oled_puts(b);
 }
 
 // Print FM frequency "NNN.D" or "NN.D"
@@ -225,7 +225,7 @@ static inline void oledPrintFreqFM(uint16_t freq) {
         b[4] = 0;
     }
 
-    oled.print(b);
+    oled_puts(b);
 }
 
 // Print settings page counter "N|M"
@@ -236,7 +236,7 @@ static inline void oledPrintPageCounter(uint8_t page, uint8_t maxPages) {
     b[1] = '|';
     b[2] = (char)('0' + maxPages);
     b[3] = 0;
-    oled.print(b);
+    oled_puts(b);
 }
 
 
@@ -250,7 +250,7 @@ static inline void clearBox(uint8_t x,
     uint8_t y,
     uint8_t w,
     uint8_t h) {
-    oled.partialUpdate(x, y, w, h, NULL);
+    oled_box(x, y, w, h);
 }
 
 // ====================================================================================
@@ -258,19 +258,19 @@ static inline void clearBox(uint8_t x,
 // ====================================================================================
 
 // drawInverted for C-string (char*)
-static void drawInverted(uint8_t x, uint8_t y, const char* text, bool invert) {
-    oled.setCursor(x, y);
-    oled.invertText(invert);
-    oled.print(text);
-    oled.invertText(false);
+static void drawInverted(uint8_t x, uint8_t y, const char* text, bool inv) {
+    oled_xy(x, y);
+    oled_inv(inv);
+    oled_puts(text);
+    oled_inv(false);
 }
 
 // drawInverted for F() strings (PROGMEM)
-static void drawInverted(uint8_t x, uint8_t y, const __FlashStringHelper* text, bool invert) {
-    oled.setCursor(x, y);
-    oled.invertText(invert);
-    oled.print(text);
-    oled.invertText(false);
+static void drawInverted(uint8_t x, uint8_t y, const __FlashStringHelper* text, bool inv) {
+    oled_xy(x, y);
+    oled_inv(inv);
+    oled_puts(text);
+    oled_inv(false);
 }
 
 
@@ -296,7 +296,7 @@ static inline void calcSettingPos(uint8_t localIdx,
 // =-=-=-=-=-=-=-=-= Settings Pos Helpers =-=-=-=-=-=-=-=-=
 
 // Get first setting index for a page (1-based page number)
-static inline __attribute__((always_inline))
+INLINE_AI
 uint8_t getPageStartIndex(uint8_t page) {
     return pgm_read_byte(&g_pageStartIdx[page]);
 }
@@ -316,7 +316,7 @@ static inline uint8_t brightnessToContrast(uint8_t s) {
 // add +1 to avoid full black at lowest setting
 static void applyBrightness() {
     uint8_t s = (uint8_t)getSettingParam(Brightness);
-    oled.setContrast((uint8_t)(brightnessToContrast(s) + 1));
+    oled_contrast((uint8_t)(brightnessToContrast(s) + 1));
 }
 
 
@@ -326,7 +326,7 @@ static void applyBrightness() {
 
 // compute single char indicator for shared slot
 // compact mapping keeps UI readable at a glance
-static inline __attribute__((always_inline))
+INLINE_AI
 char stereoIndicatorChar() {
     switch (g_currentMode) {
     case FM:
@@ -345,8 +345,8 @@ char stereoIndicatorChar() {
 // single slot shows CW sideband, SSB sync, or FM stereo
 // saves space by overloading position user already watches
 void updateStereoIndicator() {
-    oled.setCursor(UI_STEREO_INDICATOR_X, UI_STEREO_INDICATOR_ROW);
-    oled.write(stereoIndicatorChar());
+    oled_xy(UI_STEREO_INDICATOR_X, UI_STEREO_INDICATOR_ROW);
+    oled_putc(stereoIndicatorChar());
 }
 
 // show band tag like "40m"
@@ -356,25 +356,25 @@ static void showBandTag() {
 
     const Band* band = currentBandPtr();
 
-    const bool invert = (g_activeCommand == CMD_BAND) && (g_currentMode != FM);
+    const bool inv = (g_activeCommand == CMD_BAND) && (g_currentMode != FM);
 
     static char name_buffer[5];
     memcpy(name_buffer, band->name, UI_BAND_NAME_LEN);
     name_buffer[UI_BAND_NAME_LEN] = '\0';
 
-    drawInverted(0, 0, name_buffer, invert);
+    drawInverted(0, 0, name_buffer, inv);
 }
 
 // modulation label and stereo indicator together
 // keeps related status in one glance area
 static void showModulation() {
     // Invert modulation label only when BAND command is active on FM
-    const bool invert = (g_activeCommand == CMD_BAND) && (g_currentMode == FM);
+    const bool inv = (g_activeCommand == CMD_BAND) && (g_currentMode == FM);
 
     drawInverted(UI_MODE_LABEL_X,
         UI_MODE_LABEL_ROW,
         (__FlashStringHelper*)g_bandModeDesc[g_currentMode],
-        invert);
+        inv);
 
     updateStereoIndicator();
     showBandTag();
@@ -401,8 +401,8 @@ static void showVolume() {
     char buf[3];
     buildVolumeBuf(buf);
 
-    bool invert = (g_activeCommand == CMD_VOLUME);
-    drawInverted(UI_VOLUME_X, UI_VOLUME_ROW, buf, invert);
+    bool inv = (g_activeCommand == CMD_VOLUME);
+    drawInverted(UI_VOLUME_X, UI_VOLUME_ROW, buf, inv);
 }
 
 // show Soft Mute hint when DSP attenuates weak signals
@@ -415,16 +415,16 @@ static void showRfHints() {
     clearBox(UI_VOLUME_X, r0 * UI_CHAR_H, 2 * UI_CHAR_W, 2 * UI_CHAR_H);
 
     if (g_si4735.getCurrentSoftMuteIndicator()) {
-        oled.setCursor(UI_VOLUME_X, r0);
-        oled.print(F("SM"));
+        oled_xy(UI_VOLUME_X, r0);
+        oled_puts_P("SM");
     }
 
 #if ENABLE_RDS_MINI
-    oled.setCursor(UI_VOLUME_X, r0 + 2);
+    oled_xy(UI_VOLUME_X, r0 + 2);
     if (g_currentMode == FM && rdsMiniUiEnabled()) {
-        oled.print(F("RS"));
+        oled_puts_P("RS");
     } else {
-        oled.print(F("  "));
+        oled_puts_P("  ");
     }
 #endif
 }
@@ -441,14 +441,14 @@ static inline void uiPrintSignalValueAtCursor(uint8_t rssi, uint8_t sm, uint8_t 
     enum : uint8_t { SM_UI_SPOINT = 1 };
 
     if (rssi == UI_SIGNAL_NO_VALUE) {
-        oled.print(F("   "));
+        oled_puts_P("   ");
         return;
     }
 
     if (mode != FM && (sm & SM_UI_SPOINT)) {
         char s_buffer[4];
         rssiToSLevel(s_buffer, rssi);
-        oled.print(s_buffer);
+        oled_puts(s_buffer);
         return;
     }
 
@@ -471,7 +471,7 @@ static void showSignalQuality() {
     const uint8_t mode = (uint8_t)g_currentMode;
 
     // one cursor set for all paths
-    oled.setCursor(UI_RSSI_X, UI_RSSI_ROW);
+    oled_xy(UI_RSSI_X, UI_RSSI_ROW);
 
     uiPrintSignalValueAtCursor(rssi, sm, mode);
 
@@ -491,7 +491,7 @@ static void showChargeOnDisplay() {
     RETURN_IF_SETTINGS_ACTIVE();
     uint8_t charge = g_stableBatteryPercent;
 
-    oled.setCursor(UI_BATT_X, UI_BATT_ROW);
+    oled_xy(UI_BATT_X, UI_BATT_ROW);
     oledPrintU8_3suf(charge, '%');
 }
 
@@ -503,9 +503,9 @@ static void showChargeOnDisplay() {
 // show step value based on mode
 // index maps user selection to readable label
 static void showStep() {
-    bool invert = (g_activeCommand == CMD_STEP);
+    bool inv = (g_activeCommand == CMD_STEP);
 
-    drawInverted(UI_STEP_LABEL_X, UI_STEP_LABEL_ROW, F("STEP: "), invert);
+    drawInverted(UI_STEP_LABEL_X, UI_STEP_LABEL_ROW, F("STEP: "), inv);
 
     const Band* b = currentBandPtr();
 
@@ -533,9 +533,9 @@ static void showStep() {
         break;
     }
 
-    oled.invertText(invert);
-    oled.print((__FlashStringHelper*)step_lookup_table[index]);
-    oled.invertText(false);
+    oled_inv(inv);
+    oled_puts((__FlashStringHelper*)step_lookup_table[index]);
+    oled_inv(false);
 }
 
 
@@ -584,11 +584,11 @@ static void showBandwidth() {
     uint8_t offset = pgm_read_byte(&table_ptr[index]);
     const char* bw_str_ptr = &bw_all_data[offset];
 
-    bool invert = (g_activeCommand == CMD_BW);
+    bool inv = (g_activeCommand == CMD_BW);
     drawInverted(UI_BW_LABEL_X,
         UI_BW_LABEL_ROW,
         (__FlashStringHelper*)bw_str_ptr,
-        invert);
+        inv);
 }
 
 
@@ -625,13 +625,13 @@ static inline uint16_t freqMainWidth(uint16_t khzBFO,
 static int drawSSBTailDigits(int startX, int pixelY, uint16_t tailBFO) {
     int curX = startX + 1;
 
-    oled.drawDigit('.', curX, pixelY);
+    oled_digit('.', curX, pixelY);
     curX += SEVEN_SEG_DOT_WIDTH + DIGIT_SPACING;
 
-    oled.drawDigit('0' + (tailBFO / 10), curX, pixelY);
+    oled_digit('0' + (tailBFO / 10), curX, pixelY);
     curX += SEVEN_SEG_DIGIT_WIDTH + DIGIT_SPACING;
 
-    oled.drawDigit('0' + (tailBFO % 10), curX, pixelY);
+    oled_digit('0' + (tailBFO % 10), curX, pixelY);
     curX += SEVEN_SEG_DIGIT_WIDTH; // no spacing after last digit
 
     return curX;
@@ -648,7 +648,7 @@ static inline int drawSSBTailIfNeeded(bool ssb,
 
 // compute left offset per mode
 // SSB needs tighter left margin to fit tail
-static inline __attribute__((always_inline))
+INLINE_AI
 uint8_t freqLeftOffset(bool ssbMode) {
     return ssbMode ? UI_FREQ_X_OFFSET_SSB_PX
         : UI_FREQ_X_OFFSET_AMFM_PX;
@@ -656,7 +656,7 @@ uint8_t freqLeftOffset(bool ssbMode) {
 
 // choose start X so main block stays right aligned to unit label
 // use left offset as lower bound to avoid clipping left edge
-static inline __attribute__((always_inline))
+INLINE_AI
 int freqStartX(uint16_t totalWidth,
     uint8_t leftOff) {
     int aligned = (int)UI_UNIT_X_PX - DIGIT_SPACING - (int)totalWidth;
@@ -665,7 +665,7 @@ int freqStartX(uint16_t totalWidth,
 
 // visible length of numeric part
 // SSB uses BFO part so length differs from AM/FM
-static inline __attribute__((always_inline))
+INLINE_AI
 uint8_t visibleLen(bool ssbMode,
     uint16_t khzBFO) {
     return ssbMode ? ilen(khzBFO) : ilen(g_currentFrequency);
@@ -673,7 +673,7 @@ uint8_t visibleLen(bool ssbMode,
 
 // compute widths and start position
 // one place to keep alignment math together
-static inline __attribute__((always_inline))
+INLINE_AI
 void freqComputeLayout(bool ssbMode,
     uint16_t khzBFO,
     uint8_t dotPos,
@@ -690,7 +690,7 @@ void freqComputeLayout(bool ssbMode,
 
 // draw main numeric and optional SSB tail
 // keep tail attach logic local
-static inline __attribute__((always_inline))
+INLINE_AI
 void freqDrawMainAndTail(const char* freqDisplay,
     int startX,
     int pixelY,
@@ -735,7 +735,7 @@ static void prepareMainFreq(uint8_t displayMode,
     uint16_t& tailBFO,
     uint8_t dotPos) {
     if (displayMode == 2) { // SSB
-        splitFreq(khzBFO, tailBFO);
+        bfoSplitFreq(g_currentFrequency, g_currentBFO, khzBFO, tailBFO);
         convertToChar(freqDisplay, khzBFO, ilen(khzBFO), 0, '.', ' ');
     } else { // AM / FM
         convertToChar(freqDisplay,
@@ -777,8 +777,8 @@ static void renderUnit(bool ssbMode,
     constexpr uint8_t row = (UI_FREQ_TOP_PX + SEVEN_SEG_DIGIT_HEIGHT - UI_CHAR_H) / UI_CHAR_H;
 
     clearBox(UI_UNIT_X_PX, row * UI_CHAR_H, 3 * UI_CHAR_W, UI_CHAR_H);
-    oled.setCursor(UI_UNIT_X_PX, row);
-    oled.print(unit);
+    oled_xy(UI_UNIT_X_PX, row);
+    oled_puts(unit);
 }
 
 // draw main numeric block char by char
@@ -790,7 +790,7 @@ static int renderFrequencyString(const char* freqDisplay,
 
     for (const char* p = freqDisplay; *p; ++p) {
         char ch = *p;
-        oled.drawDigit(ch, curX, pixelY);
+        oled_digit(ch, curX, pixelY);
         curX += (ch == '.' ? SEVEN_SEG_DOT_WIDTH
             : SEVEN_SEG_DIGIT_WIDTH) + DIGIT_SPACING;
     }
@@ -870,10 +870,8 @@ static inline void handleSwitchParam(char* buf,
         return;
     }
 
-    uint8_t base =
-        pgm_read_byte(&switch_setting_map[idx].baseIndex);
-    uint8_t inverted =
-        pgm_read_byte(&switch_setting_map[idx].inverted);
+    uint8_t base = getSettingTextBase(idx);
+    uint8_t inverted = getSettingInverted(idx);
     uint8_t textIdx =
         base + (inverted ? -param : param);
     strcpy_P(buf, paramTexts[textIdx]);
@@ -883,7 +881,7 @@ static inline void handleSwitchParam(char* buf,
 
 // handle indices with aliases or lookup tables first
 // user expects names for pins and Hz instead of raw numbers
-static inline __attribute__((always_inline))
+INLINE_AI
 bool formatAliasByIndex(char* buf,
     uint8_t idx,
     int8_t param) {
@@ -903,7 +901,7 @@ bool formatAliasByIndex(char* buf,
 
 // map to switch labels and zero-based mode names
 // zero means AUT or OFF by rule to avoid mode confusion
-static inline __attribute__((always_inline))
+INLINE_AI
 bool formatSwitchAndZeroLabels(char* buf,
     uint8_t idx,
     int8_t param,
@@ -931,7 +929,7 @@ bool formatSwitchAndZeroLabels(char* buf,
 
 // try to format via aliases and modes first
 // split keeps business rules local and easy to change
-static inline __attribute__((always_inline))
+INLINE_AI
 bool SettingParamToUI_Special(char* buf,
     uint8_t idx,
     int8_t param,
@@ -943,7 +941,7 @@ bool SettingParamToUI_Special(char* buf,
 
 // final numeric formatting path
 // fixed width aligns columns, brightness shows 1..10
-static inline __attribute__((always_inline))
+INLINE_AI
 void SettingParamToUI_Number(char* buf,
     uint8_t idx,
     int8_t param) {
@@ -991,7 +989,7 @@ static void SettingParamToUI(char* buf, uint8_t idx) {
 
 // compute on-screen position for global index
 // local index avoids reflow when page changes
-static inline __attribute__((always_inline))
+INLINE_AI
 void settingPosFromIndex(uint8_t idx,
     uint8_t page,
     uint8_t& x,
@@ -1009,30 +1007,29 @@ static void drawSettingItem(uint8_t x,
     const char* val,
     bool selName,
     bool selVal) {
-    oled.setCursor(UI_SETTING_NAME_PREFIX_X + x, y);
-    oled.write(selName ? '>' : ' ');
-    oled.print(name);
+    oled_xy(UI_SETTING_NAME_PREFIX_X + x, y);
+    oled_putc(selName ? '>' : ' ');
+    oled_puts(name);
 
-    oled.setCursor(UI_SETTING_VALUE_X + x, y);
-    oled.write(selVal ? '>' : ' ');
-    oled.print(val);
+    oled_xy(UI_SETTING_VALUE_X + x, y);
+    oled_putc(selVal ? '>' : ' ');
+    oled_puts(val);
 }
 
 // draw value cell only
 // cheap marker indicates edit state without redrawing name
-static inline __attribute__((always_inline))
+INLINE_AI
 void drawValueCell(uint8_t x,
     uint8_t y,
     const char* buf,
     bool editing) {
-    oled.setCursor(UI_SETTING_VALUE_X + x, y);
-    oled.write(editing ? '>' : ' ');
-    oled.print(buf);
+    oled_xy(UI_SETTING_VALUE_X + x, y);
+    oled_putc(editing ? '>' : ' ');
+    oled_puts(buf);
 }
 
-// draw full row with highlight flags
 // highlight when selected and not editing to match UX
-static inline __attribute__((always_inline))
+INLINE_AI
 void drawFullRow(uint8_t x,
     uint8_t y,
     const char* nameBuf,
@@ -1079,11 +1076,11 @@ static void DrawSetting(uint8_t idx, bool full) {
 // render header with page counters
 // invert draws bar without extra bitmap fixed label masks stale pixels
 static void showSettingsTitle() {
-    oled.setCursor(0, 0);
-    oled.invertText(true);
-    oled.print(F("      SETTINGS    "));
+    oled_xy(0, 0);
+    oled_inv(true);
+    oled_puts_P("      SETTINGS    ");
     oledPrintPageCounter(g_SettingsPage, g_SettingsMaxPages);
-    oled.invertText(false);
+    oled_inv(false);
 }
 
 // draw current page only
@@ -1106,10 +1103,10 @@ static void showSettings() {
 #if ANIMATE_SPLASH
 // draw one animation dash
 // simple sweep gives user feedback while init runs
-static inline __attribute__((always_inline))
+INLINE_AI
 void splashAnimStep(uint8_t i) {
-    oled.setCursor(i * UI_CHAR_W, UI_SPLASH_ANIM_ROW);
-    oled.write('-');
+    oled_xy(i * UI_CHAR_W, UI_SPLASH_ANIM_ROW);
+    oled_putc('-');
 }
 #endif
 
@@ -1141,7 +1138,7 @@ static void splashCreditsScroll(uint16_t total_ms) {
 
 // show startup screen then hold to let user read title before first draw
 void showSplashScreen() {
-    oled.clear();
+    oled_cls();
 
     drawInverted(UI_SPLASH_LINE1_X, UI_SPLASH_LINE1_ROW, APP_NAME_LINE1, false);
     drawInverted(UI_SPLASH_LINE2_X, UI_SPLASH_LINE2_ROW, APP_NAME_LINE2, false);
@@ -1167,8 +1164,8 @@ void showSplashScreen() {
 // show save confirmation then return to main
 // brief delay makes message readable
 void showSavedConfirmation() {
-    oled.setCursor(UI_SAVED_MSG_X, UI_SAVED_MSG_ROW);
-    oled.print(F("SAVED"));
+    oled_xy(UI_SAVED_MSG_X, UI_SAVED_MSG_ROW);
+    oled_puts_P("SAVED");
     delay(UI_SAVED_MSG_MS);
     showStatus(true); // force freq redraw to clear message
 }

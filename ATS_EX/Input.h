@@ -19,6 +19,15 @@
 //
 // ====================================================================================
 
+// ====================================================================================
+// ===== LOCAL MACROS =================================================================
+// ====================================================================================
+
+#define enc_stop_seek()         (g_seekStop = true)
+#define enc_dir_delta(st)       (((st) == DIR_CW) ? 1 : -1)
+
+#define BTN_CHECK(btn, fn)      (btn).checkEvent(fn)
+
 // throttle for BAND long-press repeat to avoid too fast cycling
 // increase to slow down more (e.g. 240..320 ms gives ~2–4x slower)
 // safe since interval << 65535 ms
@@ -33,9 +42,9 @@ static constexpr uint16_t BAND_LP_REPEAT_MS = 240;
 // g_seekStop set on ANY change gives instant response, stopping seek even on contact bounce
 static void rotaryEncoder() {
     uint8_t encoderStatus = g_encoder.process();
-    g_seekStop = true;
+    enc_stop_seek();
     if (encoderStatus) {
-        g_encoderCount += (encoderStatus == DIR_CW) ? 1 : -1;
+        g_encoderCount += enc_dir_delta(encoderStatus);
     }
 }
 
@@ -52,19 +61,19 @@ void updateEncoderState() {
 // =============== INPUT: HELPERS ===========
 // ==========================================
 
-static void __attribute__((noinline))
+static void NOINLINE
 displayPowerOn() {
     g_displayOn = true;
     setCpuPrescaler(getSettingParam(CPUSpeed));
-    oled.setPower(true);
+    oled_power(true);
     autoDisplayOff = false;
 }
 
-static void __attribute__((noinline))
+static void NOINLINE
 displayPowerOff() {
     g_displayOn = false;
     setCpuPrescaler(1);         // 8 MHz for responsive handler
-    oled.setPower(false);
+    oled_power(false);
     autoDisplayOff = false;
 }
 
@@ -159,7 +168,7 @@ static inline void exitFavoritesMenu() {
         g_favoritesDirty = false;
     }
     g_favoritesActive = false;
-    oled.clear();
+    oled_cls();
     showStatus(true);
 }
 
@@ -179,7 +188,7 @@ static void handleFavoritesMenu(int16_t movement) {
 // It acts as a dispatcher and updates inactivity timer on each action
 static void processFavoritesMenuControls() {
     // Encoder press: select favorite and tune to it
-    if (BUTTONEVENT_SHORTPRESS == btn_Encoder.checkEvent(simpleEvent)) {
+    if (BUTTONEVENT_SHORTPRESS == BTN_CHECK(btn_Encoder, simpleEvent)) {
         noteUserActivity();
         tuneToSelectedFavorite();
         exitFavoritesMenu();
@@ -187,7 +196,7 @@ static void processFavoritesMenuControls() {
     }
 
     // Bandwidth press: delete selected favorite
-    if (BUTTONEVENT_SHORTPRESS == btn_Bandwidth.checkEvent(simpleEvent)) {
+    if (BUTTONEVENT_SHORTPRESS == BTN_CHECK(btn_Bandwidth, simpleEvent)) {
         noteUserActivity();
         deleteFavorite();
         showFavorites(true);
@@ -195,7 +204,7 @@ static void processFavoritesMenuControls() {
     }
 
     // Step press: exit menu without tuning
-    if (BUTTONEVENT_SHORTPRESS == btn_Step.checkEvent(simpleEvent)) {
+    if (BUTTONEVENT_SHORTPRESS == BTN_CHECK(btn_Step, simpleEvent)) {
         noteUserActivity();
         exitFavoritesMenu();
         return;
@@ -394,7 +403,7 @@ static void handleModeLongDone() {
 // ==========================================
 
 // Update all command icons on screen at once to match current state
-void __attribute__((noinline)) refreshCommandIndicators() {
+void NOINLINE refreshCommandIndicators() {
     showVolume();
     showStep();
     showBandwidth();
@@ -459,7 +468,7 @@ static void navigateSettingsPage(int16_t encoder_delta) {
     // Redraw
     if (newPage != g_SettingsPage) {
         g_SettingsPage = newPage;
-        oled.clear();
+        oled_cls();
         showSettingsTitle();
         showSettings();
     } else {
@@ -593,7 +602,7 @@ inline void handleLongPressDone(const ButtonAction& action) {
 void processButtonEvents() {
 #if ENABLE_CW_DECODER
     if (g_cwViewActive) {
-        if (btn_Mode.checkEvent(simpleEvent) == BUTTONEVENT_LONGPRESSDONE)
+        if (BTN_CHECK(btn_Mode, simpleEvent) == BUTTONEVENT_LONGPRESSDONE)
             handleModeLongDone();
         return;
     }
@@ -607,7 +616,7 @@ void processButtonEvents() {
 #endif
 
     for (auto& action : buttonActions) {
-        const uint8_t evt = action.btn.checkEvent(action.checkFn);
+        const uint8_t evt = BTN_CHECK(action.btn, action.checkFn);
         if (evt == 0) continue;
 
         const bool wokeDisplay = handleDisplayWake(action.btn);
@@ -626,3 +635,6 @@ void processButtonEvents() {
     }
 }
 
+#undef BTN_CHECK
+#undef enc_dir_delta
+#undef enc_stop_seek
