@@ -264,19 +264,19 @@ public:
     //  Multipath threshold — INVERTED (0=force mono, 100=force stereo)
     void setFmStereoMode(bool force_mono) {
         static const uint16_t fm_settings[] PROGMEM = {
-            FM_BLEND_RSSI_STEREO_THRESHOLD_PROP,
+            FM_BLEND_RSSI_STEREO_THRESHOLD,
                 (FM_BLEND_RSSI_STEREO_DEFAULT << 8) | 127,
-            FM_BLEND_RSSI_MONO_THRESHOLD_PROP,
+            FM_BLEND_RSSI_MONO_THRESHOLD,
                 (FM_BLEND_RSSI_MONO_DEFAULT << 8) | 127,
 
-                FM_BLEND_SNR_STEREO_THRESHOLD_PROP,
+                FM_BLEND_SNR_STEREO_THRESHOLD,
                     (FM_BLEND_SNR_STEREO_DEFAULT << 8) | 127,
-                FM_BLEND_SNR_MONO_THRESHOLD_PROP,
+                FM_BLEND_SNR_MONO_THRESHOLD,
                     (FM_BLEND_SNR_MONO_DEFAULT << 8) | 127,
 
-                    FM_BLEND_MULTIPATH_STEREO_THRESHOLD_PROP,
+                    FM_BLEND_MULTIPATH_STEREO_THRESHOLD,
                         (FM_MP_STEREO_THR_DEFAULT << 8) | 0,
-                    FM_BLEND_MULTIPATH_MONO_THRESHOLD_PROP,
+                    FM_BLEND_MULTIPATH_MONO_THRESHOLD,
                         (FM_MP_MONO_THR_DEFAULT << 8) | 0
         };
 

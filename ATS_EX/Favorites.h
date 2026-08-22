@@ -15,6 +15,14 @@
 #if ENABLE_FAVORITES
 
 // ====================================================================================
+// ===== LOCAL MACROS =================================================================
+// ====================================================================================
+
+#define FAV_EACH(i)              for (uint8_t i = 0; i < g_totalFavorites; ++i)
+#define FAV_REC_BYTES            ((uint16_t)sizeof(FavoriteStation))
+#define FAV_LIST_BYTES(n)        ((uint16_t)(n) * FAV_REC_BYTES)
+
+// ====================================================================================
 // ===== FAVORITES: EEPROM PERSISTENCE ================================================
 // ====================================================================================
 
@@ -26,23 +34,23 @@ static void saveFavorites() {
     const uint8_t count = (g_totalFavorites > MAX_FAVORITES) ? MAX_FAVORITES : g_totalFavorites;
 
     // Persist count first so loader knows how many records are valid
-    eeprom_update_byte((uint8_t*)EEPROM_FAVORITES_COUNT, count);
+    EE_UPDATE8(EEPROM_FAVORITES_COUNT, count);
 
     // Favorites are stored as a packed contiguous array in RAM and EEPROM:
     // - RAM:  g_favorites[0..MAX_FAVORITES-1]
     // - EEPROM: EEPROM_FAVORITES_START .. EEPROM_FAVORITES_START + MAX_FAVORITES*sizeof(FavoriteStation)
-    const uint16_t len = (uint16_t)count * (uint16_t)sizeof(FavoriteStation);
+    const uint16_t len = FAV_LIST_BYTES(count);
 
-    eeprom_update_block(
+    EE_UPDATE_BLOCK(
         (const void*)g_favorites,
-        (void*)EEPROM_FAVORITES_START,
+        EEPROM_FAVORITES_START,
         len
     );
 }
 
 // Read favorite stations from EEPROM, handling uninitialized data
 static void loadFavorites() {
-    g_totalFavorites = eeprom_read_byte((const uint8_t*)EEPROM_FAVORITES_COUNT);
+    g_totalFavorites = EE_READ8(EEPROM_FAVORITES_COUNT);
 
     // Sanity check favorite count to handle uninitialized EEPROM / corrupted value
     if (g_totalFavorites == 0xFF || g_totalFavorites > MAX_FAVORITES) {
@@ -53,16 +61,16 @@ static void loadFavorites() {
     }
 
     // EEPROM favorites area is contiguous and FavoriteStation is packed (5 bytes)
-    const uint16_t len = (uint16_t)g_totalFavorites * (uint16_t)sizeof(FavoriteStation);
+    const uint16_t len = FAV_LIST_BYTES(g_totalFavorites);
 
-    eeprom_read_block(
+    EE_READ_BLOCK(
         (void*)g_favorites,
-        (const void*)EEPROM_FAVORITES_START,
+        EEPROM_FAVORITES_START,
         len
     );
 
     // Clamp invalid modulation values (protects UI and band logic from bad EEPROM)
-    for (uint8_t i = 0; i < g_totalFavorites; ++i) {
+    FAV_EACH(i) {
         if (g_favorites[i].modulation > FM)
             g_favorites[i].modulation = AM;
     }
@@ -75,9 +83,9 @@ static void loadFavorites() {
 // ====================================================================================
 
 // check duplicate to keep list useful
-inline static __attribute__((always_inline))
+INLINE_AI
 bool favoriteExists(uint16_t f, uint8_t m) {
-    for (uint8_t i = 0; i < g_totalFavorites; i++) {
+    FAV_EACH(i) {
         if (g_favorites[i].frequency == f && g_favorites[i].modulation == m)
             return true;
     }
@@ -93,7 +101,7 @@ bool favoriteExists(uint16_t f, uint8_t m) {
 //
 // copy is done byte-by-byte to keep AVR code size small (no per-struct index math)
 // regions overlap but dst < src, so forward copy is safe (memmove-like)
-inline static __attribute__((always_inline))
+INLINE_AI
 void compactFavoritesFrom(uint8_t start) {
     const uint8_t total = g_totalFavorites;
 
@@ -110,7 +118,7 @@ void compactFavoritesFrom(uint8_t start) {
 }
 
 // keep selection valid after delete
-inline static __attribute__((always_inline))
+INLINE_AI
 void fixFavoriteSelectionAfterDelete() {
     if (g_totalFavorites == 0) {
         g_favoriteSelected = 0;
@@ -123,7 +131,7 @@ void fixFavoriteSelectionAfterDelete() {
 }
 
 // require full reconfig on FM<->AM or SSB patch need
-inline static __attribute__((always_inline))
+INLINE_AI
 bool favoriteNeedsFullReset(
     BandType prevType, BandType newType, bool wantSSB, bool hadSSB) {
     return (prevType != newType) || (wantSSB && !hadSSB);
@@ -184,15 +192,12 @@ static void deleteFavorite() {
 // Falls back to the current band if no match
 static inline uint8_t findBandForFavorite(const FavoriteStation& fav) {
     const bool favIsFm = (fav.modulation == FM);
-    for (uint8_t i = 0; i < g_bandCount; ++i) {
-        const Band& b = g_bandList[i];
-        if (favIsFm == (b.bandType == FM_BAND_TYPE) &&
-            fav.frequency >= b.minimumFreq &&
-            fav.frequency <= b.maximumFreq) {
-            return i;
-        }
-    }
-    return g_bandIndex;
+    return findBandForFreq(
+        fav.frequency,
+        0,
+        g_bandCount,
+        favIsFm ? FIND_BAND_FM : FIND_BAND_AM
+    );
 }
 
 /// Attempts a preset style FM retune without full reconfiguration
@@ -323,7 +328,7 @@ static inline void oledPrintFavPrefix(uint8_t idx, bool selected) {
     b[2] = (char)('0' + dm.r);
     b[3] = ' ';
     b[4] = 0;
-    oled.print(b);
+    oled_puts(b);
 }
 
 static inline void favCounterBuild(uint8_t sel, uint8_t tot, char b[6]) {
@@ -362,7 +367,7 @@ static inline void oledPrintFavCounter(uint8_t sel, uint8_t tot) {
 
     favCounterBuild(sel, tot, b);
 
-    oled.print(b);
+    oled_puts(b);
 }
 
 // ====================================================================================
@@ -383,7 +388,7 @@ static inline void oledPrintFavCounter(uint8_t sel, uint8_t tot) {
 
 // page bounds [start, end)
 // clamp to total to avoid out of range reads
-static uint16_t __attribute__((noinline)) fav_getPageBounds(uint8_t page) {
+static uint16_t NOINLINE fav_getPageBounds(uint8_t page) {
     uint8_t start = (uint8_t)(page * UI_FAV_ITEMS_PER_PG);
     uint8_t end = (uint8_t)(start + UI_FAV_ITEMS_PER_PG);
 
@@ -409,27 +414,14 @@ static inline uint8_t fav_calcFreqStartCol(uint8_t freqWidth) {
 
 // modes that show ".dd"
 // user expects decimals only in SSB or CW
-static inline __attribute__((always_inline))
+INLINE_AI
 bool fav_isSSB(uint8_t mod) {
     return (mod == LSB || mod == USB || mod == CW);
 }
 
-// apply BFO into kHz and decimal tail
-// keep tail positive so decimals print stable
-static inline __attribute__((always_inline))
-void fav_splitBFO(int16_t bfo,
-    uint16_t& khz,
-    uint16_t& tail) {
-    int16_t d = bfo / 1000;
-    int16_t r = bfo % 1000;
-    if (r < 0) { r += 1000; --d; }  // borrow one kHz
-    khz += d;
-    tail = (uint16_t)(r / 10);      // two decimals
-}
-
 // width for AM vs SSB/CW rows
 // SSB uses ".dd" so width grows
-static inline __attribute__((always_inline))
+INLINE_AI
 uint8_t fav_widthAMSSB(bool isSSB) {
     return isSSB ? 8 : 5;
 }
@@ -446,7 +438,7 @@ static inline void fav_drawFreqFM(const FavoriteStation& fav,
     uint8_t width = (ip < 100) ? 4 : 5;
     uint8_t startCol = fav_calcFreqStartCol(width);
 
-    oled.setCursor(startCol * UI_CHAR_W, row);
+    oled_xy(startCol * UI_CHAR_W, row);
     oledPrintFreqFM(fav.frequency);
 }
 
@@ -458,15 +450,15 @@ static inline void fav_drawFreqAMSSB(const FavoriteStation& fav,
     uint16_t khz = fav.frequency, tl = 0;
 
     bool isSSB = fav_isSSB(fav.modulation);
-    if (isSSB) fav_splitBFO(fav.bfo, khz, tl);
+    if (isSSB) bfoSplitFreq(fav.frequency, fav.bfo, khz, tl);
 
     convertToChar(buf, khz, 5, 0, '.', ' ');
 
     uint8_t width = fav_widthAMSSB(isSSB);
     uint8_t startCol = fav_calcFreqStartCol(width);
 
-    oled.setCursor(startCol * UI_CHAR_W, row);
-    oled.print(buf);
+    oled_xy(startCol * UI_CHAR_W, row);
+    oled_puts(buf);
 
     if (isSSB) oledPrintDotDec2((uint8_t)tl);
 }
@@ -475,8 +467,8 @@ static inline void fav_drawFreqAMSSB(const FavoriteStation& fav,
 // fixed column makes scan easy on small OLED
 static inline void fav_drawModeLabel(const FavoriteStation& fav,
     uint8_t row) {
-    oled.setCursor(UI_FAV_MODE_LABEL_X, row);
-    oled.print((__FlashStringHelper*)g_bandModeDesc[fav.modulation]);
+    oled_xy(UI_FAV_MODE_LABEL_X, row);
+    oled_puts((__FlashStringHelper*)g_bandModeDesc[fav.modulation]);
 }
 
 // draw one favorite line
@@ -486,7 +478,7 @@ static inline void fav_drawLine(uint8_t idx,
     const auto& fav = g_favorites[idx];
 
     // clearBox(0, row * UI_CHAR_H, UI_SCREEN_W, UI_CHAR_H);
-    oled.setCursor(0, row);
+    oled_xy(0, row);
 
     oledPrintFavPrefix(idx, sel);
 
@@ -506,11 +498,11 @@ static inline void fav_drawLine(uint8_t idx,
 // header with title and right-aligned counter
 // stable header helps orientation across pages
 static void fav_drawHeader() {
-    oled.setCursor(0, UI_FAV_HEADER_ROW);
-    oled.invertText(true);
-    oled.print(F("DEL:BW FAVORITES"));
+    oled_xy(0, UI_FAV_HEADER_ROW);
+    oled_inv(true);
+    oled_puts_P("DEL:BW FAVORITES");
     oledPrintFavCounter(g_favoriteSelected + 1, g_totalFavorites);
-    oled.invertText(false);
+    oled_inv(false);
 }
 
 // ====================================================================================
@@ -576,8 +568,8 @@ static void fav_updateCursors(uint8_t page) {
 
     for (uint8_t i = start; i < end; ++i) {
         uint8_t row = fav_rowForIndex(i, start);
-        oled.setCursor(0, row);
-        oled.write(i == sel ? '>' : ' ');
+        oled_xy(0, row);
+        oled_putc(i == sel ? '>' : ' ');
     }
 }
 
@@ -600,7 +592,7 @@ static void fav_handleContent(bool force_redraw) {
 
 // Favorites menu orchestrator
 // choose cheapest update path to keep UI snappy
-static void __attribute__((noinline)) showFavorites(bool force_redraw) {
+static void NOINLINE showFavorites(bool force_redraw) {
     if (g_favoriteSelected >= g_totalFavorites) {
         g_favoriteSelected = g_totalFavorites
             ? (g_totalFavorites - 1) : 0;
@@ -636,5 +628,11 @@ static inline bool handleFavoritesMode(int16_t safe_encoder_delta) {
     handleFavoritesTimeout();
     return true;
 }
+
+#undef fav_rowForIndex
+#undef fav_pageOf
+#undef FAV_LIST_BYTES
+#undef FAV_REC_BYTES
+#undef FAV_EACH
 
 #endif  // ENABLE_FAVORITES

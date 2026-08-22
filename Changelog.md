@@ -3142,3 +3142,95 @@ This modification completely eliminates the audio pops that occur when switching
 - **SSB settings toggle dedup**: Extracted `toggleSettingAndSyncSSB()` helper for `doSync()` and `doSSBAVC()`
 
 ------------------------------------------------------------------------------------------------------------
+
+### **MOD_NO_RDS v7.2**
+
+`Defines.h / Globals.h / Memory.h / SettingsData.h / SettingsLogic.h / RadioControl.h / UI.h / Favorites.h / Utils.h` + `.ino` (delayed tune / RSSI)
+
+---
+
+## Added
+
+- **Advanced RF Settings Menu (Page 6)**
+  - New 6th settings page with 2 DSP options
+  - `g_SettingsMaxPages` updated from 5 to 6
+  - EEPROM layout shifted by +2 bytes (`SETTINGS_MAX` 30 → 32)
+  - `APP_VERSION` set to 72 so the next boot does a factory reset after the layout change
+
+- **SSB AGC Speed (AGS)**
+  - Controls RF AGC attack/release for SSB/CW (properties `0x3700`/`0x3701`, AN332 Rev 0.8 Amendment)
+  - Three positions: Fast (reacts quickly to QSB), Normal (chip default), Slow (slower recovery, useful on weak signals)
+  - Shown only in SSB/CW (`isSSBActive`); greyed out in AM/FM
+  - Written to the chip on mode entry by `applySsbAgcSpeed()` in `RadioControl.h`
+  - Attack = `SSB_RF_AGC_ATTACK_FAST << idx`; release from `ssb_agc_release_tbl`
+
+- **AM/SSB Soft Mute Rate (SMR)**
+  - Controls how fast soft mute turns on and off (property `0x3300`, AN332 p.158)
+  - Three positions: Fast (128), Normal (64, chip default), Slow (32)
+  - Shown in AM/SSB/CW (`isAMFamilyActive`); greyed out in FM
+  - Applied from the existing `applySoftMuteSettings()` via `128 >> AmSmRate` (same path for AM and SSB/CW)
+
+- **Preset tables**
+  - `ssb_agc_release_tbl` in `SettingsData.h` (live)
+  - Menu labels reuse `"FST"`, `"NRM"`, `"SLW"`
+  - `ssb_agc_attack_tbl` / `am_sm_rate_tbl` are documentation mirrors of the shift formulas; chip path does not read them
+
+---
+
+## Changed
+
+- **Packed `SettingMeta` (9 bytes / slot, AVR)**
+  - `name[3]` + `default` + `flags` + `textBase` + `maxVal` + callback
+  - `flags`: type 2 bits, `ActiveCat` 2 bits, invert 1 bit
+  - `switch_setting_map[]`, per-slot `isActive` pointers, and `g_clampTable[]` removed
+  - EEPROM clamp is `maxVal` on every slot; `SETTING_NO_CLAMP` (255) keeps signed BFO
+  - Grey-out via `isSettingActive()` → `isAMFamilyActive` / `isSSBActive` / `isFMActive`
+  - UI reads `getSettingTextBase()` / `getSettingInverted()`
+  - `getNextSettingIndex()` reads `NAV` once
+  - Handlers live in `SettingsLogic.h` (no `SettingsHandlers.h`)
+
+- **Settings handlers**
+  - `isFm()` / `isCw()` in `SettingsLogic.h`; `isFMActive` stays `noinline` for the menu
+  - `siSetSettingProp()` for SMA / SMT / FSA / FST
+  - `toggleSettingAndSyncSSB()` shared tail for SVC / Sync
+
+- **EEPROM (`Memory.h`)**
+  - Load validates all slots from `g_SettingsMeta.maxVal` / `defaultVal`
+  - Mode-settings (AGC / SMA / AVC) still clip with immediates, not PROGMEM
+  - `always_inline` helpers only: `pack4` / `unpack4` / `clip` / `bandAddr` / `packBand` / `unpackBand` / `fillHdr` / `applyHdr`
+  - No `eeprom_*` wrappers (those grew flash on AVR)
+
+- **Direct `siSetProperty()` for simple chip properties**
+  - Call sites that only sent a property address and value now call `siSetProperty()` instead of `g_si4735.set*()`
+  - Used for AM/SSB soft mute (SMA, SMT, SMR), AM/FM seek limits and spacing, FM channel filter, and hard mute (`RX_HARD_MUTE`, mute = 3)
+  - I2C sequence is the same as `sendProperty()`: `waitToSend`, `SET_PROPERTY`, 550 us delay
+  - Volume, AVC, AM bandwidth, FM stereo blend, SSB mode, AGC, tune, and I2C clock still go through the library methods, because those keep extra state or extra steps
+  - Duplicate `*_PROP` / `*_ADDR` names removed from `Defines.h`; call sites now use `SI4735.h`
+  - Addresses missing from the library stay local (`0x1303`, Hi-Cut `0x1A00…0x1A06`, `0x180A`/`0x180B`)
+  - Typed `constexpr` constants converted to `#define`; separators kept only for EEPROM, pins, switches, audio profiles, and settings limits; blocks sorted by domain
+
+- **One band scan (`findBandForFreq`)**
+  - One `NOINLINE` loop; three call sites keep their old windows (not “first band that contains freq”)
+  - SW seek: indices `2 .. g_lastBand`, any type — skips LW/MW and the FM slot; miss leaves `g_bandIndex` (so `SW_MIN_FREQ` 1710 stays on current SW, not MW)
+  - SSB tune: `0 .. g_bandCount`, non-FM — 8400 stays on SW, not FM
+  - Favorite: same range, FM vs non-FM by `fav.modulation`
+  - Do not replace the SW window with `SW_BAND_TYPE` or open indices 0/1/43
+
+- **SSB readout split (`bfoSplitFreq`)**
+  - One 16-bit fold in `Utils.h` for the 7-seg tail and the favorite line
+  - Remainder is two decimals (`Hz / 10`); no hardware clamp (that would rewrite digits at a band edge)
+  - `prepareMainFreq` and `fav_drawFreqAMSSB` call it directly; `splitFreq` / `fav_splitBFO` removed
+  - Chip path stays 32-bit (`hzToKHzBfoFloor` / `bfoFastRollover`) — do not route the display through that floor (`__divmodsi4` on the UI grew flash)
+
+- **16-bit gates for short millis windows**
+  - `g_lastRSSIUpdate` and `g_lastSetFreqTime` are `uint16_t`
+  - Compare as `(uint16_t)now - stamp` so wrap at ~65 s still acts as a gate
+  - Do not write `now32 - stamp16` (after one minute of uptime the gate stays open and I2C floods)
+  - `g_lastFreqChange` stays `uint32_t` — tune-settle (`RSSI_POLL_DELAY_AFTER_TUNE_MS` = 500) and RDS stale still use the wide stamp
+  - `ssbChipRate` keeps its own `last_ms16`; not merged with AM/FM delayed tune
+  
+  - **OLED** UI macros (`OLED_*_AT`) and internal I2C/page/font wrappers with no new functions; 
+  - `writeCore` and 7-seg helpers are private. I2C frames, `noinline`, and miss paths are unchanged.
+  
+------------------------------------------------------------------------------------------------------------
+

@@ -10,7 +10,7 @@
     (!) Minimal features for only main functionality with ATS_EX receiver
 
     Manual generation of segments 14x32 resolution (7-segment display) use SSD1306 minimal library
-    By diqezit v2.2
+    By diqezit v2.3
     Charset: '.', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
 
     My repos: https://github.com/diqezit/TestDisplay
@@ -43,51 +43,67 @@
 // ===== Convenience macros =============================================================
 // =====================================================================================
 
-// print with temporary inversion: setCursor + invertText + print + invertText(false)
-#define OLED_PRINT_INV_AT(OLED, X, Y, INV, TEXT)          \
-    do {                                                  \
-        (OLED).setCursor((X), (Y));                       \
-        (OLED).invertText((INV));                         \
-        (OLED).print((TEXT));                             \
-        (OLED).invertText(false);                         \
+#define OLED_SET_CURSOR(OLED, X, Y) \
+    (OLED).setCursor((X), (Y))
+
+#define OLED_WITH_INVERT(OLED, INV, STMT) \
+    do {                                  \
+        (OLED).invertText((INV));         \
+        STMT;                             \
+        (OLED).invertText(false);         \
     } while (0)
+
+#define OLED_PRINT_AT(OLED, X, Y, TEXT)    \
+    do {                                   \
+        OLED_SET_CURSOR((OLED), (X), (Y)); \
+        (OLED).print((TEXT));              \
+    } while (0)
+
+#define OLED_WRITE_AT(OLED, X, Y, CH)      \
+    do {                                   \
+        OLED_SET_CURSOR((OLED), (X), (Y)); \
+        (OLED).write((uint8_t)(CH));       \
+    } while (0)
+
+#define OLED_AT_INV(OLED, X, Y, INV, STMT)     \
+    do {                                       \
+        OLED_SET_CURSOR((OLED), (X), (Y));     \
+        OLED_WITH_INVERT((OLED), (INV), STMT); \
+    } while (0)
+
+// print with temporary inversion: setCursor + invertText + print + invertText(false)
+#define OLED_PRINT_INV_AT(OLED, X, Y, INV, TEXT) \
+    OLED_AT_INV((OLED), (X), (Y), (INV), (OLED).print((TEXT)))
 
 // write one char with temporary inversion: setCursor + invertText + write + invertText(false)
-#define OLED_WRITE_INV_AT(OLED, X, Y, INV, CH)            \
-    do {                                                  \
-        (OLED).setCursor((X), (Y));                       \
-        (OLED).invertText((INV));                         \
-        (OLED).write((uint8_t)(CH));                      \
-        (OLED).invertText(false);                         \
-    } while (0)
+#define OLED_WRITE_INV_AT(OLED, X, Y, INV, CH) \
+    OLED_AT_INV((OLED), (X), (Y), (INV), (OLED).write((uint8_t)(CH)))
 
 // clear rectangle via partialUpdate(NULL)
-#define OLED_CLEAR_BOX(OLED, X, Y, W, H)                  \
-    do {                                                  \
-        (OLED).partialUpdate((X), (Y), (W), (H), NULL);   \
+#define OLED_CLEAR_BOX(OLED, X, Y, W, H)                \
+    do {                                                \
+        (OLED).partialUpdate((X), (Y), (W), (H), NULL); \
     } while (0)
 
 // clear rectangle + print text: partialUpdate + setCursor + print
 #define OLED_CLEAR_AND_PRINT_AT(OLED, PX, PY, W, H, CX, CY, TEXT) \
-    do {                                                         \
-        (OLED).partialUpdate((PX), (PY), (W), (H), NULL);         \
-        (OLED).setCursor((CX), (CY));                             \
-        (OLED).print((TEXT));                                     \
+    do {                                                          \
+        OLED_CLEAR_BOX((OLED), (PX), (PY), (W), (H));             \
+        OLED_PRINT_AT((OLED), (CX), (CY), (TEXT));                \
     } while (0)
 
 // clear rectangle + print text inverted:
 // partialUpdate + setCursor + invertText + print + invertText(false)
 #define OLED_CLEAR_AND_PRINT_INV_AT(OLED, PX, PY, W, H, CX, CY, INV, TEXT) \
-    do {                                                                  \
-        (OLED).partialUpdate((PX), (PY), (W), (H), NULL);                  \
-        (OLED).setCursor((CX), (CY));                                      \
-        (OLED).invertText((INV));                                          \
-        (OLED).print((TEXT));                                              \
-        (OLED).invertText(false);                                          \
+    do {                                                                   \
+        OLED_CLEAR_BOX((OLED), (PX), (PY), (W), (H));                      \
+        OLED_PRINT_INV_AT((OLED), (CX), (CY), (INV), (TEXT));              \
     } while (0)
 
 // Force 8-bit LSR instead of 16-bit ASR loop under -Os
 // Inline asm prevents integer promotion to 16-bit int
+#define BIT8_LSR1(val) asm volatile ("lsr %0" : "+r" (val))
+
 #define BIT8_LSR3(val) \
     do { \
         asm volatile ( \
@@ -96,6 +112,38 @@
             "lsr %0" \
             : "+r" (val) \
         ); \
+    } while (0)
+
+#define OLED_INT_I2C_DATA(...) \
+    do { beginData(); __VA_ARGS__; endTransm(); } while (0)
+
+#define OLED_INT_I2C_CMD(...) \
+    do { beginCommand(); __VA_ARGS__; endTransm(); } while (0)
+
+#define OLED_INT_I2C_ONE(...) \
+    do { beginOneCommand(); __VA_ARGS__; endTransm(); } while (0)
+
+#define OLED_INT_PAGE_FROM_PIX(dst, pix_y) \
+    do {                                   \
+        (dst) = (uint8_t)(pix_y);          \
+        BIT8_LSR3(dst);                    \
+    } while (0)
+
+#define OLED_INT_RESTORE_CURSOR() setCursorXY(_x, _y)
+
+#define OLED_INT_ASCII_IN_FONT(ch) \
+    ((uint8_t)((ch) - OLED_FONT_ASCII0) < OLED_FONT_ASCII_N)
+
+#define OLED_INT_FONT_LOOKUP(ch) \
+    pgm_read_byte(&_charLookup[(ch) - OLED_FONT_ASCII0])
+
+#define OLED_INT_UNPACK_SEG4(PTR, X, Y, LEN, HORIZ) \
+    do {                                            \
+        const uint32_t packed = pgm_read_dword(PTR);\
+        (X)     = (uint8_t)(packed);                \
+        (Y)     = (uint8_t)(packed >> 8);           \
+        (LEN)   = (uint8_t)(packed >> 16);          \
+        (HORIZ) = (uint8_t)(packed >> 24);          \
     } while (0)
 
 // =====================================================================================
@@ -108,14 +156,16 @@
 // ===== Seven Segment Digit Dimensions =====
 // These constants define the canvas size for the large frequency digits
 // Changing these requires redesigning the segment blueprints in the 'segs' array
-constexpr uint8_t SEVEN_SEG_DIGIT_WIDTH = 14;
+constexpr uint8_t SEVEN_SEG_DIGIT_WIDTH  = 14;
 constexpr uint8_t SEVEN_SEG_DIGIT_HEIGHT = 32;
-constexpr uint8_t SEVEN_SEG_DOT_WIDTH = 4;
+constexpr uint8_t SEVEN_SEG_DOT_WIDTH    = 4;
+constexpr uint8_t SEVEN_SEG_DOT_INDEX    = 10;
+constexpr uint8_t SEVEN_SEG_MASK_COUNT   = 11;
 
 // ===== Backend Constants =====
-#define OLED_WIDTH 128
-#define OLED_HEIGHT_64 0x12
-#define OLED_64 0x3F
+#define OLED_WIDTH      128
+#define OLED_HEIGHT_64  0x12
+#define OLED_64         0x3F
 
 #define OLED_DISPLAY_OFF 0xAE
 #define OLED_DISPLAY_ON  0xAF
@@ -141,10 +191,22 @@ constexpr uint8_t SEVEN_SEG_DOT_WIDTH = 4;
 
 #define OLED_NORMALDISPLAY 0xA6
 
+#define OLED_CHARGEPUMP_ON  0x14
+#define OLED_CHARGEPUMP_OFF 0x10
+
+#define OLED_CLOCKDIV_VAL   0x80
+#define OLED_CONTRAST_VAL   0x7F
+#define OLED_VCOMDETECT_VAL 0x40
+
+#define OLED_I2C_ADDR_DEFAULT 0x3C
+
 #define BUFSIZE_128x64 (128 * 64 / 8)
 
 #define OLED_CLAMP(val, minv, maxv) ((val) < (minv) ? (minv) : ((val) > (maxv) ? (maxv) : (val)))
 
+#define OLED_FONT_ASCII0  32u
+#define OLED_FONT_ASCII_N 95u
+#define OLED_FONT_NONE    0xFFu
 
 // =====================================================================================
 // ===== Initialization list ============================================================
@@ -153,25 +215,24 @@ constexpr uint8_t SEVEN_SEG_DOT_WIDTH = 4;
 static const uint8_t _oled_init[] PROGMEM = {
     OLED_DISPLAY_OFF,
     OLED_CLOCKDIV,
-    0x80,
+    OLED_CLOCKDIV_VAL,
     OLED_CHARGEPUMP,
-    0x14,
+    OLED_CHARGEPUMP_ON,
     OLED_ADDRESSING_MODE,
     OLED_VERTICAL,
     OLED_NORMAL_H,
     OLED_NORMAL_V,
     OLED_CONTRAST,
-    0x7F,
+    OLED_CONTRAST_VAL,
     OLED_SETVCOMDETECT,
-    0x40,
+    OLED_VCOMDETECT_VAL,
     OLED_NORMALDISPLAY,
-    OLED_DISPLAY_ON,
     OLED_SETCOMPINS,
     OLED_HEIGHT_64,
     OLED_SETMULTIPLEX,
     OLED_64,
+    OLED_DISPLAY_ON,
 };
-
 
 // =====================================================================================
 // ===== Static Data Tables (Global PROGMEM) ===========================================
@@ -188,7 +249,7 @@ static const uint8_t _oled_init[] PROGMEM = {
 #define OLED_SEG_DOT (1u << 7)
 
 // Bitmasks for digits 0-9 and dot / just for easier edit - thats all
-static const uint8_t _oled_symbolMasks[11] PROGMEM = {
+static const uint8_t _oled_symbolMasks[SEVEN_SEG_MASK_COUNT] PROGMEM = {
     (OLED_SEG_A | OLED_SEG_B | OLED_SEG_C | OLED_SEG_D | OLED_SEG_E | OLED_SEG_F),              // 0
     (OLED_SEG_B | OLED_SEG_C),                                                                  // 1
     (OLED_SEG_A | OLED_SEG_B | OLED_SEG_D | OLED_SEG_E | OLED_SEG_G),                           // 2
@@ -232,7 +293,6 @@ static const uint8_t _oled_segs[32] PROGMEM = {
 
 #undef OLED_SEG4
 
-
 // =====================================================================================
 // ===== Class Definition ===============================================================
 // =====================================================================================
@@ -241,7 +301,7 @@ template <int _TYPE, int _BUFF = OLED_NO_BUFFER>
 class GyverOLED {
 public:
     // Constructor
-    GyverOLED(uint8_t address = 0x3C) : _address(address) {}
+    GyverOLED(uint8_t address = OLED_I2C_ADDR_DEFAULT) : _address(address) {}
 
     // =================================================================================
     // ===== Service Functions =========================================================
@@ -252,11 +312,11 @@ public:
         Wire.begin();
         Wire.setClock(I2C_BASE_HZ);
 
-        beginCommand();
-        for (uint8_t i = 0; i < sizeof(_oled_init); i++) {
-            sendByte(pgm_read_byte(&_oled_init[i]));
-        }
-        endTransm();
+        OLED_INT_I2C_CMD(
+            for (uint8_t i = 0; i < sizeof(_oled_init); i++) {
+                sendByte(pgm_read_byte(&_oled_init[i]));
+            }
+        );
 
         setCursorXY(0, 0);
     }
@@ -277,12 +337,10 @@ public:
 
         setWindowRaw(x0, y0, x1, y1);
 
-        beginData();
         uint16_t bytes = (uint16_t)(x1 - x0) * (y1 - y0 + 1);
-        while (bytes--) sendByte(0);
-        endTransm();
+        OLED_INT_I2C_DATA(while (bytes--) sendByte(0));
 
-        setCursorXY(_x, _y);
+        OLED_INT_RESTORE_CURSOR();
     }
 
     // Adjusts display brightness level from 0 (dim) to 255 (max)
@@ -290,18 +348,18 @@ public:
 
     // Powers the OLED on/off
     //
-    // SSD1306 has an internal DC-DC converter that generates the OLED panel voltage
-    // Even when the display is turned OFF (0xAE), the charge pump may still run and can produce RF interference
-    // Disabling it reduces noise (especially noticeable on MW/SW) and also lowers power consumption
+    // Charge pump makes panel VCC from VBAT
+    // AE (sleep) blanks SEG/COM but the pump can keep switching and radiate to MW/SW
+    // 8D 10 stops it; 8D 14 enables it.
     //
-    // 0x8D + 0x14 = charge pump ON
-    // 0x8D + 0x10 = charge pump OFF
-    void setPower(bool mode) {
-        beginCommand();
-        sendByte(OLED_CHARGEPUMP);
-        sendByte(mode ? 0x14 : 0x10);                 // enable/disable charge pump
-        sendByte(mode ? OLED_DISPLAY_ON : OLED_DISPLAY_OFF);
-        endTransm();
+    // ON:  8D 14 AF   pump must be on before AF
+    // OFF: AE 8D 10   display off first then drop VCC (here: 8D 10)
+    NOINLINE void setPower(bool mode) {
+        OLED_INT_I2C_CMD(
+            sendByte(mode ? OLED_CHARGEPUMP : OLED_DISPLAY_OFF);
+            sendByte(mode ? OLED_CHARGEPUMP_ON : OLED_CHARGEPUMP);
+            sendByte(mode ? OLED_DISPLAY_ON : OLED_CHARGEPUMP_OFF);
+        );
     }
 
     // =================================================================================
@@ -311,41 +369,13 @@ public:
     // Outputs single ASCII character with inversion support
     // glyph stored as 5 columns in _charMap_min[][5]
     // 6th column (spacing) is generated at runtime (0x00 or 0xFF if inverted)
-    static constexpr uint8_t FONT_COLS = 5;
+    static constexpr uint8_t FONT_COLS   = 5;
     static constexpr uint8_t FONT_SPACER = 1;
-    static constexpr uint8_t FONT_TOTAL = FONT_COLS + FONT_SPACER;
-
-    // Core write without beginData()/endTransm() for batching
-    // one glyph into an already open I2C data burst from print/write
-    __attribute__((noinline)) void writeCore(uint8_t data) {
-        if (_x + FONT_TOTAL > _maxX) return;  // clip so a long string cannot overwrite next UI field
-
-        // invert fills pixels and gap as one cell
-        const uint8_t invMask = _invState ? 0xFFu : 0x00u;
-
-        // missing RDS/RadioText char still occupies a cell
-        // space glyph is five zeros so it is the blank fallback
-        const uint8_t* glyphPtr = &_charMap_min[0][0];
-        if ((uint8_t)(data - 32u) < 95u) {
-            const uint8_t index = pgm_read_byte(&_charLookup[data - 32u]);
-            if (index != 0xFFu)
-                glyphPtr = &_charMap_min[index][0];
-        }
-
-        uint8_t n = FONT_COLS;
-        do {
-            sendByte((uint8_t)(pgm_read_byte(glyphPtr++) ^ invMask));
-        } while (--n);
-
-        sendByte(invMask);  // spacing not stored in flash
-        _x += FONT_TOTAL;
-    }
+    static constexpr uint8_t FONT_TOTAL  = FONT_COLS + FONT_SPACER;
 
     // Single-char write
     size_t write(uint8_t data) {
-        beginData();
-        writeCore(data);
-        endTransm();
+        OLED_INT_I2C_DATA(writeCore(data));
         return 1;
     }
 
@@ -360,13 +390,13 @@ public:
     // print RAM string
     size_t print(const char* s) {
         if (!s) return 0;
-        beginData();
         size_t n = 0;
-        while (*s) {
-            writeCore((uint8_t)*s++);
-            n++;
-        }
-        endTransm();
+        OLED_INT_I2C_DATA(
+            while (*s) {
+                writeCore((uint8_t)*s++);
+                n++;
+            }
+        );
         return n;
     }
 
@@ -374,15 +404,15 @@ public:
     size_t print(const __FlashStringHelper* s) {
         if (!s) return 0;
         PGM_P p = (PGM_P)s;
-        beginData();
         size_t n = 0;
-        while (1) {
-            char c = (char)pgm_read_byte(p++);
-            if (!c) break;
-            writeCore((uint8_t)c);
-            n++;
-        }
-        endTransm();
+        OLED_INT_I2C_DATA(
+            while (1) {
+                char c = (char)pgm_read_byte(p++);
+                if (!c) break;
+                writeCore((uint8_t)c);
+                n++;
+            }
+        );
         return n;
     }
 
@@ -397,8 +427,8 @@ public:
     void setCursorXY(uint8_t x, uint8_t y) {
         _x = x;
         _y = y;
-        uint8_t page = y;
-        BIT8_LSR3(page);
+        uint8_t page;
+        OLED_INT_PAGE_FROM_PIX(page, y);
         setWindowRaw(x, page, _maxX, page);
     }
 
@@ -409,105 +439,29 @@ public:
     // ===== Seven Segment Drawing ======================================================
     // =================================================================================
 
-    // =-=-=-=-=-=-=-=-= Low-level primitive drawing (buffer manipulation) =-=-=-=-=-=-=-=-=
-
-    // Sets a single pixel in the local buffer (bitwise)
-    void local_setPixel(unsigned char* buf, uint8_t curr_x, uint8_t curr_y) {
-        // Keep shifts strictly 8-bit to avoid int-promotions turning this into 16-bit shift loops under -Os
-        uint8_t page = curr_y;
-        BIT8_LSR3(page);
-        uint8_t bit = (uint8_t)(curr_y & 7);
-
-        // idx = curr_x * SEG_PAGES + page
-        // Here SEG_PAGES is constexpr and equals 4 for 32px high seven-seg glyph buffer
-        static_assert(SEG_PAGES == 4, "local_setPixel assumes SEG_PAGES == 4");
-        uint8_t idx = (uint8_t)((curr_x << 2) + page);
-
-        uint8_t m = 1;
-        m <<= bit;
-        buf[idx] |= m;
-    }
-
-    // Renders horizontal segment in buffer (2px thick)
-    void draw_horizontal_line(unsigned char* buf, uint8_t s_x, uint8_t s_y, uint8_t s_len) {
-        for (uint8_t i = 0; i < s_len; i++) {
-            uint8_t curr_x = (uint8_t)(s_x + i);
-            local_setPixel(buf, curr_x, s_y);
-            local_setPixel(buf, curr_x, (uint8_t)(s_y + 1));
-        }
-    }
-
-    // Renders vertical segment in buffer (2px thick)
-    void draw_vertical_line(unsigned char* buf, uint8_t s_x, uint8_t s_y, uint8_t s_len) {
-        for (uint8_t i = 0; i < s_len; i++) {
-            uint8_t curr_y = (uint8_t)(s_y + i);
-            local_setPixel(buf, s_x, curr_y);
-            local_setPixel(buf, (uint8_t)(s_x + 1), curr_y);
-        }
-    }
-
     // =-=-=-=-=-=-=-=-= Mid-level data transfer =-=-=-=-=-=-=-=-=
 
     // send rectangular window of data to display
     __attribute__((noinline))
         void partialUpdate(uint8_t x, uint8_t y, uint8_t w, uint8_t h, const unsigned char* data) {
-        uint8_t startPage = y;
-        BIT8_LSR3(startPage);
+        uint8_t startPage;
+        OLED_INT_PAGE_FROM_PIX(startPage, y);
 
-        uint8_t endPage = (y + h - 1);
-        BIT8_LSR3(endPage);
+        uint8_t endPage;
+        OLED_INT_PAGE_FROM_PIX(endPage, (uint8_t)(y + h - 1));
 
         setWindowRaw(x, startPage, (uint8_t)(x + w - 1), endPage);
 
         uint8_t pages = endPage - startPage + 1;
         uint16_t len = (uint16_t)w * pages;
 
-        beginData();
-        if (!data) {
-            while (len--) sendByte(0x00);
-        } else {
-            while (len--) sendByte(*data++);
-        }
-        endTransm();
-    }
-
-    // =-=-=-=-=-=-=-=-= Low-level helpers =-=-=-=-=-=-=-=-=
-
-    // clear only the part of the buffer that will be used
-    // prevents corrupting other parts of the static buffer
-    inline void prepareLocalBuffer(uint8_t* buf, uint8_t width) {
-        const uint16_t used_bytes = (uint16_t)width * SEG_PAGES;
-        // compile-time check prevents buffer overflow from bad constants
-        static_assert(SEVEN_SEG_DIGIT_WIDTH * SEG_PAGES <= SEG_BUF_SZ, "SEG_BUF_SZ is too small");
-        memset(buf, 0, used_bytes);
-    }
-
-    // =-=-=-=-=-=-=-=-= Mid-level helper =-=-=-=-=-=-=-=-=
-
-    // iterate over mask bits and draw all active segments
-    // mask mapping keeps glyph definitions compact in flash
-    inline void renderSegmentsToBuffer(uint8_t* buf, uint8_t mask) {
-        const uint8_t* ptr = _oled_segs;
-        uint8_t m = mask;
-        for (uint8_t b = 0; b < 8; b++, ptr += 4) {
-            if (m & 1) {
-
-                // Read 4 consecutive PROGMEM bytes in a single optimal sequence
-                // 
-                // prevents GCC from recalculating the Z pointer 4 times
-                //
-                uint32_t packed = pgm_read_dword(ptr);
-                uint8_t s_x     = (uint8_t)(packed);
-                uint8_t s_y     = (uint8_t)(packed >> 8);
-                uint8_t s_len   = (uint8_t)(packed >> 16);
-                uint8_t isHoriz = (uint8_t)(packed >> 24);
-
-                if (isHoriz) draw_horizontal_line(buf, s_x, s_y, s_len);
-                else        draw_vertical_line(buf, s_x, s_y, s_len);
+        OLED_INT_I2C_DATA(
+            if (!data) {
+                while (len--) sendByte(0x00);
+            } else {
+                while (len--) sendByte(*data++);
             }
-            // Force 8-bit logical shift right (avoid 16-bit int-promotion asr/ror)
-            asm volatile ("lsr %0" : "+r" (m));
-        }
+        );
     }
 
     // =-=-=-=-=-=-=-=-= High-level orchestrator  =-=-=-=-=-=-=-=-=
@@ -516,7 +470,7 @@ public:
     // split into helpers for clarity without flash size penalty
     void drawDigit(char c, uint8_t px, uint8_t py) {
         uint8_t index;
-        if (c == '.') index = 10;
+        if (c == '.') index = SEVEN_SEG_DOT_INDEX;
         else if (c >= '0' && c <= '9') index = (uint8_t)(c - '0');
         else return;
 
@@ -544,10 +498,10 @@ public:
     // Fills entire display with specified byte value and resets cursor
     void fill(uint8_t data) {
         setWindowRaw(0, 0, _maxX, _maxRow);
-        beginData();
-        for (uint16_t i = 0; i < SCREEN_BYTES; i++) sendByte(data);
-        endTransm();
-        setCursorXY(_x, _y);
+        OLED_INT_I2C_DATA(
+            for (uint16_t i = 0; i < SCREEN_BYTES; i++) sendByte(data)
+        );
+        OLED_INT_RESTORE_CURSOR();
     }
 
     // Transmits single byte over I2C with batch handling to optimize transfers
@@ -559,17 +513,12 @@ public:
 
     // Sends single command byte to display controller
     void sendCommand(uint8_t cmd1) {
-        beginOneCommand();
-        sendByte(cmd1);
-        endTransm();
+        OLED_INT_I2C_ONE(sendByte(cmd1));
     }
 
     // Sends command byte followed by parameter to display controller
     void sendCommand(uint8_t cmd1, uint8_t cmd2) {
-        beginCommand();
-        sendByte(cmd1);
-        sendByte(cmd2);
-        endTransm();
+        OLED_INT_I2C_CMD(sendByte(cmd1); sendByte(cmd2));
     }
 
     // Defines active window area for data writing on display
@@ -602,16 +551,16 @@ public:
     // retrieves font column byte using a lookup table for a compact font map
     // col range is guaranteed by write() loop, no bounds check needed
     uint8_t getFont(uint8_t font, uint8_t col) {
-        if ((uint8_t)(font - 32u) >= 95u) return 0;
-        const uint8_t index = pgm_read_byte(&_charLookup[font - 32u]);
-        return (index == 0xFFu) ? 0 : pgm_read_byte(&_charMap_min[index][col]);
+        if (!OLED_INT_ASCII_IN_FONT(font)) return 0;
+        const uint8_t index = OLED_INT_FONT_LOOKUP(font);
+        return (index == OLED_FONT_NONE) ? 0 : pgm_read_byte(&_charMap_min[index][col]);
     }
 
     // =================================================================================
     // ===== Variables and Constants ====================================================
     // =================================================================================
 
-    const uint8_t _address = 0x3C;
+    const uint8_t _address = OLED_I2C_ADDR_DEFAULT;
     static constexpr uint8_t _maxRow = 8 - 1;
     static constexpr uint8_t _maxX = OLED_WIDTH - 1;
 
@@ -619,36 +568,133 @@ public:
     uint8_t _x = 0, _y = 0;
 
 private:
+    // Core write without beginData()/endTransm() for batching
+    // one glyph into an already open I2C data burst from print/write
+    __attribute__((noinline)) void writeCore(uint8_t data) {
+        if (_x + FONT_TOTAL > _maxX) return;  // clip so a long string cannot overwrite next UI field
+
+        // invert fills pixels and gap as one cell
+        const uint8_t invMask = _invState ? 0xFFu : 0x00u;
+
+        // missing RDS/RadioText char still occupies a cell
+        // space glyph is five zeros so it is the blank fallback
+        const uint8_t* glyphPtr = &_charMap_min[0][0];
+        if (OLED_INT_ASCII_IN_FONT(data)) {
+            const uint8_t index = OLED_INT_FONT_LOOKUP(data);
+            if (index != OLED_FONT_NONE)
+                glyphPtr = &_charMap_min[index][0];
+        }
+
+        uint8_t n = FONT_COLS;
+        do {
+            sendByte((uint8_t)(pgm_read_byte(glyphPtr++) ^ invMask));
+        } while (--n);
+
+        sendByte(invMask);  // spacing not stored in flash
+        _x += FONT_TOTAL;
+    }
+
+    // =-=-=-=-=-=-=-=-= Low-level primitive drawing (buffer manipulation) =-=-=-=-=-=-=-=-=
+
+    // Sets a single pixel in the local buffer (bitwise)
+    void local_setPixel(unsigned char* buf, uint8_t curr_x, uint8_t curr_y) {
+        // Keep shifts strictly 8-bit to avoid int-promotions turning this into 16-bit shift loops under -Os
+        uint8_t page;
+        OLED_INT_PAGE_FROM_PIX(page, curr_y);
+        uint8_t bit = (uint8_t)(curr_y & 7);
+
+        // idx = curr_x * SEG_PAGES + page
+        // Here SEG_PAGES is constexpr and equals 4 for 32px high seven-seg glyph buffer
+        static_assert(SEG_PAGES == 4, "local_setPixel assumes SEG_PAGES == 4");
+        uint8_t idx = (uint8_t)((curr_x << 2) + page);
+
+        uint8_t m = 1;
+        m <<= bit;
+        buf[idx] |= m;
+    }
+
+    // Renders horizontal segment in buffer (2px thick)
+    void draw_horizontal_line(unsigned char* buf, uint8_t s_x, uint8_t s_y, uint8_t s_len) {
+        for (uint8_t i = 0; i < s_len; i++) {
+            uint8_t curr_x = (uint8_t)(s_x + i);
+            local_setPixel(buf, curr_x, s_y);
+            local_setPixel(buf, curr_x, (uint8_t)(s_y + 1));
+        }
+    }
+
+    // Renders vertical segment in buffer (2px thick)
+    void draw_vertical_line(unsigned char* buf, uint8_t s_x, uint8_t s_y, uint8_t s_len) {
+        for (uint8_t i = 0; i < s_len; i++) {
+            uint8_t curr_y = (uint8_t)(s_y + i);
+            local_setPixel(buf, s_x, curr_y);
+            local_setPixel(buf, (uint8_t)(s_x + 1), curr_y);
+        }
+    }
+
+    // =-=-=-=-=-=-=-=-= Low-level helpers =-=-=-=-=-=-=-=-=
+
+    // clear only the part of the buffer that will be used
+    // prevents corrupting other parts of the static buffer
+    inline void prepareLocalBuffer(uint8_t* buf, uint8_t width) {
+        const uint16_t used_bytes = (uint16_t)width * SEG_PAGES;
+        // compile-time check prevents buffer overflow from bad constants
+        static_assert(SEVEN_SEG_DIGIT_WIDTH * SEG_PAGES <= SEG_BUF_SZ, "SEG_BUF_SZ is too small");
+        memset(buf, 0, used_bytes);
+    }
+
+    // =-=-=-=-=-=-=-=-= Mid-level helper =-=-=-=-=-=-=-=-=
+
+    // iterate over mask bits and draw all active segments
+    // mask mapping keeps glyph definitions compact in flash
+    inline void renderSegmentsToBuffer(uint8_t* buf, uint8_t mask) {
+        const uint8_t* ptr = _oled_segs;
+        uint8_t m = mask;
+        for (uint8_t b = 0; b < 8; b++, ptr += 4) {
+            if (m & 1) {
+
+                // Read 4 consecutive PROGMEM bytes in a single optimal sequence
+                // 
+                // prevents GCC from recalculating the Z pointer 4 times
+                //
+                uint8_t s_x, s_y, s_len, isHoriz;
+                OLED_INT_UNPACK_SEG4(ptr, s_x, s_y, s_len, isHoriz);
+
+                if (isHoriz) draw_horizontal_line(buf, s_x, s_y, s_len);
+                else        draw_vertical_line(buf, s_x, s_y, s_len);
+            }
+            // Force 8-bit logical shift right (avoid 16-bit int-promotion asr/ror)
+            BIT8_LSR1(m);
+        }
+    }
+
     // =================================================================================
     // ===== Low-level I2C ==============================================================
     // =================================================================================
 
     void beginTransmMode(uint8_t mode) {
         Wire.beginTransmission(_address);
-        Wire.write(mode);
+        sendByte(mode);
     }
 
     // Raw window setter to avoid clamp-heavy logic in hot paths
     // Safe only if caller guarantees: x0..x1 in 0..127, y0..y1 in 0..7 (pages)
     inline void setWindowRaw(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1) {
-        beginCommand();
-        sendByte(OLED_COLUMNADDR);
-        sendByte(x0);
-        sendByte(x1);
-        sendByte(OLED_PAGEADDR);
-        sendByte(y0);
-        sendByte(y1);
-        endTransm();
+        OLED_INT_I2C_CMD(
+            sendByte(OLED_COLUMNADDR);
+            sendByte(x0);
+            sendByte(x1);
+            sendByte(OLED_PAGEADDR);
+            sendByte(y0);
+            sendByte(y1);
+        );
     }
 
     // derived constants for seven-seg drawing and transfers
-    static constexpr uint8_t  SEG_PAGES = (SEVEN_SEG_DIGIT_HEIGHT + 7) / 8;
-    static constexpr uint8_t  SEG_MAX_W = SEVEN_SEG_DIGIT_WIDTH;
-    static constexpr uint16_t SEG_BUF_SZ = (uint16_t)SEG_MAX_W * SEG_PAGES;
+    static constexpr uint8_t  SEG_PAGES  = (SEVEN_SEG_DIGIT_HEIGHT + 7) / 8;
+    static constexpr uint16_t SEG_BUF_SZ = (uint16_t)SEVEN_SEG_DIGIT_WIDTH * SEG_PAGES;
 
     static constexpr uint16_t SCREEN_BYTES = BUFSIZE_128x64; // full screen size
 };
-
 
 // =====================================================================================
 // ===== Cleanup =======================================================================
@@ -662,5 +708,14 @@ private:
 #undef OLED_SEG_F
 #undef OLED_SEG_G
 #undef OLED_SEG_DOT
+
+#undef OLED_INT_I2C_DATA
+#undef OLED_INT_I2C_CMD
+#undef OLED_INT_I2C_ONE
+#undef OLED_INT_PAGE_FROM_PIX
+#undef OLED_INT_RESTORE_CURSOR
+#undef OLED_INT_ASCII_IN_FONT
+#undef OLED_INT_FONT_LOOKUP
+#undef OLED_INT_UNPACK_SEG4
 
 #endif // SSD1306_OLED_H

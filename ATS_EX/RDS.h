@@ -22,6 +22,14 @@
 
 extern GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 
+// ====================================================================================
+// ===== LOCAL MACROS =================================================================
+// ====================================================================================
+
+#define RDS_BLER_C(b)           (((uint8_t)(b) >> 2) & 0x03)
+#define RDS_BLER_D(b)           ((uint8_t)(b) & 0x03)
+#define RDS_MARK_OK(n)          ((uint16_t)((n) | 1))
+
 // =-=-=-=-=-=-=-=-= RDS configuration =-=-=-=-=-=-=-=-=
 
 #define RDS_ROW             6
@@ -64,7 +72,7 @@ static uint8_t  s_hh, s_mm;
 // =-=-=-=-=-=-=-=-= Time arithmetic helpers =-=-=-=-=-=-=-=-=
 
 // 16-bit millisecond delta with proper wrap handling (~65s period)
-static inline __attribute__((always_inline))
+INLINE_AI
 uint16_t rdsElapsed(uint16_t now, uint16_t since) {
     return (uint16_t)(now - since);
 }
@@ -72,24 +80,24 @@ uint16_t rdsElapsed(uint16_t now, uint16_t since) {
 // =-=-=-=-=-=-=-=-= State query helpers =-=-=-=-=-=-=-=-=
 
 // Returns true when any valid RDS data has been received
-static inline __attribute__((always_inline)) bool rdsHasData() {
+INLINE_AI bool rdsHasData() {
     return s_ok != 0;
 }
 
 // Returns true when valid clock time has been received
-static inline __attribute__((always_inline)) bool rdsHasValidClock() {
+INLINE_AI bool rdsHasValidClock() {
     return s_hh != RDS_NO_VALUE;
 }
 
 // =-=-=-=-=-=-=-=-= AVR and formatting helpers =-=-=-=-=-=-=-=-=
 
 // AVR-GCC promotes uint8_t shifts to 16-bit — inline asm avoids that
-static inline __attribute__((always_inline)) uint8_t avrSwapNibbles(uint8_t v) {
+INLINE_AI uint8_t avrSwapNibbles(uint8_t v) {
     asm("swap %0" : "+r"(v));
     return v;
 }
 
-static inline __attribute__((always_inline))
+INLINE_AI
 void fmtDigit2(char* dst, uint8_t val) {
     DivMod10 d = divmod10_u8(val);
     dst[0] = (char)('0' + d.q);
@@ -97,7 +105,7 @@ void fmtDigit2(char* dst, uint8_t val) {
 }
 
 // Format "HH:MM" into 5-char buffer (no null terminator)
-static inline __attribute__((always_inline))
+INLINE_AI
 void fmtTime5(char* dst, uint8_t hh, uint8_t mm) {
     fmtDigit2(dst, hh);
     dst[2] = ':';
@@ -106,18 +114,18 @@ void fmtTime5(char* dst, uint8_t hh, uint8_t mm) {
 
 // =-=-=-=-=-=-=-=-= Block B field extractors =-=-=-=-=-=-=-=-=
 
-static inline __attribute__((always_inline)) uint8_t rdsGroupType(uint16_t bB) { return (uint8_t)(bB >> 12); }
-static inline __attribute__((always_inline)) uint8_t rdsVer(uint16_t bB) { return (uint8_t)((bB >> 11) & 1); }
-static inline __attribute__((always_inline)) uint8_t rdsAB(uint16_t bB) { return (uint8_t)bB & 0x10; }
-static inline __attribute__((always_inline)) uint8_t rdsAdr(uint16_t bB) { return (uint8_t)(bB & 0x0F); }
-static inline __attribute__((always_inline)) bool rdsIsGroup2(uint16_t bB) { return rdsGroupType(bB) == RDS_GROUP2_TYPE; }
+INLINE_AI uint8_t rdsGroupType(uint16_t bB) { return (uint8_t)(bB >> 12); }
+INLINE_AI uint8_t rdsVer(uint16_t bB) { return (uint8_t)((bB >> 11) & 1); }
+INLINE_AI uint8_t rdsAB(uint16_t bB) { return (uint8_t)bB & 0x10; }
+INLINE_AI uint8_t rdsAdr(uint16_t bB) { return (uint8_t)(bB & 0x0F); }
+INLINE_AI bool rdsIsGroup2(uint16_t bB) { return rdsGroupType(bB) == RDS_GROUP2_TYPE; }
 // group type 4 + version A combined into bits[15:11]
-static inline __attribute__((always_inline)) bool rdsIsGroup4A(uint16_t bB) { return (uint8_t)(bB >> 11) == RDS_GROUP4A_TAG; }
+INLINE_AI bool rdsIsGroup4A(uint16_t bB) { return (uint8_t)(bB >> 11) == RDS_GROUP4A_TAG; }
 
 // =-=-=-=-=-=-=-=-= Display output =-=-=-=-=-=-=-=-=
 
 // Fill 16-char RT zone into buffer at offset 0
-static inline __attribute__((always_inline))
+INLINE_AI
 void rdsFillRT(char* buf) {
     uint8_t remain = (s_len > s_scrl) ? (s_len - s_scrl) : 0;
 
@@ -126,7 +134,7 @@ void rdsFillRT(char* buf) {
 }
 
 // Fill 5-char clock zone into buffer
-static inline __attribute__((always_inline))
+INLINE_AI
 void rdsFillClock(char* clk) {
     if (!rdsHasData()) {
         memset(clk, ' ', RDS_CLK_COLS);
@@ -140,19 +148,19 @@ void rdsFillClock(char* clk) {
 
 // Draw entire RDS row (RT + Clock) in a single pass
 // One buffer + one oled.print() = one I2C burst for the whole row
-static void __attribute__((noinline)) rdsRedraw() {
+static void NOINLINE rdsRedraw() {
     char buf[RDS_FULL_WIN + 1];
     rdsFillRT(buf);
     rdsFillClock(&buf[RDS_RT_WIN]);
     buf[RDS_FULL_WIN] = '\0';
-    oled.setCursor(0, RDS_ROW);
-    oled.print(buf);
+    oled_xy(0, RDS_ROW);
+    oled_puts(buf);
 }
 
 // =-=-=-=-=-=-=-=-= Buffer management =-=-=-=-=-=-=-=-=
 
 // noinline — called from two places, saves ~8 bytes vs inlined duplicates
-static void __attribute__((noinline)) rdsDisableHw() {
+static void NOINLINE rdsDisableHw() {
     siSetProperty(FM_RDS_CONFIG, 0);
 }
 
@@ -162,7 +170,7 @@ static inline void rdsEnableHw() {
 }
 
 // RDS spec mandates full wipe when A/B flag flips — station started new message
-static void __attribute__((noinline)) rdsClearRT() {
+static void NOINLINE rdsClearRT() {
     memset(s_rt, ' ', RDS_RT_MAX);
     s_len = 0;
     s_scrl = 0;
@@ -170,7 +178,7 @@ static void __attribute__((noinline)) rdsClearRT() {
 }
 
 // Clears all RDS content (RT + clock) but keeps HW state
-static void __attribute__((noinline)) rdsClearContent() {
+static void NOINLINE rdsClearContent() {
     rdsClearRT();
     s_hh = RDS_NO_VALUE;
     s_mm = RDS_NO_VALUE;
@@ -178,7 +186,7 @@ static void __attribute__((noinline)) rdsClearContent() {
 }
 
 // Full reset: content + HW state + timers
-static void __attribute__((noinline)) rdsResetAll() {
+static void NOINLINE rdsResetAll() {
     rdsClearContent();
     s_hw = 0;
     s_poll = 0;
@@ -186,13 +194,13 @@ static void __attribute__((noinline)) rdsResetAll() {
 }
 
 // Clears content and refreshes display — common pattern for freq change and sync loss
-static void __attribute__((noinline)) rdsClearAndRedraw() {
+static void NOINLINE rdsClearAndRedraw() {
     rdsClearContent();
     rdsRedraw();
 }
 
 // Full reset with display refresh — used when deactivating or toggling
-static void __attribute__((noinline)) rdsResetAndRedraw() {
+static void NOINLINE rdsResetAndRedraw() {
     rdsResetAll();
     rdsRedraw();
 }
@@ -225,7 +233,7 @@ static inline void rdsAdvanceScroll(uint16_t n) {
 
 // =-=-=-=-=-=-=-=-= RDS char decode =-=-=-=-=-=-=-=-=
 
-static bool __attribute__((noinline)) rdsStoreChars(uint8_t pos, const uint8_t* data, uint8_t n) {
+static bool NOINLINE rdsStoreChars(uint8_t pos, const uint8_t* data, uint8_t n) {
     bool changed = false;
     char* dst = &s_rt[pos];
 
@@ -386,22 +394,22 @@ static inline bool rdsHandleSyncLoss(uint16_t n) {
 
 // s_ok never zero when valid — zero reserved as "no data yet" sentinel
 static inline void rdsMarkValid(uint16_t n) {
-    s_ok = (uint16_t)(n | 1);
+    s_ok = RDS_MARK_OK(n);
 }
 
 // =-=-=-=-=-=-=-=-= Public API =-=-=-=-=-=-=-=-=
 
-__attribute__((noinline)) bool rdsMiniUiEnabled() { return s_on; }
+bool NOINLINE rdsMiniUiEnabled() { return s_on; }
 
 // Frees I2C bus when toggling off so other peripherals can communicate
-void __attribute__((noinline)) rdsMiniToggleUi() {
+void NOINLINE rdsMiniToggleUi() {
     s_on = !s_on;
     if (!s_on && s_hw) rdsDisableHw();
     rdsResetAndRedraw();
 }
 
 // Takes uint16_t — upper 16 bits of millis() never needed at these intervals
-void __attribute__((noinline)) rdsMiniTask(uint16_t now16) {
+void NOINLINE rdsMiniTask(uint16_t now16) {
     if (rdsIsGated())               return;
     if (rdsIsWrongMode()) { rdsDeactivateHw(); return; }
     if (rdsCheckFreqChanged())      return;
@@ -422,13 +430,37 @@ void __attribute__((noinline)) rdsMiniTask(uint16_t now16) {
     // RESP12 layout [BLEA 7:6] [BLEB 5:4] [BLEC 3:2] [BLED 1:0]
     {
         const uint8_t bler = g_si4735.rdsGetBLER();
-        if (((bler >> 2) & 0x03) <= 1 && (bler & 0x03) <= 1)
+        if (RDS_BLER_C(bler) <= 1 && RDS_BLER_D(bler) <= 1)
             rdsProcessGroup4A(bB);
     }
 
     rdsAdvanceScroll(n);
     rdsRedraw();
 }
+
+#undef RDS_MINUTE_MAX
+#undef RDS_HOUR_MAX
+#undef RDS_2B_CHARS
+#undef RDS_2B_MAX_ADR
+#undef RDS_2A_CHARS
+#undef RDS_2A_MAX_ADR
+#undef RDS_GROUP4A_TAG
+#undef RDS_GROUP2_TYPE
+#undef RDS_CTRL_CHAR_MAX
+#undef RDS_NO_VALUE
+#undef RDS_RT_WIN
+#undef RDS_CLK_COLS
+#undef RDS_SCROLL_MS
+#undef RDS_TIMEOUT_MS
+#undef RDS_SETTLE_MS
+#undef RDS_POLL_MS
+#undef RDS_SCROLL_GAP
+#undef RDS_RT_MAX
+#undef RDS_FULL_WIN
+#undef RDS_ROW
+#undef RDS_MARK_OK
+#undef RDS_BLER_D
+#undef RDS_BLER_C
 
 #else
 

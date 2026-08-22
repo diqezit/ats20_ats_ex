@@ -1,23 +1,38 @@
+#pragma once
+
 // ----------------------------------------------------------------------
 // SettingsLogic.h - Settings handler business logic
 // ----------------------------------------------------------------------
 
-#pragma once
+#define HANDLER(name) void name(int8_t v)
+#define MODE_PRED(name, mode) \
+    static inline ALWAYS_INLINE bool name() { return g_currentMode == (mode); }
+#define SWITCH_TO(idx, lo, hi) \
+    doSwitchLogic(settingRef(idx), (lo), (hi), v)
+#define TOGGLE_ONLY(name, idx) \
+    HANDLER(name) { toggleSetting(idx); }
+#define TOGGLE_WHEN(name, idx, cond, fn) \
+    HANDLER(name) { toggleSetting(idx); if (cond) fn(); }
+#define SWITCH_PROP_WHEN(name, idx, maxv, cond, prop) \
+    HANDLER(name) { SWITCH_TO(idx, 0, maxv); if (cond) siSetSettingProp(prop, idx); }
 
 // =================================================================================================
 // Applicability predicates (used by g_SettingsMeta[] to grey-out irrelevant items)
 // =================================================================================================
 
-static bool isAlwaysActive() { return true; }
+MODE_PRED(isFm, FM)
+MODE_PRED(isCw, CW)
 
 // noinline to keep one shared body for FM check
-static bool __attribute__((noinline)) isFMActive() {
-    return g_currentMode == FM;
+static bool NOINLINE isFMActive() {
+    return isFm();
 }
 
 static bool isAMFamilyActive() { return !isFMActive(); }
 
 static bool isSSBActive() { return isSSB(); }
+
+#undef MODE_PRED
 
 // =================================================================================================
 // Helper: persist mode-dependent setting to g_modeSettings[][]
@@ -25,10 +40,14 @@ static bool isSSBActive() { return isSSB(); }
 
 // save setting value specific to current mode
 // links temporary UI state to persistent storage
-inline static __attribute__((always_inline))
+inline static ALWAYS_INLINE
 void persistModeSetting(ModeSettingType type, SettingsIndex index) {
     ModeContext m = getModeContext();
     g_modeSettings[type][m] = getSettingParam(index);
+}
+
+static inline void siSetSettingProp(uint16_t prop, SettingsIndex idx) {
+    siSetProperty(prop, (uint16_t)(uint8_t)getSettingParam(idx));
 }
 
 // =================================================================================================
@@ -47,7 +66,7 @@ static void applyCompensatedVolume() {
     } else {
         t = g_volume;
 
-        if (g_currentMode == FM) {
+        if (isFm()) {
             uint8_t o = getSettingParam(FmVolAdjust);
             t = (o >= t) ? 0 : (uint8_t)(t - o);
         }
@@ -81,9 +100,9 @@ static void doVolume(int8_t v) {
 // 'AUT' (Auto) is the standard mode.
 // can be useful to prevent overload from very strong local stations
 // (by increasing attenuation)
-void doAttenuation(int8_t v) {
-    uint8_t max_att_value = (g_currentMode == FM) ? MAX_ATTENUATION_FM_DB : MAX_ATTENUATION_AM_DB;
-    doSwitchLogic(settingRef(ATT), 0, max_att_value, v);
+HANDLER(doAttenuation) {
+    uint8_t max_att_value = isFm() ? MAX_ATTENUATION_FM_DB : MAX_ATTENUATION_AM_DB;
+    SWITCH_TO(ATT, 0, max_att_value);
 
     setAgcHardware(getSettingParam(ATT));
     persistModeSetting(MODE_SETTING_AGC, ATT);
@@ -94,10 +113,10 @@ void doAttenuation(int8_t v) {
 // between strong and weak stations
 // Higher values give more aggressive leveling making quiet stations louder
 // Maps simple user index (0-10) to non-linear hardware gain value (12-90)
-void doAvc(int8_t v) {
-    if (g_currentMode == FM) return;
+HANDLER(doAvc) {
+    if (isFm()) return;
 
-    doSwitchLogic(settingRef(AutoVolControl), AVC_MIN_INDEX, AVC_MAX_INDEX, v);
+    SWITCH_TO(AutoVolControl, AVC_MIN_INDEX, AVC_MAX_INDEX);
 
     persistModeSetting(MODE_SETTING_AVC, AutoVolControl);
 
@@ -110,8 +129,8 @@ void doAvc(int8_t v) {
 // Adjusts the RSSI threshold from 0 (OFF) to 60
 // As a safety measure if the squelch is manually disabled (set to 0) while it is actively muting the audio,
 // this function immediately un-mutes receiver
-void doSquelch(int8_t v) {
-    doSwitchLogic(settingRef(SQL), 0, SQUELCH_MAX_LEVEL, v);
+HANDLER(doSquelch) {
+    SWITCH_TO(SQL, 0, SQUELCH_MAX_LEVEL);
 
     if (getSettingParam(SQL) == 0 && g_squelchCutoff)
         unmuteAndClearSquelchCutoff();
@@ -121,45 +140,39 @@ void doSquelch(int8_t v) {
 // controls HOW MUCH the volume is reduced when a signal becomes weak
 // A higher value means stronger muting, making the receiver almost silent on noisy frequencies
 // Setting it to 0 - disables soft mute feature
-void doSoftMute(int8_t v) {
-    doSwitchLogic(settingRef(SoftMute), 0, SOFT_MUTE_MAX_ATTENUATION, v);
+HANDLER(doSoftMute) {
+    SWITCH_TO(SoftMute, 0, SOFT_MUTE_MAX_ATTENUATION);
 
     // persist per modulation (AM, LSB, USB, CW)
     persistModeSetting(MODE_SETTING_SOFT_MUTE, SoftMute);
 
-    if (g_currentMode != FM)
-        g_si4735.setAmSoftMuteMaxAttenuation(getSettingParam(SoftMute));
+    if (!isFm())
+        siSetSettingProp(AM_SOFT_MUTE_MAX_ATTENUATION, SoftMute);
 }
 
 // Settings: Soft Mute Threshold
 // controls WHEN the soft mute feature activates
 // It sets a minimum signal quality (SNR) threshold
 // If the signal drops below this level, the audio will be muted by the amount set in 'SMA'
-void doSoftMuteThreshold(int8_t v) {
-    doSwitchLogic(settingRef(SoftMuteThr), 0, SOFT_MUTE_MAX_SNR_THRESHOLD, v);
-    if (!g_si4735.isCurrentTuneFM())
-        g_si4735.setAMSoftMuteSnrThreshold(getSettingParam(SoftMuteThr));
-}
+SWITCH_PROP_WHEN(doSoftMuteThreshold, SoftMuteThr, SOFT_MUTE_MAX_SNR_THRESHOLD,
+                 !g_si4735.isCurrentTuneFM(), AM_SOFT_MUTE_SNR_THRESHOLD)
 
 // Settings: AM Noise Blanker
-void doAMNoiseBlanker(int8_t v) {
-    toggleSetting(AMNoiseBlanker);
-    if (g_currentMode != FM) applyAMNoiseBlankerSettings();
-}
+TOGGLE_WHEN(doAMNoiseBlanker, AMNoiseBlanker, !isFm(), applyAMNoiseBlankerSettings)
 
 // =================================================================================================
 // Settings: Page 2 - SSB & CW
 // =================================================================================================
 
 // Settings: BFO Offset calibration
-void doBFOCalibration(int8_t v) {
+HANDLER(doBFOCalibration) {
 
     // BFO calibration is not applicable in FM
     if (currentBandType() == FM_BAND_TYPE) return;
 
     // Expanded range to -25..+25. With a x100 multiplier in updateBFO(),
     // this provides a +/- 2.5kHz calibration range in 100Hz step
-    doSwitchLogic(settingRef(BFO), BFO_CALIBRATION_MIN, BFO_CALIBRATION_MAX, v);
+    SWITCH_TO(BFO, BFO_CALIBRATION_MIN, BFO_CALIBRATION_MAX);
 
     // Per-band BFO calibration: store in current band
     currentBandPtr()->bfoCal = getSettingParam(BFO);
@@ -169,8 +182,8 @@ void doBFOCalibration(int8_t v) {
     if (isSSB()) updateBFO();
 }
 
-//Settings: SSB Soft Mute Mode
-void doSSBSoftMuteMode(int8_t v) {
+// Settings: SSB Soft Mute Mode
+HANDLER(doSSBSoftMuteMode) {
     toggleSetting(SSM);
     if (isSSB())
         g_si4735.setSSBSoftMute(getSettingParam(SSM));
@@ -178,39 +191,39 @@ void doSSBSoftMuteMode(int8_t v) {
 
 // Common tail for SSB-related toggle settings (Sync, SVC)
 // reduce code duplication
-static void __attribute__((noinline)) toggleSettingAndSyncSSB(uint8_t idx) {
+static void NOINLINE toggleSettingAndSyncSSB(uint8_t idx) {
     toggleSetting(idx);
 
     if (isSSB()) applyBandConfiguration(false);
 }
 
-//Settings: SSB AVC Switch
-void doSSBAVC(int8_t v) {
+// Settings: SSB AVC Switch
+HANDLER(doSSBAVC) {
     toggleSettingAndSyncSSB(SVC);
 }
 
-//Settings: SSB Cutoff filter
-void doCutoffFilter(int8_t v) {
-    doSwitchLogic(settingRef(CutoffFilter), 0, CUTOFF_FILTER_MAX_VALUE, v);
+// Settings: SSB Cutoff filter
+HANDLER(doCutoffFilter) {
+    SWITCH_TO(CutoffFilter, 0, CUTOFF_FILTER_MAX_VALUE);
 
     if (isSSB())
         updateSSBCutoffFilter();
 }
 
-//Settings: Sync switch
-void doSync(int8_t v) {
+// Settings: Sync switch
+HANDLER(doSync) {
     // Sync is not need in CW mode
-    if (g_currentMode == CW) return;
+    if (isCw()) return;
 
     toggleSettingAndSyncSSB(Sync);
 }
 
 // Settings: CW Pitch
 // 5..8 meaning 500..800 Hz
-void doCWPitch(int8_t v) {
-    doSwitchLogic(settingRef(CWPitch), 5, 8, v);
+HANDLER(doCWPitch) {
+    SWITCH_TO(CWPitch, 5, 8);
     markStateAsDirty();
-    if (g_currentMode == CW) updateBFO();
+    if (isCw()) updateBFO();
 }
 
 // =================================================================================================
@@ -221,54 +234,35 @@ void doCWPitch(int8_t v) {
 // sets de-emphasis time constant for FM reception
 // matches the pre-emphasis used by broadcasters in different regions
 // 75 µs is standard for America, 50 µs for Europe and rest of
-void doDeEmp(int8_t v) {
-    toggleSetting(DeEmp);
-    if (g_currentMode == FM)
-        applyFmDeEmphasisFromSetting();
-}
+TOGGLE_WHEN(doDeEmp, DeEmp, isFm(), applyFmDeEmphasisFromSetting)
 
 // Settings: FM Audio Profile (Speaker EQ)
 // Toggles a curated audio profile designed to improve sound on the small internal speaker.
 // When disabled, it restores default chip settings for pure audio output, ideal for headphones.
-void doFMAudioProfile(int8_t v) {
-    toggleSetting(FMAudioProfile);
-    if (g_currentMode == FM) FMAudioConfigure();
-}
+TOGGLE_WHEN(doFMAudioProfile, FMAudioProfile, isFm(), FMAudioConfigure)
 
 // Settings: Force FM Mono
 // Toggles between automatic stereo/mono blend and forced mono reception
-void doForceMono(int8_t v) {
-    toggleSetting(ForceMono);
-    if (g_currentMode == FM) applyFMStereoSettings();
-}
+TOGGLE_WHEN(doForceMono, ForceMono, isFm(), applyFMStereoSettings)
 
 // Settings: FM Soft Mute Attenuation (FSA)
 // Controls how much the volume is reduced (in dB) when soft mute activates
 // Higher values result in a deeper, more noticeable mute
 // Range: 0 (disabled) to 31 (max)
-void doFmSoftMuteAtt(int8_t v) {
-    doSwitchLogic(settingRef(FmSmAtt), 0, FM_SOFT_MUTE_MAX_ATTN_LEVEL, v);
-    if (g_currentMode == FM)
-        siSetProperty(FM_PROP_SOFTMUTE_MAX_ATTN_ADDR, (uint16_t)(uint8_t)getSettingParam(FmSmAtt));
-}
+SWITCH_PROP_WHEN(doFmSoftMuteAtt, FmSmAtt, FM_SOFT_MUTE_MAX_ATTN_LEVEL,
+                 isFm(), FM_SOFT_MUTE_MAX_ATTENUATION)
 
 // Settings: FM Soft Mute Threshold (FST)
 // Sets the minimum signal quality (SNR) required to keep audio at full volume
 // If SNR drops below this, soft mute engages. Higher values are more aggressive
 // Range: 0 to 15
-void doFmSoftMuteThr(int8_t v) {
-    doSwitchLogic(settingRef(FmSmThr), 0, FM_SOFT_MUTE_MAX_SNR_LEVEL, v);
-    if (g_currentMode == FM)
-        siSetProperty(FM_PROP_SOFTMUTE_SNR_THRESH_ADDR, (uint16_t)(uint8_t)getSettingParam(FmSmThr));
-}
+SWITCH_PROP_WHEN(doFmSoftMuteThr, FmSmThr, FM_SOFT_MUTE_MAX_SNR_LEVEL,
+                 isFm(), FM_PROP_SOFTMUTE_SNR_THRESH_ADDR)
 
 // Settings: Toggle handler for SW AFC menu item (SWA)
 // 0=OFF, 1=PPM, 2=Hz Normal, 3=Hz Aggressive
-void doSwAfcProfile(int8_t v) {
-    doSwitchLogic(settingRef(SWAFC),
-        SW_AFC_PROFILE_OFF,
-        SW_AFC_PROFILE_HZ_AGGR,
-        v);
+HANDLER(doSwAfcProfile) {
+    SWITCH_TO(SWAFC, SW_AFC_PROFILE_OFF, SW_AFC_PROFILE_HZ_AGGR);
     applySwAfc();
 }
 
@@ -276,8 +270,8 @@ void doSwAfcProfile(int8_t v) {
 // Settings: Page 4 - Display & UI
 // =================================================================================================
 
-//Settings: Brightness
-void doBrightness(int8_t v) {
+// Settings: Brightness
+HANDLER(doBrightness) {
     int8_t new_setting = getSettingParam(Brightness) + v;
 
     // clamp the value of to the [0, 9]
@@ -289,7 +283,7 @@ void doBrightness(int8_t v) {
 
 // Settings: switcher - S-Point display to RSSI display
 // 0=RSSI, 1=SPT, 2=RSSI+BAR, 3=SPT+BAR
-void doSMeter(int8_t v) {
+HANDLER(doSMeter) {
     enum : uint8_t { SM_UI_BAR = 2 };
 
     int8_t& sm = settingRef(SMeter);
@@ -304,63 +298,53 @@ void doSMeter(int8_t v) {
 #endif
 }
 
-//Settings: SW Units
-void doSWUnits(int8_t v) {
-    toggleSetting(SWUnits);
+// Settings: SW Units
+TOGGLE_ONLY(doSWUnits, SWUnits)
+
+// Settings: Display timeout switch
+HANDLER(doDisplayOff) {
+    SWITCH_TO(DisplayOff, 0, DISPLAY_OFF_TIMER_MAX_LEVEL);
 }
 
-//Settings: Display timeout switch
-void doDisplayOff(int8_t v) {
-    doSwitchLogic(settingRef(DisplayOff), 0, DISPLAY_OFF_TIMER_MAX_LEVEL, v);
-}
-
-//Settings: RSSI AM Off switch
-void doRSSIAMOff(int8_t v) {
-    toggleSetting(RSSI_AM_Off);
-}
+// Settings: RSSI AM Off switch
+TOGGLE_ONLY(doRSSIAMOff, RSSI_AM_Off)
 
 // Settings: Navigation Style
 // Toggles between row-first and column-first cursor movement
-void doNavStyle(int8_t v) {
-    toggleSetting(NAV);
-}
+TOGGLE_ONLY(doNavStyle, NAV)
 
 // =================================================================================================
 // Settings: Page 5 - Hardware Configuration
 // =================================================================================================
 
-//Settings: Auto Antenna Capacitor
-void doAntennaCapacitor(int8_t v) {
+// Settings: Auto Antenna Capacitor
+HANDLER(doAntennaCapacitor) {
     toggleSetting(AntennaCap);
     applyBandAntennaCap(currentBandType() == FM_BAND_TYPE); // in menu
 }
 
-//Settings: CPU Frequency divider
-void doCPUSpeed(int8_t v) {
+// Settings: CPU Frequency divider
+HANDLER(doCPUSpeed) {
     toggleSetting(CPUSpeed);
     setCpuPrescaler(getSettingParam(CPUSpeed));
 }
 
 // Settings: Toggles the battery voltage pin between A1 and A2.
-void doBatteryPinSelect(int8_t v) {
-    toggleSetting(BATT_PIN);
-}
+TOGGLE_ONLY(doBatteryPinSelect, BATT_PIN)
 
-//Settings: Scan button switch
-void doScanSwitch(int8_t v) {
-    toggleSetting(ScanSwitch);
-}
+// Settings: Scan button switch
+TOGGLE_ONLY(doScanSwitch, ScanSwitch)
 
 // Settings: FM Volume Adjust
 // Fine-tunes the software volume reduction for FM mode to match AM/SSB levels
-void doFmVolAdjust(int8_t v) {
-    doSwitchLogic(settingRef(FmVolAdjust), 0, 15, v);
-    if (g_currentMode == FM) applyCompensatedVolume();
+HANDLER(doFmVolAdjust) {
+    SWITCH_TO(FmVolAdjust, 0, 15);
+    if (isFm()) applyCompensatedVolume();
 }
 
-// Settings SW Link
+// Settings: SW Link
 // Links step and bandwidth across all SW sub bands when enabled
-void doSwLink(int8_t v) {
+HANDLER(doSwLink) {
     toggleSetting(SWLink);
 
     if (swLinkEnabled()) {
@@ -368,3 +352,28 @@ void doSwLink(int8_t v) {
         swLinkNormalizeAllSwBands();
     }
 }
+
+// =================================================================================================
+// Settings: Page 6 - Advanced RF
+// =================================================================================================
+
+// Settings: SSB AGC Speed
+// Fast / Normal / Slow, SSB/CW only
+HANDLER(doSsbAgcSpeed) {
+    SWITCH_TO(SsbAgcSpeed, 0, 2);
+    if (isSSB()) applySsbAgcSpeed();
+}
+
+// Settings: AM/SSB Soft Mute Rate
+// Fast / Normal / Slow, shared 0x3300
+HANDLER(doAmSmRate) {
+    SWITCH_TO(AmSmRate, 0, 2);
+    if (!isFm())
+        applySoftMuteSettings(getModeContext());
+}
+
+#undef SWITCH_PROP_WHEN
+#undef TOGGLE_WHEN
+#undef TOGGLE_ONLY
+#undef SWITCH_TO
+#undef HANDLER

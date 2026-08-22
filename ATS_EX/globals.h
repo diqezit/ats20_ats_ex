@@ -24,7 +24,7 @@
 // A macro to convert a 4-character string literal into a char array without a null terminator
 #define PACK_STR4(s) {s[0], s[1], s[2], s[3]}
 
-const uint8_t g_SettingsMaxPages = 5;       // pages number in settings menu
+const uint8_t g_SettingsMaxPages = 6;       // pages number in settings menu
 
 #if ENABLE_FAVORITES
 const uint8_t MAX_FAVORITES = 20;
@@ -262,7 +262,7 @@ const uint8_t g_bandCount = 44;
 const uint8_t g_lastBand = g_bandCount - 1;
 
 uint8_t g_signalQualityValue = 255;
-uint32_t g_lastRSSIUpdate = 0;
+uint16_t g_lastRSSIUpdate = 0;
 
 uint8_t g_muteVolume = 0;
 uint8_t g_volume = DEFAULT_VOLUME;
@@ -283,7 +283,7 @@ uint8_t g_seekDirection = 1;
 
 uint32_t g_lastFreqChange = 0;
 bool g_processFreqChange = false;
-uint32_t g_lastSetFreqTime = 0;
+uint16_t g_lastSetFreqTime = 0;
 
 // =================================================================================================
 // Encoder + buttons + radio object

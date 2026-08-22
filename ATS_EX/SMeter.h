@@ -11,6 +11,12 @@
 
 extern GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 
+// ====================================================================================
+// ===== LOCAL MACROS =================================================================
+// ====================================================================================
+
+#define SM_PGM(p, i)            pgm_read_byte(&(p)[i])
+
 // =-=-=-=-=-=-=-=-= Constants =-=-=-=-=-=-=-=-=
 
 static constexpr uint8_t SM_S9 = 9;             // S9 threshold for S-meter
@@ -24,18 +30,18 @@ static constexpr uint8_t SM_BAR_SCALE = 49;     // strength range 0..49
 // =-=-=-=-=-=-=-=-= Interpolation Tables =-=-=-=-=-=-=-=-=
 
 // AM thresholds: first 15 entries double as HF S-meter thresholds (S0..S9+50)
-static const uint8_t AM_THR[] PROGMEM = {
+PGM_U8(AM_THR,
     1, 2, 3, 4, 10, 16, 22, 28, 34, 44, 54, 64, 74, 84, 94, 95, 96
-};
-static const uint8_t AM_VAL[] PROGMEM = {
+);
+PGM_U8(AM_VAL,
     1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 34, 37, 40, 43, 46, 49
-};
-static const uint8_t FM_THR[] PROGMEM = {
+);
+PGM_U8(FM_THR,
     1, 2, 8, 14, 24, 34, 44, 54, 64, 74, 76, 77
-};
-static const uint8_t FM_VAL[] PROGMEM = {
+);
+PGM_U8(FM_VAL,
     1, 19, 22, 25, 28, 31, 34, 37, 40, 43, 46, 49
-};
+);
 
 // S-meter HF reuses AM_THR[0..14]
 static constexpr uint8_t LEN_HF = 15;
@@ -68,7 +74,7 @@ static inline bool smNoSignal(uint8_t rssi) {
 }
 
 static inline uint8_t smPgm(const uint8_t* p, uint8_t i) {
-    return pgm_read_byte(&p[i]);
+    return SM_PGM(p, i);
 }
 
 // Scan PROGMEM threshold array for first entry >= rssi
@@ -90,7 +96,7 @@ static inline uint8_t smLerp(uint8_t a, uint8_t b, uint8_t c) {
 
 // Send n identical bytes to OLED in active data block
 static inline void smSendRun(uint8_t n, uint8_t val) {
-    while (n--) oled.sendByte(val);
+    while (n--) oled_data_byte(val);
 }
 
 static inline void smBlank(char* buf) {
@@ -147,15 +153,15 @@ static inline uint8_t rssiToStrength49(uint8_t rssi) {
 
 // =-=-=-=-=-=-=-=-= Signal Bar Draw =-=-=-=-=-=-=-=-=
 
-void __attribute__((noinline))
+void NOINLINE
 smDrawSignalBar(uint8_t rssi) {
 
-    oled.setCursorXY(0, SM_BAR_Y);
-    oled.beginData();
+    oled_xy_px(0, SM_BAR_Y);
+    oled_data_begin();
 
     if (smNoSignal(rssi)) {
         smSendRun(SM_BAR_W, 0x00);
-        oled.endTransm();
+        oled_data_end();
         return;
     }
 
@@ -165,5 +171,7 @@ smDrawSignalBar(uint8_t rssi) {
     smSendRun(w, SM_BAR_MASK);
     smSendRun((uint8_t)(SM_BAR_W - w), SM_BAR_BASE);
 
-    oled.endTransm();
+    oled_data_end();
 }
+
+#undef SM_PGM

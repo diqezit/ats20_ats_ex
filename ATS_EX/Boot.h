@@ -16,6 +16,24 @@
 #include "Rotary.h"
 #include "UI.h"
 
+// ====================================================================================
+// ===== LOCAL MACROS =================================================================
+// ====================================================================================
+
+#define TWI_TWPS_1()            (TWSR = 0)
+#define CLKPR_UNLOCK_KEY        0x80
+
+#define ENC_EICRA_ANY           (_BV(ISC00) | _BV(ISC10))
+#define ENC_EIFR_CLR            (_BV(INTF0) | _BV(INTF1))
+#define ENC_EIMSK_BOTH          (_BV(INT0) | _BV(INT1))
+
+#define AMP_PIN_OUT()           (AMP_DDR |= (1 << AMP_BIT))
+#define LED_PB5_OUT()           (DDRB |= (1 << DDB5))
+#define UART0_OFF()             (UCSR0B = 0)
+
+#define ENC_BTN_PCMSK           _BV(ENCODER_BUTTON - 14)
+#define AGC_BTN_PBMSK           _BV(AGC_BUTTON - 8)
+
 // ==========================================
 // ===== I2C CLOCK COMPENSATION ============
 // ==========================================
@@ -76,7 +94,7 @@ namespace {
 void applyI2CSpeed() {
     uint8_t p = CLKPR & CLKPR_MASK;
     if (p >= TWBR_TABLE_SIZE) p = TWBR_TABLE_SIZE - 1;
-    TWSR = 0;    // TWPS=0 means TWI hardware prescaler is 1
+    TWI_TWPS_1();    // TWPS=0 means TWI hardware prescaler is 1
     TWBR = TWBR_TABLE[p];
 }
 
@@ -85,10 +103,10 @@ void applyI2CSpeed() {
 static void setCpuPrescaler(uint8_t prescaler) {
     uint8_t oldSREG = SREG;
     cli();
-    CLKPR = 0x80;       // unlock - write CLKPCE bit
-    CLKPR = prescaler;  // must follow within 4 cycles
+    CLKPR = CLKPR_UNLOCK_KEY; // unlock - write CLKPCE bit
+    CLKPR = prescaler;        // must follow within 4 cycles
     SREG = oldSREG;
-    applyI2CSpeed();    // SCL would drift without this
+    applyI2CSpeed();          // SCL would drift without this
 }
 
 // ==========================================
@@ -116,7 +134,7 @@ static inline void initTimer0() {
 // bootloader enables UART for firmware upload - turn it off
 // saves power and frees PD0/PD1 if needed later
 static inline void disableBootloaderUART() {
-    UCSR0B = 0;
+    UART0_OFF();
 }
 
 // lightweight replacement for Arduino init()
@@ -130,30 +148,30 @@ static inline void initFast() {
 // amplifier control pin as output, start muted
 // PB5 LED as output for status indication
 static inline void initHardwarePins() {
-    AMP_DDR |= (1 << AMP_BIT);
+    AMP_PIN_OUT();
     setAmpState(false);
-    DDRB |= (1 << DDB5);
+    LED_PB5_OUT();
 }
 
 // D2=INT0 D3=INT1 both on CHANGE for quadrature decoding
 // clear pending flags first to avoid false trigger on enable
 static inline void initEncoderInterrupts() {
-    EICRA = _BV(ISC00) | _BV(ISC10);  // both on any edge
-    EIFR = _BV(INTF0) | _BV(INTF1);   // clear stale flags
-    EIMSK = _BV(INT0) | _BV(INT1);    // enable both
+    EICRA = ENC_EICRA_ANY;    // both on any edge
+    EIFR = ENC_EIFR_CLR;     // clear stale flags
+    EIMSK = ENC_EIMSK_BOTH;   // enable both
 }
 
 // mark stored version byte as invalid so loadReceiverConfig()
 // will treat EEPROM as blank and write fresh defaults
 static inline void clearEEPROMVersion() {
-    eeprom_update_byte((uint8_t*)EEPROM_VERSION_ADDRESS, 0);
+    EE_UPDATE8(EEPROM_VERSION_ADDRESS, 0);
 }
 
 // user holds encoder or AGC button at power-on to request reset
 // active-low inputs debounced with 25ms re-check
 static inline bool eepromResetKeysHeld() {
-    const uint8_t enc = _BV(ENCODER_BUTTON - 14);
-    const uint8_t agc = _BV(AGC_BUTTON - 8);
+    const uint8_t enc = ENC_BTN_PCMSK;
+    const uint8_t agc = AGC_BTN_PBMSK;
     if ((PINC & enc) && (PINB & agc)) return false;  // both released
     delay(25);
     return !((PINC & enc) && (PINB & agc));  // still held after debounce
@@ -203,3 +221,14 @@ static inline void applyInitialConfiguration() {
     applyBandConfiguration(false);
     syncFrequencyDisplay();
 }
+
+#undef AGC_BTN_PBMSK
+#undef ENC_BTN_PCMSK
+#undef UART0_OFF
+#undef LED_PB5_OUT
+#undef AMP_PIN_OUT
+#undef ENC_EIMSK_BOTH
+#undef ENC_EIFR_CLR
+#undef ENC_EICRA_ANY
+#undef CLKPR_UNLOCK_KEY
+#undef TWI_TWPS_1

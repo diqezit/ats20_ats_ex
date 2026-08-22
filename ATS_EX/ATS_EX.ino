@@ -67,7 +67,7 @@ GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 
 // read-modify-write encoder counter under a short critical section
 // avoids ISR races and returns consumed delta in one shot
-int16_t __attribute__((noinline)) getAndResetEncoderCount(volatile int16_t& counter) {
+int16_t NOINLINE getAndResetEncoderCount(volatile int16_t& counter) {
     int16_t value;
     uint8_t oldSREG = SREG;
     cli();
@@ -78,12 +78,12 @@ int16_t __attribute__((noinline)) getAndResetEncoderCount(volatile int16_t& coun
 }
 
 // sync previous freq tracker with current freq
-static inline __attribute__((always_inline)) void syncPreviousFreq() {
+static inline ALWAYS_INLINE void syncPreviousFreq() {
     g_previousFrequency = g_currentFrequency;
 }
 
 // commit current freq to skip redundant EEPROM writes
-static void __attribute__((noinline)) saveLastFreq() {
+static void NOINLINE saveLastFreq() {
     g_lastSavedFrequency = g_currentFrequency;
 }
 
@@ -142,8 +142,7 @@ void syncModeDependentSettings(bool load) {
 // ==========================================
 
 // adjust tuning step for current mode and apply to SI4735
-static __attribute__((noinline))
-void doStep(int8_t v) {
+static NOINLINE void doStep(int8_t v) {
     Band* band = currentBandPtr();
     int8_t* idx;
     int8_t  max;
@@ -204,7 +203,7 @@ static inline void doBandwidth(uint8_t v) {
         // invert step because FM map is ordered in reverse
         // this makes knob rotation feel consistent with other modes
         doSwitchLogic(band->bwIdxFM, 0, MAX_INDEX(bw_fm_map), (int8_t)-v);
-        g_si4735.setFmBandwidth((uint8_t)band->bwIdxFM);
+        siSetProperty(FM_CHANNEL_FILTER, (uint16_t)(uint8_t)band->bwIdxFM);
         break;
 
     default:
@@ -224,14 +223,12 @@ static inline void doBandwidth(uint8_t v) {
 // =-=-=-=-=-=-=-=-= Settings & Parameter Handlers =-=-=-=-=-=-=-=-=
 
 // compute first item index for 6-per-page layout
-static inline __attribute__((always_inline))
-uint8_t settingsPageStart(uint8_t page) {
-    return (uint8_t)(6 * (page - 1));
+static inline ALWAYS_INLINE uint8_t settingsPageStart(uint8_t page) {
+    return (uint8_t)(UI_SETTINGS_PER_PAGE * (page - 1));
 }
 
 // load mode-scoped values into UI and reset cursor
-inline static __attribute__((always_inline))
-void settingsEnter() {
+static inline ALWAYS_INLINE void settingsEnter() {
     syncModeDependentSettings(true);
 
     // Load current band BFO calibration into UI buffer (per-band calibration)
@@ -247,8 +244,7 @@ void settingsEnter() {
 }
 
 // save UI values back to storage and commit to EEPROM
-inline static __attribute__((always_inline))
-void settingsExitAndSave() {
+static inline ALWAYS_INLINE void settingsExitAndSave() {
     syncModeDependentSettings(false);
     g_settingsDirty = true;
     saveAllReceiverInformation();
@@ -261,14 +257,14 @@ static void switchSettingsPage() {
     g_SettingsPage = (g_SettingsPage > g_SettingsMaxPages) ? 1 : g_SettingsPage;
     g_SettingSelected = settingsPageStart(g_SettingsPage);
     g_SettingEditing = false;
-    oled.clear();
+    oled_cls();
     showSettingsTitle();
     showSettings();
 }
 
 //Switch between main screen and settings mode
 static void switchSettings() {
-    oled.clear();
+    oled_cls();
     if (g_settingsActive) {
         settingsEnter();
     } else {
@@ -283,26 +279,22 @@ static void switchSettings() {
 // =-=-=-=-=-=-=-=-= Freq update helpers =-=-=-=-=-=-=-=-=
 
 // avoid 32-bit abs, compute 16-bit delta the way UI expects
-inline static __attribute__((always_inline))
-uint16_t freqDelta16(uint16_t a, uint16_t b) {
+static inline ALWAYS_INLINE uint16_t freqDelta16(uint16_t a, uint16_t b) {
     return (a >= b) ? (a - b) : (b - a);
 }
 
 // rate limit protects I2C from flooding during fast turns
-inline static __attribute__((always_inline))
-bool freqRateLimitOk(uint32_t now) {
-    return (now - g_lastSetFreqTime) >= MIN_SETFREQ_INTERVAL_MS;
+static inline ALWAYS_INLINE bool freqRateLimitOk(uint32_t now) {
+    return (uint16_t)((uint16_t)now - g_lastSetFreqTime) >= (uint16_t)MIN_SETFREQ_INTERVAL_MS;
 }
 
 // time gate prevents spamming setFrequency on micro moves
-inline static __attribute__((always_inline))
-bool freqTimeElapsed(uint32_t now) {
+static inline ALWAYS_INLINE bool freqTimeElapsed(uint32_t now) {
     return (now - g_lastFreqChange) >= FREQ_UPDATE_DELAY_MS;
 }
 
 // large delta is a user intent to jump, send early
-inline static __attribute__((always_inline))
-bool freqForceUpdate(uint16_t delta) {
+static inline ALWAYS_INLINE bool freqForceUpdate(uint16_t delta) {
     return delta >= FREQ_FORCE_UPDATE_THRESHOLD_KHZ;
 }
 
@@ -318,7 +310,7 @@ static inline void performFrequencyUpdateCheck(uint32_t now) {
     if ((time_elapsed || force_update) && rate_limit_ok) {
         g_si4735.setFrequency(g_currentFrequency);
         g_processFreqChange = false;
-        g_lastSetFreqTime = now;
+        g_lastSetFreqTime = (uint16_t)now;
 
         // sync only after successful send
         syncPreviousFreq();
@@ -328,7 +320,7 @@ static inline void performFrequencyUpdateCheck(uint32_t now) {
 // =-=-=-=-=-=-=-=-= Encoder coalesce helper =-=-=-=-=-=-=-=-=
 
 // Handles the delayed frequency update for AM/FM to prevent flooding the chip
-static void __attribute__((noinline)) handleDelayedFrequencyUpdate() {
+static void NOINLINE handleDelayedFrequencyUpdate() {
     if (autoDisplayOff) return;              // only deep sleep mode
     if (!g_processFreqChange || isSSB()) return;
 
@@ -338,8 +330,7 @@ static void __attribute__((noinline)) handleDelayedFrequencyUpdate() {
 // =-=-=-=-=-=-=-=-= RSSI helpers =-=-=-=-=-=-=-=-=
 
 // skip AM polling when disabled or right after user action to avoid clicks
-static inline __attribute__((always_inline))
-bool amRssiPollingAllowed(uint16_t now_s) {
+static inline ALWAYS_INLINE bool amRssiPollingAllowed(uint16_t now_s) {
     return (uint16_t)(now_s - g_lastUserActivityTime) >= 1;
 }
 
@@ -383,7 +374,7 @@ static inline void updateFmStereoIndicator(uint32_t now) {
 }
 
 // gate status polling while user is tuning or menus are open
-inline static __attribute__((always_inline)) bool uiBusy() {
+static inline ALWAYS_INLINE bool uiBusy() {
 #if ENABLE_FAVORITES
     return g_settingsActive || g_favoritesActive;
 #else
@@ -392,14 +383,13 @@ inline static __attribute__((always_inline)) bool uiBusy() {
 }
 
 // Checks for and handles signal quality and stereo indicator updates
-static void __attribute__((noinline))
-handleSignalAndStereoUpdates(uint32_t now, uint16_t now_s) {
+static void NOINLINE handleSignalAndStereoUpdates(uint32_t now, uint16_t now_s) {
     if (uiBusy() || g_processFreqChange) return;
 
     if (now - g_lastFreqChange < RSSI_POLL_DELAY_AFTER_TUNE_MS) return;
-    if (now - g_lastRSSIUpdate < RSSI_POLL_INTERVAL_MS) return;
+    if ((uint16_t)((uint16_t)now - g_lastRSSIUpdate) < (uint16_t)RSSI_POLL_INTERVAL_MS) return;
 
-    g_lastRSSIUpdate = now;
+    g_lastRSSIUpdate = (uint16_t)now;
     updateSignalQuality(now_s);
     updateFmStereoIndicator(now);
 }
@@ -431,8 +421,7 @@ static inline void handleCommandTimeout(uint16_t now16) {
 // =-=-=-=-=-=-=-=-= Save helpers =-=-=-=-=-=-=-=-=
 
 // idle save protects EEPROM during active tuning and still captures last freq
-inline static __attribute__((always_inline))
-bool shouldSaveStateOnIdle(uint16_t now_s) {
+static inline ALWAYS_INLINE bool shouldSaveStateOnIdle(uint16_t now_s) {
     uint16_t idle_s = (uint16_t)(SAVE_ON_IDLE_TIMEOUT / 1000);
     return g_stateIsDirty && ((uint16_t)(now_s - g_lastUserActivityTime) > idle_s);
 }
@@ -458,17 +447,16 @@ static inline void handleSettingsSave(uint16_t now_s) {
 // =-=-=-=-=-=-=-=-= Display sleep helpers =-=-=-=-=-=-=-=-=
 
 // read timeout from PROGMEM table so logic stays data-driven
-inline static __attribute__((always_inline))
-uint16_t displayTimeoutS(uint8_t p) {
+static inline ALWAYS_INLINE uint16_t displayTimeoutS(uint8_t p) {
     return pgm_read_word(&T[p]);
 }
 
 // Enter low-power mode turn off OLED, reduce CPU multiplier
-inline static __attribute__((always_inline)) void engageDisplaySleep() {
+static inline ALWAYS_INLINE void engageDisplaySleep() {
     if (!g_displayOn) return;
     g_displayOn = false;
     autoDisplayOff = true;
-    oled.setPower(false);
+    oled_power(false);
     setCpuPrescaler(CPU_PRESCALER_DEEP_SLEEP);
 }
 
@@ -490,7 +478,7 @@ static inline void checkDisplayTimeout() {
 }
 
 // for all time-based tasks
-static void __attribute__((noinline)) handlePeriodicTasks() {
+static void NOINLINE handlePeriodicTasks() {
     const uint32_t now = millis();
     const uint16_t now_s = (uint16_t)(now / 1000);
 
@@ -520,7 +508,7 @@ static inline void initBatteryProbe() {
 }
 
 // Initialize controller
-void __attribute__((noinline)) setup() {
+void NOINLINE setup() {
 #if DEBUG_MODE
     initDebugUART();
     debugPrint_P(PSTR("\n\n--- ATS_EX DEBUG START ---\n"));
@@ -565,7 +553,7 @@ static inline bool handleGameMode(int16_t encDelta) {
 #endif
 
 // main loop program in process order
-void __attribute__((noinline)) loop() { // no iline to less bloated main func this is must be 
+void NOINLINE loop() { // no iline to less bloated main func this is must be
 
     updateEncoderState();
     checkDisplayTimeout();
@@ -597,7 +585,7 @@ void __attribute__((noinline)) loop() { // no iline to less bloated main func th
 }
 
 // Overriding original main to save some space and reduce register pressure
-int __attribute__((OS_main, used)) main(void) {
+int OS_MAIN main(void) {
 
     // Kill any bootloader-residual WDT that may cause spurious resets
     MCUSR = 0;
