@@ -3234,3 +3234,115 @@ This modification completely eliminates the audio pops that occur when switching
   
 ------------------------------------------------------------------------------------------------------------
 
+
+### **MOD_NO_RDS v7.2.1**
+
+`Defines.h / CustomFonts.h / Utils.h / ATS_EX.ino / UI.h / Favorites.h / RadioControl.h / SI4735.cpp / SI4735.h / SI4735_fixed.h / Boot.h / Rotary.h / Rotary.cpp / SimpleButton.h / SSD1306_OLED.h / SettingsData.h / Battery.h / globals.h / MEMORY.h / patch_am.h / patch_ssb_new.h / patch_ssb_old.h`
+
+---
+
+## Added
+
+- **Improved AM patch (`patch_am.h`)**
+  - Fixes annoying audio dips during frequency tuning in AM/SSB modes
+  - Uses rev0 because it occupies the smallest memory footprint on the device
+  - Based on NeekeetosNee research, stored in den3rats compression
+  - Enabled by default (`PATCH_EX_AM 1`)
+
+- **New SSB patch by NeekeetosNee (`patch_ssb_new.h`) — enabled by default in this release**
+  - Audio improvements and fixes over the stable SSB patch
+  - Compile-time selection via `PATCH_EX_SSB` / `PATCH_EX_SSB_NEW` — only one patch data set is ever linked into flash
+  - Stored in the den3rats compressed format instead of the full 8-byte array
+  - Fits the ATmega328P flash **exactly** (30720/30720 bytes) thanks to the Flash optimization campaign below — no feature had to be sacrificed for it; RDS stays off as in the v7.2.1 defaults
+  - To roll back to the stable SSB patch: set `PATCH_EX_SSB 1` and `PATCH_EX_SSB_NEW 0` in `Defines.h`, then rebuild
+
+- **Patch-specific data lives in the patch `.h` itself (`ssb_patch_segments` / `am_patch_segments`)**
+  - Each patch file carries its own line count AND segmentation in a single PROGMEM table
+  - Swapping a patch or revision = replacing its `.h` — no firmware edits, no `Defines.h` constants
+
+## Changed
+
+- **RDS disabled by default**
+  - `ENABLE_RDS_MINI` set to `0` to free up ~500B Flash
+  - The freed space is used by the improved AM patch **and the new SSB patch**
+  - RDS MINI itself still works — enable it manually (`ENABLE_RDS_MINI 1`, `PATCH_EX_AM 0`, `PATCH_EX_SSB 1`) if you prefer it over the patches
+
+- **`setAM()` / `setFM()` USBLSB fix moved into the library (`SI4735.cpp`)**
+  - Stale SSB sideband bits (ARG1) are cleared directly in the 4-argument library functions
+
+- **Unified compressed patch loader is now table-driven**
+  - `downloadCompressedPatch()` reads the line count and segmentation from the patch's own `*_patch_segments` table
+  - No `is_am` flag, no hardcoded boundaries, no `*_PATCH_LINES_COUNT` in `Defines.h`
+  - Callers updated: `patchDownload()` / `configureAMMode()` now pass `*_patch_segments` (breaking change for custom callers)
+
+- **SI4735 constructor: chip defaults as a single PROGMEM image (`kSi4735Defaults`)**
+  - The 26-byte contiguous member block `rdsEndGroupA..audioMuteMcuPin` now loads with one `memcpy_P` instead of ~140B of scattered store instructions
+  - NSDMI initializers removed from `SI4735.h`; the mirror struct in `SI4735.cpp` keeps the exact field order, types and values
+  - `static_assert` guards the mirror size and the member contiguity — the struct and the class cannot silently drift apart
+
+- **Reverse NAV table removed**
+  - `g_navColFirstReverse` (32B PROGMEM) dropped — the inverse mapping is a short linear search over the forward table in `getNextSettingIndex()`
+
+- **Constant initialization of globals (.data images)**
+  - 9 × `SimpleButton`, `Rotary` and `GyverOLED` objects start as ready flash images; the pre-main() constructor calls are gone
+  - Hardware pin setup (DDR input + pull-up) moved to `initButtonPullups()` in `Boot.h`, the first pin-touching step of `setup()`; register effects bit-identical (`PORTD` 0xFC, `PORTB` 0x0F, `PORTC` 0x01)
+  - Button object 5 → 4 bytes: `_pinPort` stores the `PINx` register address as one byte
+
+- **`Rotary` and `GyverOLED` constructors are `constexpr`**
+  - `GyverOLED` initializes `_address/_invState/_x/_y` statically (same zero-state as before)
+  - `Rotary` pins stored as `unsigned char`
+
+## Fixed
+
+- **Compact font lookup table (`_charLookup`) normalized**
+  - In the 47-glyph compact variant the indices for `P..Y` were shifted by +1, so every affected letter rendered as the NEXT one (e.g. "SW" as "SX", "LSB" as "LTB")
+  - The lowercase entries `a..e`, `g..i` pointed past the end of the glyph map
+  - The lookup is now identity-checked against the glyph map; every firmware string render-tests clean
+
+## Optimizations
+
+- **Replaced Arduino core timing with the local `FastTime` block** (~−344B)
+  - `wiring.c.o` / `hooks.c.o` and `timer0_overflow_count` dropped from the link (also −4B RAM)
+  - Timer0 switched to exact 1ms CTC mode; `millis()` and `delay()` reimplemented locally
+  - Interrupt load reduced (one compare-A interrupt per millisecond instead of overflow counting)
+
+- **Timer0 ISR in hand-written asm** (−20B, 74 → 54 bytes)
+  - Naked `TIM0_COMPA_vect`; the 32-bit increment is a `subi/sbci 0xFF` carry chain
+  - Exactly the semantics of `timer0_millis++`, verified over 100k+ boundary cases; ~25 cycles shorter per tick; only `r24` and `SREG` are saved
+
+- **`delay()` as a single shared body** (−26B)
+  - One `NOINLINE` function instead of LTO-split partial copies
+
+- **Runtime-prescaler aware `delayMicroseconds()`**
+  - Reads the divider straight from the `CLKPR` register — the same source of truth `applyI2CSpeed()` uses
+  - Exact stock 16MHz timing at full speed, honest microseconds at 8/4/2MHz (settings "CPU 50%", display-off, deep sleep)
+
+- **LTO noinline consolidation** (−186B)
+  - `setPowerUp`, `setAmpState`, `patchEnter`, `fmApplyTableRange`, `syncPreviousFreq` kept as shared bodies instead of multiple always-inline copies
+  - Shared helpers deduplicate repeated sequences: `markFreqChangeTime()`, `currentBandPtr()`, `currentBandType()`, `settingsResetCursor()`, `secondsOf()`, `getAndResetEncoderCount()`
+
+- **Compact font: 47 glyphs** (−70B)
+  - Splash credits string uppercased (`MOD_NO_RDS GITHUB.COM/DIQEZIT/ATS20_ATS_EX`), URL-only lowercase glyphs dropped, `Z` added
+  - Splash credits scroll reads directly from PROGMEM (`uiScrollPrint21AtRow_P`) — no RAM copy buffer
+  - Frequency layout math narrowed to `uint8_t` (screen-space fits in 8 bits)
+
+- **Battery monitoring filter**
+  - EMA rewritten to additive form `avg += (sample - avg) >> 4` (same 1/16 response)
+  - `updateStablePercent()` marked `NOINLINE` to reduce code duplication under `-Os` + LTO
+
+- **FM audio properties in `RadioControl.h`**
+  - Soft-mute / NB+blend / Hi-Cut profiles collapsed into a single PROGMEM table `fm_audio_props[][2]`
+  - `FMAudioConfigure()` uses three short counted range calls (`fmApplyTableRange()`) instead of separate functions
+
+- **Link-time dead code elimination**
+  - Stripped `audioMuteMcuPin` checks from `powerUp()` / `powerDown()`; muting is handled exclusively via `setAmpState()` in `Boot.h` (drops the `digitalWrite` dependency chain)
+  - `prepareDisplayConfig()` migrated to PROGMEM `paramTexts` entries instead of RAM string literals
+  - `UI::drawFrequencyUnit()` performs direct `__FlashStringHelper*` casting, eliminating redundant RAM copying for unit labels
+
+- **Band definitions in PROGMEM**
+  - Static band properties as a compact `BandDef` struct in PROGMEM
+  - Runtime `g_bandList` populated at boot via `initBandList()` with derived defaults (step/bandwidth) based on `bandType`
+
+  
+------------------------------------------------------------------------------------------------------------
+

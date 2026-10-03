@@ -287,7 +287,9 @@ HANDLER(doSMeter) {
     enum : uint8_t { SM_UI_BAR = 2 };
 
     int8_t& sm = settingRef(SMeter);
+#if defined(ENABLE_SIGNAL_BAR) && ENABLE_SIGNAL_BAR
     const uint8_t prev = (uint8_t)sm;
+#endif
 
     doSwitchLogic(sm, 0, 3, v);
 

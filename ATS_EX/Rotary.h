@@ -7,8 +7,6 @@
 // Enable this to emit codes twice per step
 // #define HALF_STEP
 
-#define ENABLE_PULLUPS  // Enable weak pullups
-
 // Values returned by 'process'
 #define DIR_NONE 0x0    // No complete step yet
 #define DIR_CW   0x10   // Clockwise step
@@ -17,7 +15,10 @@
 class Rotary
 {
   public:
-    Rotary(char, char);
+    // constructor
+    constexpr Rotary(char p1, char p2)
+        : state(0), pin1((unsigned char)p1), pin2((unsigned char)p2) {}
+
     // Process pin(s)
     unsigned char process();
   private:

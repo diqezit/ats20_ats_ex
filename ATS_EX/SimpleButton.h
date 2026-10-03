@@ -24,7 +24,8 @@ SimpleButton::SimpleButton(uint8_t pin);
 
   - Constructor to create a "Button-Handler"
   - The given pin number must not exceed 63
-  - The given pin is set to pinMode(INPUT_PULLUP). The allplication must not change the pinMode for the given pin!
+  - The given pin is set to input with pull-up by initButtonPullups() at the start of setup()
+  - application must not change the pinMode for the given pin!
 
 uint8_t SimpleButton::checkEvent( uint8_t (*eventHandler)(uint8_t eventId, uint8_t pin)=NULL );
   - Must be called (frequently, i. e. in loop()) to process the button events
@@ -83,13 +84,25 @@ uint8_t SimpleButton::checkEvent( uint8_t (*eventHandler)(uint8_t eventId, uint8
 
 class SimpleButton {
 public:
-    SimpleButton(uint8_t pin);
+    // _pinPort stores the PINx register memory address
+    // (PIND=0x29, PINB=0x23, PINC=0x26)
+    // 
+    // _pinMask keeps the old constructor bit numbering exactly
+    // 
+    //   D0..D7 (0..7)   -> 1 << pin
+    //   D8..D13 (8..13) -> 1 << (pin - 8)
+    //   A0..A5 (14..19) -> 1 << (pin - 14)
+    constexpr SimpleButton(uint8_t pin)
+        : _PinDebounceState((uint16_t)pin << 10),
+          _pinPort(pin < 8 ? 0x29u : (pin < 14 ? 0x23u : 0x26u)),
+          _pinMask((uint8_t)(1u << (pin < 8 ? pin : (pin < 14 ? pin - 8 : pin - 14)))) {}
+
     uint8_t checkEvent(uint8_t(*_event)(uint8_t event, uint8_t pin) = NULL);
 private:
     uint16_t _PinDebounceState;
 
-    // cached pin input register + bit mask (optimization)
-    volatile uint8_t* _pinReg;
+    // cached pin input register (memory address) + bit mask (optimization)
+    uint8_t _pinPort;
     uint8_t _pinMask;
 
     // The data is stored as Bitfield:

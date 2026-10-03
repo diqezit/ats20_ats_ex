@@ -57,9 +57,61 @@
   * The first byte is a command, and the next seven bytes are arguments. Writing more than 8 bytes results
   * in unpredictable device behavior". If you extend this library, remember the 8 byte restriction.
   */
+
+  // Constructor
+  // 
+  // Byte-for-byte mirror of contiguous NSDMI block in SI4735.h
+  // 
+  // all values taken from same macros NSDMI uses / both stay in sync
+namespace {
+    struct Si4735Defaults {
+        bool rdsEndGroupA;
+        bool rdsEndGroupB;
+        int16_t deviceAddress;
+        uint16_t maxDelaySetFrequency;
+        uint16_t maxDelayAfterPowerUp;
+        unsigned long maxSeekTime;
+        uint8_t lastMode;
+        uint8_t currentAvcAmMaxGain;
+        uint8_t currentClockType;
+        uint8_t ctsIntEnable;
+        uint8_t gpo2Enable;
+        uint16_t refClock;
+        uint16_t refClockPrescale;
+        uint8_t refClockSourcePin;
+        uint8_t volume;
+        uint8_t currentAudioMode;
+        uint8_t currentSsbStatus;
+        int8_t audioMuteMcuPin;
+    };
+
+    const Si4735Defaults kSi4735Defaults PROGMEM = {
+        false,                                   // rdsEndGroupA
+        false,                                   // rdsEndGroupB
+        SI473X_ADDR_SEN_LOW,                     // deviceAddress
+        MAX_DELAY_AFTER_SET_FREQUENCY,           // maxDelaySetFrequency
+        MAX_DELAY_AFTER_POWERUP,                 // maxDelayAfterPowerUp
+        MAX_SEEK_TIME,                           // maxSeekTime
+        (uint8_t)-1,                             // lastMode
+        DEFAULT_CURRENT_AVC_AM_MAX_GAIN,         // currentAvcAmMaxGain
+        XOSCEN_CRYSTAL,                          // currentClockType
+        0,                                       // ctsIntEnable
+        0,                                       // gpo2Enable
+        32768,                                   // refClock
+        1,                                       // refClockPrescale
+        0,                                       // refClockSourcePin
+        32,                                      // volume
+        SI473X_ANALOG_AUDIO,                     // currentAudioMode
+        0,                                       // currentSsbStatus
+        -1                                       // audioMuteMcuPin
+    };
+} // namespace
+
 SI4735::SI4735() {
-    // 1 = LSB and 2 = USB; 0 = AM, FM or WB
-    currentSsbStatus = 0;
+    static_assert(sizeof(Si4735Defaults) == 26, "mirror struct must match the NSDMI block size");
+    static_assert(offsetof(SI4735, audioMuteMcuPin) - offsetof(SI4735, rdsEndGroupA) == sizeof(Si4735Defaults) - 1,
+        "NSDMI members must stay contiguous: rdsEndGroupA .. audioMuteMcuPin (see SI4735.h)");
+    memcpy_P(&rdsEndGroupA, &kSi4735Defaults, sizeof(kSi4735Defaults));
 }
 
 /** @defgroup group05 Deal with Interrupt and I2C bus */
@@ -364,7 +416,7 @@ void SI4735::waitToSend() { // func partially not orig and edited
  * @param uint8_t FUNC sets the receiver function have to be used [0 = FM Receive; 1 = AM (LW/MW/SW) and SSB (if SSB patch apllied)]
  * @param uint8_t OPMODE set the kind of audio mode you want to use.
  */
-void SI4735::setPowerUp(uint8_t CTSIEN, uint8_t GPO2OEN, uint8_t PATCH, uint8_t XOSCEN, uint8_t FUNC, uint8_t OPMODE) {
+void __attribute__((noinline)) SI4735::setPowerUp(uint8_t CTSIEN, uint8_t GPO2OEN, uint8_t PATCH, uint8_t XOSCEN, uint8_t FUNC, uint8_t OPMODE) {
     powerUp.arg.CTSIEN = CTSIEN;   // 1 -> Interrupt anabled;
     powerUp.arg.GPO2OEN = GPO2OEN; // 1 -> GPO2 Output Enable;
     powerUp.arg.PATCH = PATCH;     // 0 -> Boot normally;
@@ -431,9 +483,9 @@ void SI4735::radioPowerUp(void) {
     waitToSend();
     delay(maxDelayAfterPowerUp);
 
-    // Turns the external mute circuit off
-    if (audioMuteMcuPin >= 0)
-        setHardwareAudioMute(false);
+    // ATS_EX: hardware MCU mute removed - setAudioMuteMcuPin() is never called
+    // (audioMuteMcuPin stays -1), amp muting is handled by setAmpState() in Boot.h
+    // Removing these checks drops digitalWrite() and wiring_digital from the link
 
     if (this->currentClockType == XOSCEN_RCLK) {
         setRefClock(this->refClock);
@@ -466,9 +518,7 @@ void SI4735::analogPowerUp(void) {
  * @see radioPowerUp()
  */
 void SI4735::powerDown(void) {
-    // Turns the external mute circuit on
-    if (audioMuteMcuPin >= 0)
-        setHardwareAudioMute(true);
+    // ATS_EX: external mute circuit ON call removed (audioMuteMcuPin never set)
 
     waitToSend();
     Wire.beginTransmission(deviceAddress);
@@ -598,7 +648,7 @@ void SI4735::setup(uint8_t resetPin, uint8_t ctsIntEnable, uint8_t defaultFuncti
     setPowerUp(ctsIntEnable, gpo2Enable, 0, clockType, defaultFunction, audioMode);
 
     if (audioMuteMcuPin >= 0)
-        setHardwareAudioMute(true); // If you are using external citcuit to mute the audio, it turns the audio mute
+        setHardwareAudioMute(true); // ATS_EX: dead path kept only if base setup() is ever linked
 
     reset();
 
@@ -809,6 +859,8 @@ void SI4735::setFM() {
  */
 void SI4735::setAM(uint16_t fromFreq, uint16_t toFreq, uint16_t initialFreq, uint16_t step) {
 
+    currentFrequencyParams.arg.USBLSB = 0;   // clear stale SSB sideband bits (ARG1)
+
     currentMinimumFrequency = fromFreq;
     currentMaximumFrequency = toFreq;
     currentStep = step;
@@ -845,6 +897,9 @@ void SI4735::setAM(uint16_t fromFreq, uint16_t toFreq, uint16_t initialFreq, uin
  * @param step step used to go to the next channel
  */
 void SI4735::setFM(uint16_t fromFreq, uint16_t toFreq, uint16_t initialFreq, uint16_t step) {
+
+    currentFrequencyParams.arg.USBLSB = 0;   // clear stale SSB sideband bits (ARG1)
+
     currentMinimumFrequency = fromFreq;
     currentMaximumFrequency = toFreq;
     currentStep = step;
@@ -1398,7 +1453,7 @@ void SI4735::setSeekFmRssiThreshold(uint16_t value) {
    *
    * @param propertyNumber property number (example: RX_VOLUME)
    * @param parameter   property value that will be seted
-   * 
+   *
    * If you look at the asm code this function passes to write(uint8_t) and does not use union-temporary variables for now
    */
 void SI4735::sendProperty(uint16_t propertyNumber, uint16_t parameter) { // func not orig and edited
@@ -1410,7 +1465,7 @@ void SI4735::sendProperty(uint16_t propertyNumber, uint16_t parameter) { // func
     Wire.write((uint8_t)(propertyNumber >> 8));
     Wire.write((uint8_t)(propertyNumber & 0xFF));
 
-    Wire.write((uint8_t)(parameter >> 8));              
+    Wire.write((uint8_t)(parameter >> 8));
     Wire.write((uint8_t)(parameter & 0xFF));
 
     Wire.endTransmission();

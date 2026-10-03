@@ -91,24 +91,34 @@ constexpr auto APP_VERSION = 72;
 // Features
 #define ENABLE_FAVORITES       1        // 1=Favorites enabled
 #define ENABLE_BATTERY_MONITOR 1        // 1=battery monitor enabled
-#define ENABLE_RDS_MINI        1        // 1=RDS RadioText on FM (requires ~500B Flash)
+#define ENABLE_RDS_MINI        0        // 1=RDS RadioText on FM (requires ~500B Flash)
 #define ENABLE_SIGNAL_BAR      1        // 1=draw thin RSSI bar above frequency, 0=disable (~260B Flash)
 #define ENABLE_GAME            0        // 1=enable Pong mini game, 0=disable
 #define ENABLE_CW_DECODER      0        // EXPERIMENTAL: CW (Morse) decoder view
 
 // Build / debug
-#define PATCH_EX_SSB 1                  // 1=highly compressed patch loader (recommended)
+#define PATCH_EX_SSB      0             // 1=highly compressed stable patch loader (recommended)
+#define PATCH_EX_SSB_NEW  1             // new SSB patch version with audio improvementnt and fixes (by NeekeetosNee)
+#define PATCH_EX_AM       1             // 1=AM patch with audio improvementnt and fixes (by NeekeetosNee)
+
 #define TEST         1                  // Enables temporary test code paths / experiments
 #define DEBUG_MODE   0                  // 1=enable debug output (9600 baud), 0=disable
 
+#if (PATCH_EX_SSB) && (PATCH_EX_SSB_NEW)
+#error "Enable only one: PATCH_EX_SSB or PATCH_EX_SSB_NEW"
+#endif
 
 // UI Strings
 
-#define APP_NAME_LINE1 F("ATS-20+ V7.2")
+#define APP_NAME_LINE1 F("ATS-20+ V7.2.1")
 #define APP_NAME_LINE2 F("ATS EX")
 
-#define APP_SPLASH_CREDITS_TEXT  APP_SPLASH_PAD "MOD_NO_RDS github.com/diqezit/ats20_ats_ex"
+#define APP_SPLASH_CREDITS_TEXT  APP_SPLASH_PAD "MOD_NO_RDS GITHUB.COM/DIQEZIT/ATS20_ATS_EX"
 #define APP_SPLASH_PAD "\x01\x01\x01\x01\x01"
+
+#define U_HZ   "Hz"
+#define U_KHZ  "kHz"
+#define U_MHZ  "MHz"
 
 // scroll timing (ms) bigger = slower / longer
 #define SPLASH_CREDITS_STEP_MS   140

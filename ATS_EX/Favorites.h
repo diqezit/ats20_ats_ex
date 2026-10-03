@@ -224,7 +224,7 @@ static inline bool fav_tryTuneFastFmToFm(const FavoriteStation& fav, uint8_t tar
     g_si4735.setFrequency(f);
 
     // Reset tune tracking so settle based tasks start fresh
-    g_lastFreqChange = millis();
+    markFreqChangeTime();
     g_processFreqChange = false;
     g_previousFrequency = f;
     g_signalQualityValue = INVALID_RSSI_VALUE;

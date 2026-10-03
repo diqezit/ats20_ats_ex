@@ -138,26 +138,28 @@ public:
     //  - compressed_ssb_patch_content: non-zero patch bytes
     //  - cutoff_places_offsets: positions requiring split handling
     //  - cutoff_nonzero_lengths: encodes both data length and 0x15 follow-up flag
-    //    (values < 100 = next line uses 0x15, >= 100 = normal continuation)
+    //    (values < 100 = next line uses 0x15 00 00, >= 100 = normal continuation)
     //
-    // Base addresses change at line boundaries: 0, 129, 405, 758, 1023+
+    // Base addresses change at line boundaries — per-patch, from the segments
     //
     // ====================================================================================
     // https://github.com/diqezit/ats20_ats_ex/issues/22#issuecomment-3237646622
     // Credit for the clever patch compression method goes to den3rats
     // ====================================================================================
 
-#if PATCH_EX_SSB
+#if PATCH_EX_SSB || PATCH_EX_SSB_NEW || PATCH_EX_AM
 private:
 
     // Patch memory is segmented — this maps line index to base address
-    inline uint16_t getBaseForLine(uint16_t patch_line) {
-        switch (patch_line) {
-        case 0 ... 128:    return 0;
-        case 129 ... 404:  return 256;
-        case 405 ... 757:  return 512;
-        case 758 ... 1022: return 768;
-        default:           return 1024;
+    // segmentation comes from the patch's segments table
+    // (element[0] is the line count and is skipped; pairs start at element[2])
+    inline uint16_t getBaseForLine(uint16_t patch_line, const uint16_t* patch_segments) {
+        const uint16_t* seg = patch_segments + 2;
+        for (;;) {
+            const uint16_t end = pgm_read_word_near(seg);
+            if (patch_line <= end)
+                return pgm_read_word_near(seg + 1);
+            seg += 2;
         }
     }
 
@@ -208,14 +210,17 @@ private:
     }
 
     // Decompresses and sends a single patch line, handling cutoff splits
+    // the segments table is passed through to getBaseForLine()
+    // everything else is identical for SSB and AM
     inline bool processSinglePatchLine(uint16_t& patch_line,
         const uint8_t* compressed_ssb_patch_content,
         const uint8_t* cutoff_places_offsets,
         const uint8_t* cutoff_nonzero_lengths,
         uint16_t& patch_data_idx,
-        uint8_t& cutoff_place_idx) {
+        uint8_t& cutoff_place_idx,
+        const uint16_t* patch_segments) {
 
-        uint16_t base = getBaseForLine(patch_line);
+        uint16_t base = getBaseForLine(patch_line, patch_segments);
         uint8_t cmd = (patch_line == 0) ? 0x15 : 0x16;
 
         uint8_t non_zero_bytes;
@@ -235,17 +240,26 @@ private:
     }
 
 public:
-    bool downloadCompressedPatch(const uint8_t* compressed_ssb_patch_content,
+    // Unified den3rats loader for SSB and AM patches
+    // line count and segmentation come from the patch segments table
+    //
+    // data tables are passed as param
+    bool downloadCompressedPatch(
+        const uint8_t* patch_content,
+        const uint16_t* patch_segments,
         const uint8_t* cutoff_places_offsets,
         const uint8_t* cutoff_nonzero_lengths) {
+
         uint16_t patch_data_idx = 0;
         uint8_t cutoff_place_idx = 0;
-        const uint16_t ssb_patch_lines_count = 1105;
 
-        for (uint16_t patch_line = 0; patch_line < ssb_patch_lines_count; patch_line++) {
-            if (!processSinglePatchLine(patch_line, compressed_ssb_patch_content,
+        // Line count is element[0] of segments table
+        uint16_t lines_count = pgm_read_word_near(patch_segments);
+
+        for (uint16_t patch_line = 0; patch_line < lines_count; patch_line++) {
+            if (!processSinglePatchLine(patch_line, patch_content,
                 cutoff_places_offsets, cutoff_nonzero_lengths,
-                patch_data_idx, cutoff_place_idx)) {
+                patch_data_idx, cutoff_place_idx, patch_segments)) {
                 return false;
             }
         }
@@ -253,7 +267,8 @@ public:
         delayMicroseconds(250);
         return true;
     }
-#endif
+
+#endif // PATCH_EX_SSB || PATCH_EX_SSB_NEW || PATCH_EX_AM
 
     // FM stereo/mono blend per AN332
     // force_mono=true: force mono (hides hiss on weak signals)

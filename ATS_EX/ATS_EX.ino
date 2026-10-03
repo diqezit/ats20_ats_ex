@@ -23,7 +23,8 @@
 // Special thanks for testing, ideas, and contributions to:
 // - d3n3rats
 // - jh4vaj
-//
+// - NeekeetosNee (patches)
+// 
 // --- Technical Reference ---
 // For in-depth Si473x programming details, see Skyworks AN332:
 // https://www.skyworksinc.com/-/media/Skyworks/SL/documents/public/application-notes/AN332.pdf
@@ -42,7 +43,15 @@ GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 
 #include "Rotary.h"
 #include "SimpleButton.h"
-#include "patch_ssb_compressed.h"
+
+#if PATCH_EX_SSB_NEW
+#include "patch_ssb_new.h"
+#elif PATCH_EX_SSB
+#include "patch_ssb_old.h"
+#endif
+#if PATCH_EX_AM
+#include "patch_am.h"
+#endif
 
 #include "Globals.h"
 #include "Utils.h"
@@ -78,7 +87,7 @@ int16_t NOINLINE getAndResetEncoderCount(volatile int16_t& counter) {
 }
 
 // sync previous freq tracker with current freq
-static inline ALWAYS_INLINE void syncPreviousFreq() {
+static void NOINLINE syncPreviousFreq() {
     g_previousFrequency = g_currentFrequency;
 }
 
@@ -227,6 +236,12 @@ static inline ALWAYS_INLINE uint8_t settingsPageStart(uint8_t page) {
     return (uint8_t)(UI_SETTINGS_PER_PAGE * (page - 1));
 }
 
+// shared cursor reset for settings enter / page switch
+static void NOINLINE settingsResetCursor() {
+    g_SettingSelected = settingsPageStart(g_SettingsPage);
+    g_SettingEditing = false;
+}
+
 // load mode-scoped values into UI and reset cursor
 static inline ALWAYS_INLINE void settingsEnter() {
     syncModeDependentSettings(true);
@@ -238,8 +253,7 @@ static inline ALWAYS_INLINE void settingsEnter() {
         g_SettingsPage = 1; // safeguard
 
     showSettingsTitle();
-    g_SettingSelected = settingsPageStart(g_SettingsPage);
-    g_SettingEditing = false;
+    settingsResetCursor();
     showSettings();
 }
 
@@ -255,8 +269,7 @@ static inline ALWAYS_INLINE void settingsExitAndSave() {
 static void switchSettingsPage() {
     g_SettingsPage++;
     g_SettingsPage = (g_SettingsPage > g_SettingsMaxPages) ? 1 : g_SettingsPage;
-    g_SettingSelected = settingsPageStart(g_SettingsPage);
-    g_SettingEditing = false;
+    settingsResetCursor();
     oled_cls();
     showSettingsTitle();
     showSettings();
@@ -473,14 +486,14 @@ static inline void checkDisplayTimeout() {
 
     uint16_t timeout_s = displayTimeoutS(p);
 
-    if ((uint16_t)(millis() / 1000) - g_lastUserActivityTime > timeout_s)
+    if (secondsOf(millis()) - g_lastUserActivityTime > timeout_s)
         engageDisplaySleep();
 }
 
 // for all time-based tasks
 static void NOINLINE handlePeriodicTasks() {
     const uint32_t now = millis();
-    const uint16_t now_s = (uint16_t)(now / 1000);
+    const uint16_t now_s = secondsOf(now);
 
     if (g_displayOn) {
         handleSignalAndStereoUpdates(now, now_s);
@@ -509,6 +522,7 @@ static inline void initBatteryProbe() {
 
 // Initialize controller
 void NOINLINE setup() {
+    initBandList();   // rebuild RAM band table from PROGMEM defs (must be first)
 #if DEBUG_MODE
     initDebugUART();
     debugPrint_P(PSTR("\n\n--- ATS_EX DEBUG START ---\n"));

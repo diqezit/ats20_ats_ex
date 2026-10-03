@@ -1,6 +1,149 @@
 #pragma once
 
 // =====================================================================================
+// FastTime - compact replacement block core for Arduino timing chain (wiring.c.o)
+// =====================================================================================
+//
+// stock core pulls 344 B of flash for time keeping
+//        __vector_16 (Timer0 OVF ISR)  148 B   — also maintains timer0_overflow_count
+//        micros()                       74 B   — used ONLY by the stock delay()
+//        millis()                       24 B
+//        delay()                        98 B   — micros()-based
+// 
+//      + hooks.c.o and 4 B of RAM (timer0_overflow_count)
+//      so firmware never calls micros() directly (only stock delay used it)
+//      and dropping overflow counter is behavior-neutral...
+//
+// what this section provides instead
+//        ISR(TIM0_COMPA_vect) one increment per exact 1 ms tick (Timer0 CTC configured in Boot.h initTimer0(): /64, OCR0A=249)
+//        millis()             byte-identical logic to the core (atomic 32-bit read)
+//        delay()              millis()-based / never returns earlier than requested
+//        delayMicroseconds()  the exact stock 16 MHz busy-loop (sbiw/brne)
+//
+// wiring.c.o is no longer pulled into the link (nothing references it) hooks.c.o drops with it
+//
+// stock core counts 1024 us overflows and corrects 2.4% drift with fractional accumulator
+// CTC reconfiguration makes hardware tick exactly 1000.000 us so ISR is an single increment
+// and millis() stays drift-free with less code (and 2.4% fewer timer interrupts)
+
+
+#include <Arduino.h>
+#include <avr/interrupt.h>
+
+// Timer0 is set up by Boot.h initTimer0() in CTC mode
+// 
+// 64 prescaler
+// OCR0A=249
+// 
+// compare-A match every 250 ticks = 16000 cycles = exactly 1000 us at 16 MHz
+// 
+// tick itself is an exact millisecond not needed aculator here
+static_assert(F_CPU == 16000000UL,
+    "FastTime constants are written for 16 MHz (compile-time F_CPU)"
+    "millis() + delay() keep the stock core"
+    "CPU time / delayMicroseconds() compensates via CLKPR"
+    "Only different COMPILE-time clock needs new constants");
+
+volatile unsigned long timer0_millis = 0;
+
+// Naked + hand asm: exactly the semantics of timer0_millis++ but about half the size
+// 74 B GCC version -> 54 B and ~25 cycles shorter per tick
+// 
+// Only r24 and SREG are saved
+//
+// The increment is a subi/sbci 0xFF chain
+// 
+// each byte gets +1 iff every lower byte was 0xFF
+//
+// r1 stays zero it is never written here
+#if defined(TIM0_COMPA_vect)
+ISR(TIM0_COMPA_vect, ISR_NAKED)
+#else
+ISR(TIMER0_COMPA_vect, ISR_NAKED)
+#endif
+{
+    __asm__ __volatile__ (
+        "push r24"                  "\n\t"
+        "in   r24, __SREG__"        "\n\t"
+        "push r24"                  "\n\t"
+        "lds  r24, timer0_millis"   "\n\t"
+        "subi r24, 0xFF"            "\n\t"
+        "sts  timer0_millis, r24"   "\n\t"
+        "lds  r24, timer0_millis+1" "\n\t"
+        "sbci r24, 0xFF"            "\n\t"
+        "sts  timer0_millis+1, r24" "\n\t"
+        "lds  r24, timer0_millis+2" "\n\t"
+        "sbci r24, 0xFF"            "\n\t"
+        "sts  timer0_millis+2, r24" "\n\t"
+        "lds  r24, timer0_millis+3" "\n\t"
+        "sbci r24, 0xFF"            "\n\t"
+        "sts  timer0_millis+3, r24" "\n\t"
+        "pop  r24"                  "\n\t"
+        "out  __SREG__, r24"        "\n\t"
+        "pop  r24"                  "\n\t"
+        "reti"
+    );
+}
+
+extern "C" {
+
+// Byte-identical logic to the stock core
+// atomic 32-bit read with SREG save/restore
+unsigned long millis(void)
+{
+    unsigned long m;
+    uint8_t oldSREG = SREG;
+
+    cli();
+    m = timer0_millis;
+    SREG = oldSREG;
+
+    return m;
+}
+
+// Busy-wait on millis()
+//
+// Never returns earlier than the requested interval (millis is monotonic) at most ~1 ms later than the stock micros()-accurate delay
+// Every call site in this firmware is a "wait at least N ms" chip handshake (I2C settle / power-up / debounce) so this is a drop-in
+// 
+// Single live value (end) + signed wrap-safe compare keeps the register save/restore in the prologue minimal
+NOINLINE void delay(unsigned long ms)
+{
+    if (!ms) return;
+    unsigned long end = millis() + ms;
+    while ((int32_t)(millis() - end) < 0) { }
+}
+
+// exact stock Arduino core busy-loop (4-cycle sbiw/brne) for 16 MHz
+// scaled by  RUNTIME CPU prescaler
+//
+// stays accurate at 16 / 8 / 4 / 2 MHz
+// (settings "CPU" 50% / display-off 8 MHz / deep sleep 2 MHz)
+//
+// CLKPR is read straight from hardware
+// applyI2CSpeed() in Boot.h already uses for I2C clock
+// 
+// Masked to 0..3 (divisors 1..8) covers every prescaler this firmware can set and keeps us <<= 3 free of 16-bit overflow
+// (max argument here is 2500)
+//
+// At CLKPR = 0 (full 16 MHz) shift is no-op and loop timing is exact stock one
+// Constant 1-bit shifts in small loop expand inline so no libgcc __ashlhi3 gets pulled into link
+NOINLINE void delayMicroseconds(unsigned int us)
+{
+    uint8_t p = CLKPR & 0x03;   // runtime divider exponent: 0=16MHz 1=8MHz 2=4MHz 3=2MHz
+    while (p--) us <<= 1;       // scale loop count: CPU runs 2^p times slower
+
+    __asm__ __volatile__ (
+        "1: sbiw %0,1" "\n\t"
+        "brne 1b"
+        : "=w" (us)
+        : "0" (us)
+    );
+}
+
+} // extern "C"
+
+// =====================================================================================
 // String & Number Conversion Utilities
 // =====================================================================================
 
@@ -47,22 +190,22 @@ static inline uint8_t ilen(uint16_t n) {
     return 5;
 }
 
-
-// draw fixed 21-column window at row from RAM buffer
+// Draw a 21-column window directly from a PROGMEM string
+// 
+// Avoids the RAM copy buffer
 template<typename TOled>
-static inline void uiScrollPrint21AtRow(TOled& o, uint8_t row,
+static inline void uiScrollPrint21AtRow_P(TOled& o, uint8_t row,
     const char* src, uint8_t len, uint8_t start) {
     constexpr uint8_t WIN = 21;
 
     char b[WIN + 1];
-    memset(b, ' ', WIN);
-    b[WIN] = 0;
 
-    if (start < len) {
-        uint8_t n = (uint8_t)(len - start);
-        if (n > WIN) n = WIN;
-        memcpy(b, &src[start], n);
+    for (uint8_t i = 0; i < WIN; ++i) {
+        const uint8_t pos = (uint8_t)(start + i);
+        b[i] = (pos < len) ? (char)pgm_read_byte(src + pos) : ' ';
     }
+
+    b[WIN] = 0;
 
     o.setCursor(0, row);
     o.print(b);
@@ -92,11 +235,21 @@ static inline ModeContext getModeContext() {
     }
 }
 
+// (uint16_t)(ms/1000) deduplicated the millis()+ldi+call sequence
+static uint16_t NOINLINE secondsOf(uint32_t ms) {
+    return (uint16_t)(ms / 1000UL);
+}
+
 // Store user activity time in seconds (16-bit) from a provided millis() snapshot
-// Kept out-of-line to deduplicate millis()/1000 + store sequences under -Os + LTO
-static void __attribute__((noinline))
-storeUserActivitySecondsFromMillis(uint32_t now_ms) {
-    g_lastUserActivityTime = (uint16_t)(now_ms / 1000UL);
+static void NOINLINE storeUserActivitySecondsFromMillis(uint32_t now_ms) {
+    g_lastUserActivityTime = secondsOf(now_ms);
+}
+
+// Stamp the last frequency change time (millis() snapshot)
+// Shared by doFrequencyTune / doFrequencyTuneSSB / favorites recall
+// the millis() call + 32-bit store sequence repeats 3x under -Os + LTO otherwise
+static void NOINLINE markFreqChangeTime() {
+    g_lastFreqChange = millis();
 }
 
 // Marks receiver state as dirty to trigger an EEPROM save on idle
@@ -125,13 +278,13 @@ static inline void bfoSplitFreq(uint16_t freq, int16_t bfo,
 // Single out of line helper for g_bandList at g_bandIndex
 // Keeps the idx times sizeof Band address math in one place under Os and LTO
 // Do not cache the returned pointer across code paths that modify g_bandIndex
-static Band* __attribute__((noinline)) currentBandPtr() {
+static Band* NOINLINE currentBandPtr() {
     return &g_bandList[g_bandIndex];
 }
 
 // pointer math to save Flash
 // BandType accessor built on currentBandPtr to keep band type queries compact
-static BandType __attribute__((noinline)) currentBandType() {
+static BandType NOINLINE currentBandType() {
     return currentBandPtr()->bandType;
 }
 
@@ -164,7 +317,7 @@ static void doSwitchLogic(int8_t& param, int8_t low, int8_t high, int8_t step) {
 }
 
 // Unmute audio in hardware and clear squelch state flag
-static void __attribute__((noinline)) unmuteAndClearSquelchCutoff() {
+static void NOINLINE unmuteAndClearSquelchCutoff() {
     g_si4735.setAudioMute(false);
     g_squelchCutoff = false;
 }
@@ -172,7 +325,7 @@ static void __attribute__((noinline)) unmuteAndClearSquelchCutoff() {
 // generic helper to update a value and call a function if it has changed
 // avoids duplicating the if new_value != old_value pattern
 template<typename T>
-static inline __attribute__((always_inline))
+static inline ALWAYS_INLINE
 void updateIfChanged(T& old_value, T new_value, void (*update_fn)()) {
     if (old_value != new_value) {
         old_value = new_value;

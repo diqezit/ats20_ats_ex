@@ -50,23 +50,6 @@ const unsigned char ttable[7][4] PROGMEM =
 };
 #endif
 
-// Constructor. Each arg is the pin number for each encoder contact
-Rotary::Rotary(char _pin1, char _pin2) {
-    // Assign variables
-    pin1 = _pin1;
-    pin2 = _pin2;
-    // Set pins to input.
-    DDRD &= ~(1 << pin1);
-    DDRD &= ~(1 << pin2);
-
-#ifdef ENABLE_PULLUPS
-    PORTD |= (1 << pin1);
-    PORTD |= (1 << pin2);
-#endif
-    // Initialise state
-    state = R_START;
-}
-
 unsigned char Rotary::process() {
     // Grab state of input pins
     uint8_t pinstate = (PIND >> 2) & 0x03;   // PD2->bit0, PD3->bit1

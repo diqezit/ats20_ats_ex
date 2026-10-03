@@ -110,7 +110,7 @@ static inline void applyPercentUpdate(uint8_t newPercent) {
 // Immediate Init to prevent 0% or 100 glitches on startup
 // Low-Pass Filter (1/16) ssmooth voltage dips caused by OLED activity
 // Strict Hysteresis requires 10 stable samples to update UI (no menu jitter)
-static inline void updateStablePercent() {
+static void NOINLINE updateStablePercent() {
     if (!g_voltagePinConnected) return;
 
     int sample = (int)adcReadAx(getBatteryPin());
@@ -123,7 +123,7 @@ static inline void updateStablePercent() {
         return;
     }
 
-    g_averageADC = (15 * g_averageADC + sample) >> 4;
+    g_averageADC += (sample - g_averageADC) >> 4;
 
     uint8_t currentRawPercent = calculateRawPercent(g_averageADC);
     int8_t diff = currentRawPercent - g_stableBatteryPercent;

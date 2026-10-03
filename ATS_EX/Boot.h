@@ -123,12 +123,14 @@ ISR(INT1_vect, ISR_ALIASOF(INT0_vect));
 // ===== BOOT HELPERS ======================
 // ==========================================
 
-// Timer0 fast PWM with /64 prescaler - gives us millis() and delay()
-// same config as Arduino core but we skip everything else
+// Timer0 CTC with 64 prescaler - compare match every 250 ticks = exact 1 ms
+// gives millis() with zero drift and a minimal compare-match ISR (see Utils.h FastTime section)
+// OC0A/OC0B pins stay disconnected (COM bits 0): D5/D6 keep normal GPIO use
 static inline void initTimer0() {
-    TCCR0A = (uint8_t)(_BV(WGM01) | _BV(WGM00));
-    TCCR0B = (uint8_t)(_BV(CS01) | _BV(CS00));
-    TIMSK0 = (uint8_t)_BV(TOIE0);
+    TCCR0A = (uint8_t)_BV(WGM01);                  // CTC
+    TCCR0B = (uint8_t)(_BV(CS01) | _BV(CS00));     // prescaler 64
+    OCR0A  = (uint8_t)((F_CPU / 64 / 1000) - 1);   // 249 @ 16 MHz -> 1000.000 us period
+    TIMSK0 = (uint8_t)_BV(OCIE0A);                 // compare-A interrupt
 }
 
 // bootloader enables UART for firmware upload - turn it off
@@ -145,12 +147,64 @@ static inline void initFast() {
     sei();
 }
 
+// Rebuild RAM band table (g_bandList) from compact PROGMEM definitions (g_bandDefs)
+// Must run before any logic or EEPROM load accesses g_bandList
+static inline void initBandList() {
+    const BandDef* d = g_bandDefs;
+    for (uint8_t i = 0; i < g_bandCount; i++, d++) {
+        Band* b = &g_bandList[i];
+        memcpy_P(b, d, sizeof(BandDef));
+        const uint8_t t = b->bandType;
+        b->stepIdxAM  = (t == LW_BAND_TYPE || t == MW_BAND_TYPE)
+                      ? BandDefaults::stepLW_MW   // 9 kHz grid on LW/MW
+                      : BandDefaults::stepSW;     // 5 kHz elsewhere
+        b->stepIdxSSB = BandDefaults::stepSSB;
+        b->stepIdxFM  = BandDefaults::stepFM;
+        b->bwIdxAM    = BandDefaults::bwAM;
+        b->bwIdxSSB   = BandDefaults::bwSSB;
+        b->bwIdxFM    = BandDefaults::bwFM;
+        b->bfoCal     = BandDefaults::bfoCal;
+    }
+}
+
+// Button / encoder pin hardware setup
+// 
+// DDR input + pull-up for every button and encoder pin
+// 
+// Called from initHardwarePins() - first pin-touching step of setup()
+// still BEFORE first button-pin read (eepromResetKeysHeld())
+// and BEFORE initEncoderInterrupts() enables INT0/INT1
+static constexpr uint8_t BTN_PORT_MASK(uint8_t pin, uint8_t base) {
+    // bit mask of pin inside port starting at Arduino pin base
+    // 0 if out of range
+    return (pin >= base && pin < base + 8) ? (uint8_t)(1u << (pin - base)) : 0;
+}
+
+static inline void initButtonPullups() {
+
+    constexpr uint8_t mD =
+        BTN_PORT_MASK(ENCODER_PIN_A, 0) | BTN_PORT_MASK(ENCODER_PIN_B, 0) |
+        BTN_PORT_MASK(MODE_SWITCH, 0)   | BTN_PORT_MASK(BANDWIDTH_BUTTON, 0) |
+        BTN_PORT_MASK(VOLUME_BUTTON, 0) | BTN_PORT_MASK(AVC_BUTTON, 0);
+
+    constexpr uint8_t mB =
+        BTN_PORT_MASK(BAND_BUTTON, 8) | BTN_PORT_MASK(SOFTMUTE_BUTTON, 8) |
+        BTN_PORT_MASK(STEP_BUTTON, 8) | BTN_PORT_MASK(AGC_BUTTON, 8);
+
+    constexpr uint8_t mC = BTN_PORT_MASK(ENCODER_BUTTON, 14);
+
+    if (mD) { DDRD &= (uint8_t)~mD; PORTD |= mD; }   // input + pull-up
+    if (mB) { DDRB &= (uint8_t)~mB; PORTB |= mB; }
+    if (mC) { DDRC &= (uint8_t)~mC; PORTC |= mC; }
+}
+
 // amplifier control pin as output, start muted
 // PB5 LED as output for status indication
 static inline void initHardwarePins() {
     AMP_PIN_OUT();
     setAmpState(false);
     LED_PB5_OUT();
+    initButtonPullups();
 }
 
 // D2=INT0 D3=INT1 both on CHANGE for quadrature decoding

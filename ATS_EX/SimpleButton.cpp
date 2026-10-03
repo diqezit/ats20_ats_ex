@@ -17,58 +17,6 @@
 #define BUTTONSTATE_SHORTRELEASE  6           // Button released after shortpress but wait for debounce the release
 //#define BUTTONSTATE_2DEBOUNCE     7
 
-
-SimpleButton::SimpleButton(uint8_t pin) {
-    // Fast GPIO init (saves Flash vs pinMode on AVR):
-    // - configure as INPUT
-    // - enable internal pull-up (button drives pin LOW when pressed)
-    //
-    // Also cache the PINx register address + bit mask once here
-    // This removes per-call port branching and runtime bit shifting in checkEvent()
-
-    // Arduino Uno / ATmega328P pin mapping used here:
-    //   0..7   -> PORTD / PIND  (PD0..PD7)
-    //   8..13  -> PORTB / PINB  (PB0..PB5)
-    //   14..19 -> PORTC / PINC  (PC0..PC5)  [A0..A5]
-
-    if (pin < 8) {
-        // Digital pins D0..D7 (PORTD)
-        DDRD &= ~(1 << pin);    // input
-        PORTD |= (1 << pin);    // pull-up on
-
-        _pinReg = &PIND;                // cached input register
-        _pinMask = (uint8_t)(1 << pin); // cached bit mask
-    } else if (pin < 14) {
-        // Digital pins D8..D13 (PORTB)
-        uint8_t bit = (uint8_t)(pin - 8);
-
-        DDRB &= ~(1 << bit);    // input
-        PORTB |= (1 << bit);    // pull-up on
-
-        _pinReg = &PINB;
-        _pinMask = (uint8_t)(1 << bit);
-    } else {
-        // Analog pins A0..A5 as digital 14..19 (PORTC)
-        uint8_t bit = (uint8_t)(pin - 14);
-
-        DDRC &= ~(1 << bit);    // input
-        PORTC |= (1 << bit);    // pull-up on
-
-        _pinReg = &PINC;
-        _pinMask = (uint8_t)(1 << bit);
-    }
-
-    // Store the Arduino pin number inside the packed state word.
-    // _PinDebounceState layout (16-bit):
-    //   b15..b10: pin number (0..63)
-    //   b9..b4  : debounce timestamp (units of 16ms)
-    //   b3..b0  : FSM state (0..15)
-    //
-    // debounce+state start at 0 => IDLE state, timestamp=0
-    _PinDebounceState = ((uint16_t)pin << 10);
-}
-
-
 uint8_t SimpleButton::checkEvent(uint8_t(*eventHandler)(uint8_t event, uint8_t pin)) {
     uint8_t ret = 0;
 
@@ -82,7 +30,7 @@ uint8_t SimpleButton::checkEvent(uint8_t(*eventHandler)(uint8_t event, uint8_t p
     uint8_t  state = (uint8_t)(_PinDebounceState & 0x0F);     // 4-bit FSM state
     uint16_t stamp = (uint16_t)(_PinDebounceState & 0x3f0);   // last change time
 
-    const uint8_t pinState = ((*_pinReg & _pinMask) ? HIGH : LOW);
+    const uint8_t pinState = ((*(volatile uint8_t*)(uintptr_t)_pinPort) & _pinMask) ? HIGH : LOW;
 
     // handle wrap (0x400 == 1024ms window in 16ms ticks)
     if (now < stamp) now = (uint16_t)(now + 0x400);

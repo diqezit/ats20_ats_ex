@@ -170,7 +170,7 @@ static inline void cwViewTask();
 static void applyBandConfiguration(bool extraSSBReset = false);
 static void setAmpState(bool on);
 static void applyBrightness();
-static void loadSSBPatch();
+static void loadPatch();
 
 static void handleDelayedFrequencyUpdate();
 static void handleSignalAndStereoUpdates(uint32_t, uint16_t);
@@ -221,6 +221,7 @@ struct __attribute__((packed)) FavoriteStation {
 
 bool g_voltagePinConnected = false;
 bool g_ssbLoaded = false;
+bool g_amLoaded = false;            // AM patch is in chip RAM
 bool g_stereoStatus = false;
 bool autoDisplayOff = false;
 bool g_squelchCutoff = false;
@@ -322,82 +323,67 @@ constexpr uint16_t SSB_MODE_MAX_FREQ = 30000;
 // to track the current band where is 1 = MW 
 uint8_t g_bandIndex = 1; // so that muls doesn spread across the code and without sbc r17, r17, uint is needed
 
-// Default step/bandwidth/bfo values for band initialization
-// stepIdxAM, stepIdxSSB, stepIdxFM, bwIdxAM, bwIdxSSB, bwIdxFM, bfoCal
-#define BD  1, 4, 1, 4, 4, 0, 0   // SW/FM bands (stepIdx=1 → 5 kHz step)
-#define BM  2, 4, 1, 4, 4, 0, 0   // LW/MW bands (stepIdx=2 → 9 kHz step)
-
-// Array single source of truth for all bands
-// name, minFreq, maxFreq, bandType, defaultFreq, [step/bw/bfo defaults]
-Band g_bandList[g_bandCount] = {
-    //        name           min      max   type           freq   step/bw/bfo
-    // --- LW/MW bands ---
-    { PACK_STR4("LW  "),      150,     521, LW_BAND_TYPE,   300, BM },
-    { PACK_STR4("MW  "),      522,    1710, MW_BAND_TYPE,   522, BM },
-
-    // --- SW broadcast & amateur bands ---
-    { PACK_STR4("SW  "),     1711,    1799, SW_BAND_TYPE,  1750, BD },
-    { PACK_STR4("160m"),     1800,    2000, SW_BAND_TYPE,  1900, BD },  // 160m amateur
-    { PACK_STR4("SW  "),     2001,    2299, SW_BAND_TYPE,  2100, BD },
-
-    { PACK_STR4("120m"),     2300,    2495, SW_BAND_TYPE,  2400, BD },  // 120m broadcast
-    { PACK_STR4("SW  "),     2496,    3199, SW_BAND_TYPE,  2800, BD },
-
-    { PACK_STR4("90m "),     3200,    3399, SW_BAND_TYPE,  3300, BD },  // 90m broadcast
-    { PACK_STR4("SW  "),     3400,    3499, SW_BAND_TYPE,  3450, BD },
-
-    { PACK_STR4("80m "),     3500,    3899, SW_BAND_TYPE,  3700, BD },  // 80m amateur
-    { PACK_STR4("75m "),     3900,    3999, SW_BAND_TYPE,  3950, BD },
-    { PACK_STR4("SW  "),     4000,    4749, SW_BAND_TYPE,  4500, BD },
-
-    { PACK_STR4("60m "),     4750,    5060, SW_BAND_TYPE,  4850, BD },  // 60m broadcast
-    { PACK_STR4("SW  "),     5061,    5350, SW_BAND_TYPE,  5200, BD },
-    { PACK_STR4("60H "),     5351,    5366, SW_BAND_TYPE,  5357, BD },  // 60m amateur (WRC-15)
-    { PACK_STR4("SW  "),     5367,    5899, SW_BAND_TYPE,  5500, BD },
-
-    { PACK_STR4("49m "),     5900,    6200, SW_BAND_TYPE,  6000, BD },  // 49m broadcast
-    { PACK_STR4("SW  "),     6201,    6999, SW_BAND_TYPE,  6500, BD },
-
-    { PACK_STR4("40m "),     7000,    7200, SW_BAND_TYPE,  7100, BD },  // 40m amateur
-    { PACK_STR4("41m "),     7201,    7450, SW_BAND_TYPE,  7300, BD },
-    { PACK_STR4("SW  "),     7451,    9399, SW_BAND_TYPE,  8000, BD },
-
-    { PACK_STR4("31m "),     9400,    9900, SW_BAND_TYPE,  9600, BD },  // 31m broadcast
-    { PACK_STR4("SW  "),     9901,   10099, SW_BAND_TYPE, 10000, BD },
-    { PACK_STR4("30m "),    10100,   10150, SW_BAND_TYPE, 10136, BD },  // 30m amateur
-    { PACK_STR4("SW  "),    10151,   11599, SW_BAND_TYPE, 11000, BD },
-
-    { PACK_STR4("25m "),    11600,   12100, SW_BAND_TYPE, 11900, BD },  // 25m broadcast
-    { PACK_STR4("SW  "),    12101,   13569, SW_BAND_TYPE, 13000, BD },
-
-    { PACK_STR4("22m "),    13570,   13870, SW_BAND_TYPE, 13700, BD },  // 22m broadcast
-    { PACK_STR4("SW  "),    13871,   13999, SW_BAND_TYPE, 13900, BD },
-
-    { PACK_STR4("20m "),    14000,   14350, SW_BAND_TYPE, 14200, BD },  // 20m amateur
-    { PACK_STR4("SW  "),    14351,   15099, SW_BAND_TYPE, 15000, BD },
-
-    { PACK_STR4("19m "),    15100,   15800, SW_BAND_TYPE, 15400, BD },  // 19m broadcast
-    { PACK_STR4("SW  "),    15801,   17479, SW_BAND_TYPE, 17000, BD },
-    { PACK_STR4("16m "),    17480,   18067, SW_BAND_TYPE, 17600, BD },  // 16m broadcast
-
-    { PACK_STR4("17m "),    18068,   18168, SW_BAND_TYPE, 18100, BD },  // 17m amateur
-    { PACK_STR4("SW  "),    18169,   20999, SW_BAND_TYPE, 19500, BD },
-
-    { PACK_STR4("15m "),    21000,   21450, SW_BAND_TYPE, 21200, BD },  // 15m amateur
-    { PACK_STR4("13m "),    21451,   21850, SW_BAND_TYPE, 21600, BD },  // 13m broadcast
-    { PACK_STR4("SW  "),    21851,   24889, SW_BAND_TYPE, 23000, BD },
-
-    { PACK_STR4("12m "),    24890,   24990, SW_BAND_TYPE, 24940, BD },  // 12m amateur
-    { PACK_STR4("SW  "),    24991,   26099, SW_BAND_TYPE, 25600, BD },
-    { PACK_STR4("CB  "),    26100,   27860, SW_BAND_TYPE, 27200, BD },  // CB radio
-    { PACK_STR4("10m "),    27861,   30000, SW_BAND_TYPE, 28500, BD },  // 10m amateur
-
-    // --- FM broadcast band ---
-    { PACK_STR4("    "),     6400,   10800, FM_BAND_TYPE,  8400, BD }
+// Compact flash-resident band definitions ({struct BandDef} 11 bytes per band)
+// 
+// step/bandwidth defaults are derived from bandType (LW/MW = 9 kHz AM step, else 5 kHz)
+struct __attribute__((packed)) BandDef {
+    char name[4];
+    uint16_t minimumFreq;
+    uint16_t maximumFreq;
+    uint8_t bandType;       // field order mirrors struct Band prefix (11 bytes)
+    uint16_t currentFreq;   // default power-on frequency
 };
 
-#undef BD
-#undef BM
+const BandDef g_bandDefs[g_bandCount] PROGMEM = {
+    //          name         min     max    type   freq
+    { PACK_STR4("LW  "),   150,   521, LW_BAND_TYPE,   300 },
+    { PACK_STR4("MW  "),   522,  1710, MW_BAND_TYPE,   522 },
+    { PACK_STR4("SW  "),  1711,  1799, SW_BAND_TYPE,  1750 },
+    { PACK_STR4("160m"),  1800,  2000, SW_BAND_TYPE,  1900 },
+    { PACK_STR4("SW  "),  2001,  2299, SW_BAND_TYPE,  2100 },
+    { PACK_STR4("120m"),  2300,  2495, SW_BAND_TYPE,  2400 },
+    { PACK_STR4("SW  "),  2496,  3199, SW_BAND_TYPE,  2800 },
+    { PACK_STR4("90m "),  3200,  3399, SW_BAND_TYPE,  3300 },
+    { PACK_STR4("SW  "),  3400,  3499, SW_BAND_TYPE,  3450 },
+    { PACK_STR4("80m "),  3500,  3899, SW_BAND_TYPE,  3700 },
+    { PACK_STR4("75m "),  3900,  3999, SW_BAND_TYPE,  3950 },
+    { PACK_STR4("SW  "),  4000,  4749, SW_BAND_TYPE,  4500 },
+    { PACK_STR4("60m "),  4750,  5060, SW_BAND_TYPE,  4850 },
+    { PACK_STR4("SW  "),  5061,  5350, SW_BAND_TYPE,  5200 },
+    { PACK_STR4("60H "),  5351,  5366, SW_BAND_TYPE,  5357 },
+    { PACK_STR4("SW  "),  5367,  5899, SW_BAND_TYPE,  5500 },
+    { PACK_STR4("49m "),  5900,  6200, SW_BAND_TYPE,  6000 },
+    { PACK_STR4("SW  "),  6201,  6999, SW_BAND_TYPE,  6500 },
+    { PACK_STR4("40m "),  7000,  7200, SW_BAND_TYPE,  7100 },
+    { PACK_STR4("41m "),  7201,  7450, SW_BAND_TYPE,  7300 },
+    { PACK_STR4("SW  "),  7451,  9399, SW_BAND_TYPE,  8000 },
+    { PACK_STR4("31m "),  9400,  9900, SW_BAND_TYPE,  9600 },
+    { PACK_STR4("SW  "),  9901, 10099, SW_BAND_TYPE, 10000 },
+    { PACK_STR4("30m "), 10100, 10150, SW_BAND_TYPE, 10136 },
+    { PACK_STR4("SW  "), 10151, 11599, SW_BAND_TYPE, 11000 },
+    { PACK_STR4("25m "), 11600, 12100, SW_BAND_TYPE, 11900 },
+    { PACK_STR4("SW  "), 12101, 13569, SW_BAND_TYPE, 13000 },
+    { PACK_STR4("22m "), 13570, 13870, SW_BAND_TYPE, 13700 },
+    { PACK_STR4("SW  "), 13871, 13999, SW_BAND_TYPE, 13900 },
+    { PACK_STR4("20m "), 14000, 14350, SW_BAND_TYPE, 14200 },
+    { PACK_STR4("SW  "), 14351, 15099, SW_BAND_TYPE, 15000 },
+    { PACK_STR4("19m "), 15100, 15800, SW_BAND_TYPE, 15400 },
+    { PACK_STR4("SW  "), 15801, 17479, SW_BAND_TYPE, 17000 },
+    { PACK_STR4("16m "), 17480, 18067, SW_BAND_TYPE, 17600 },
+    { PACK_STR4("17m "), 18068, 18168, SW_BAND_TYPE, 18100 },
+    { PACK_STR4("SW  "), 18169, 20999, SW_BAND_TYPE, 19500 },
+    { PACK_STR4("15m "), 21000, 21450, SW_BAND_TYPE, 21200 },
+    { PACK_STR4("13m "), 21451, 21850, SW_BAND_TYPE, 21600 },
+    { PACK_STR4("SW  "), 21851, 24889, SW_BAND_TYPE, 23000 },
+    { PACK_STR4("12m "), 24890, 24990, SW_BAND_TYPE, 24940 },
+    { PACK_STR4("SW  "), 24991, 26099, SW_BAND_TYPE, 25600 },
+    { PACK_STR4("CB  "), 26100, 27860, SW_BAND_TYPE, 27200 },
+    { PACK_STR4("10m "), 27861, 30000, SW_BAND_TYPE, 28500 },
+    { PACK_STR4("    "),  6400, 10800, FM_BAND_TYPE,  8400 },
+};
+
+// Runtime band state (filled at boot)
+Band g_bandList[g_bandCount];
 
 // =================================================================================================
 // Bandwidth tables (PROGMEM)
@@ -405,9 +391,10 @@ Band g_bandList[g_bandCount] = {
 
 // single PROGMEM block of null-terminated UI labels
 const char bw_all_data[] PROGMEM =
-"0.5 kHz\0" "1.0 kHz\0" "1.2 kHz\0" "1.8 kHz\0" "2.0 kHz\0" "2.2 kHz\0"
-"2.5 kHz\0" "3.0 kHz\0" "4.0 kHz\0" "6.0 kHz\0" " AUTO  \0" "110 kHz\0"
-"84 kHz \0" "60 kHz \0" "40 kHz \0";
+"0.5 " U_KHZ "\0" "1.0 " U_KHZ "\0" "1.2 " U_KHZ "\0" "1.8 " U_KHZ "\0"
+"2.0 " U_KHZ "\0" "2.2 " U_KHZ "\0" "2.5 " U_KHZ "\0" "3.0 " U_KHZ "\0"
+"4.0 " U_KHZ "\0" "6.0 " U_KHZ "\0" " AUTO  \0" "110 " U_KHZ "\0"
+"84 " U_KHZ " \0" "60 " U_KHZ " \0" "40 " U_KHZ " \0";
 
 // Maps UI index to an offset in `bw_all_data`
 // Using 1-byte offsets (vs 2-byte pointers) is a key data size optimization
@@ -423,6 +410,38 @@ const uint8_t g_bwSSBMaxIdx = 5;
 const uint8_t g_maxFilterAM = 6;
 const uint8_t g_bwAMIdx[] = { 4, 5, 3, 6, 2, 1, 0 };
 
+// =============================================================================================
+// ===== NAMED INDICES =========================================================================
+// =============================================================================================
+
+// Bandwidth selection — order of bw_ssb_map / bw_am_map / bw_fm_map (= strings shown on screen)
+enum BwIdx : uint8_t {
+    BW_SSB_0K5 = 0, BW_SSB_1K0, BW_SSB_1K2, BW_SSB_2K2, BW_SSB_3K0, BW_SSB_4K0,             // 0..5
+    BW_AM_1K0  = 0, BW_AM_1K8,  BW_AM_2K0,  BW_AM_2K5,  BW_AM_3K0,  BW_AM_4K0,  BW_AM_6K0,  // 0..6
+    BW_FM_AUTO = 0, BW_FM_110K, BW_FM_84K,  BW_FM_60K,  BW_FM_40K                           // 0..4
+};
+
+// Tuning step selection — order of g_tabStep (AM part / SSB part via +SSB_STEP_OFFSET) and g_tabStepFM
+enum StepIdx : uint8_t {
+    STEP_AM_1K   =  0,    STEP_AM_5K,   STEP_AM_9K,     STEP_AM_10K,                        // g_tabStep[0..6], kHz
+    STEP_AM_50K,        STEP_AM_100K,   STEP_AM_1M,
+    STEP_SSB_10HZ = 0, STEP_SSB_25HZ, STEP_SSB_50HZ,    STEP_SSB_100HZ, STEP_SSB_500HZ,     // +SSB_STEP_OFFSET, Hz
+    STEP_SSB_1K,         STEP_SSB_5K,  STEP_SSB_9K,     STEP_SSB_10K,
+    STEP_FM_5K   =  0,   STEP_FM_10K, STEP_FM_100K                                          // g_tabStepFM[0..2], kHz
+};
+
+// Factory defaults applied to every band entry at boot (initBandList() in Boot.h)
+struct BandDefaults {
+    static constexpr uint8_t stepSW    = STEP_AM_5K;      // 5 kHz  — SW and default bands
+    static constexpr uint8_t stepLW_MW = STEP_AM_9K;      // 9 kHz  — LW/MW regional grid
+    static constexpr uint8_t stepSSB   = STEP_SSB_500HZ;  // 500 Hz — SSB/CW
+    static constexpr uint8_t stepFM    = STEP_FM_10K;     // 10 kHz — FM broadcast grid
+    static constexpr uint8_t bwAM      = BW_AM_3K0;       // 3.0 kHz
+    static constexpr uint8_t bwSSB     = BW_SSB_3K0;      // 3.0 kHz
+    static constexpr uint8_t bwFM      = BW_FM_AUTO;      // AUTO
+    static constexpr int8_t  bfoCal    = 0;               // BFO calibration offset, Hz
+};
+
 // =================================================================================================
 // Step tables (PROGMEM + RAM)
 // =================================================================================================
@@ -430,9 +449,11 @@ const uint8_t g_bwAMIdx[] = { 4, 5, 3, 6, 2, 1, 0 };
 // step strings padded to 4 chars to reduce mem usage
 static const char step_lookup_table[][7] PROGMEM = {
     // AM Steps (indices 0-6)
-    "1 kHz ", "5 kHz ", "9 kHz ", "10 kHz", "50 kHz", "100kHz", "1 MHz ",
+    "1 " U_KHZ " ", "5 " U_KHZ " ", "9 " U_KHZ " ", "10 " U_KHZ,
+    "50 " U_KHZ, "100" U_KHZ, "1 " U_MHZ " ",
     // SSB Steps (indices 7-15)
-    "10 Hz ", "25 Hz ", "50 Hz ", "100 Hz", "500 Hz", "1 kHz ", "5 kHz ", "9 kHz ", "10 kHz"
+    "10 " U_HZ " ", "25 " U_HZ " ", "50 " U_HZ " ", "100 " U_HZ,
+    "500 " U_HZ, "1 " U_KHZ " ", "5 " U_KHZ " ", "9 " U_KHZ " ", "10 " U_KHZ
 };
 
 // Array with tuning steps. The structure is defined like - AM (in kHz), then SSB (in Hz)

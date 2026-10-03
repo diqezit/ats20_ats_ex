@@ -1,10 +1,10 @@
-# ATS-20 / ATS-20+ firmware (ATS_EX fork) — Favorites/Presets (station memory list)
+# ATS-20 / ATS-20+ firmware (ATS_EX fork) - Favorites/Presets (station memory list)
 
-**diqezit’s fork of `goshante/ats20_ats_ex`** for **ATS-20 / ATS-20+ receivers** based on **ATmega328P + SI4732/SI4735** (OLED UI, AM/FM/SSB/CW).
+**diqezit's fork of `goshante/ats20_ats_ex`** for **ATS-20 / ATS-20+ receivers** based on **ATmega328P + SI4732/SI4735** (OLED UI, AM/FM/SSB/CW).
 
 **Main feature:** a unified **Favorites / Presets / Station Memory / Bookmarks** list (**20 entries**) shared across **AM / FM / SSB / CW**, storing a full station snapshot: **frequency + mode + BFO** (so SSB/CW recall is accurate).
 
-**Also included:** `MOD_NO_RDS` (flash-saving build for ATmega328P), **RDS MINI RadioText**, **audio pop/click elimination (speaker path)**, plus many bug fixes and UI improvements.
+**Also included:** `MOD_NO_RDS` (flash-saving build for ATmega328P), **audio pop/click elimination (speaker path)**, **improved AM patch** (audio dips fix), **new SSB patch** (enabled by default), **optional RDS MINI RadioText**, plus many bug fixes and UI improvements.
 
 <p align="center">
   <img src="https://img.shields.io/badge/Firmware-ATS--20%2B-blueviolet?style=for-the-badge&logo=github" alt="Firmware ATS-20+">
@@ -42,11 +42,16 @@
 
 ## Key Modifications
 
-This fork introduces three main branches of improvements over the original firmware:
+This fork introduces several main branches of improvements over the original firmware:
 
 1. **Audio Pop/Click Elimination (Hardware & Software Mod):** a modification that removes pops/clicks when switching modes (requires a small physical change to the receiver circuit).
-2. **`MOD_NO_RDS` firmware series:** the original full RDS was replaced with a lightweight **RDS MINI** decoder to stay within ATmega328P flash limits. This freed program space for new functionality — most notably a **unified Favorites system for all bands (AM, FM, SSB, CW)** — plus many other fixes and improvements.
-3. **RDS MINI RadioText decoder:** starting from the **v7.1.x** series this fork includes a minimal RDS implementation (~500 bytes Flash). It decodes **Group 2A/2B RadioText** on FM and shows it as scrolling text on OLED row 6. Toggle at runtime via **long-press `MODE` in FM mode** (shows `RS` hint when active).
+2. **`MOD_NO_RDS` firmware series:** the original full RDS was replaced with a lightweight **RDS MINI** decoder to stay within ATmega328P flash limits. This freed program space for new functionality - most notably a **unified Favorites system for all bands (AM, FM, SSB, CW)** - plus many other fixes and improvements.
+3. **RDS MINI RadioText decoder:** starting from the **v7.1.x** series this fork includes a minimal RDS implementation (~500 bytes Flash). It decodes **Group 2A/2B RadioText** on FM and shows it as scrolling text on OLED row 6. Toggle at runtime via **long-press `MODE` in FM mode** (shows `RS` hint when active). Requires compiling with `ENABLE_RDS_MINI 1` (off by default in v7.2.1).
+4. **Improved AM Patch (`patch_am.h`):** starting from **v7.2.1**, this fork includes an improved AM patch (based on NeekeetosNee's research) that eliminates annoying audio dips during frequency tuning in AM/SSB modes. Uses rev0 for the smallest memory footprint, stored in den3rats compressed format. **Enabled by default.**
+5. **New SSB Patch (`patch_ssb_new.h`):** audio improvements and fixes by NeekeetosNee. **Enabled by default in the v7.2.1 release build.** After the Flash optimization campaign of this release it fits the ATmega328P exactly (30720 of 30720 bytes) together with the improved AM patch, Favorites and the signal meter, so no feature had to be sacrificed. To roll back to the stable SSB patch: set `PATCH_EX_SSB 1` and `PATCH_EX_SSB_NEW 0` in `Defines.h`, then rebuild.
+6. **Flash optimization campaign (v7.2.1, about 1.1 KB reclaimed):** the Arduino core timing chain was replaced with a local FastTime block (Timer0 in exact 1 ms CTC mode with a hand-written ISR), duplicate code was consolidated into shared helpers, the compact font was reduced to 47 glyphs and static tables were moved to PROGMEM. The BFO and SSB fine-tune arithmetic is deliberately untouched.
+
+> **⚠️ Important note about v7.2.1 defaults:** `ENABLE_RDS_MINI` is set to `0` and both patches are enabled (`PATCH_EX_AM 1` + `PATCH_EX_SSB_NEW 1`). The release build fills the ATmega328P flash completely (30720/30720 bytes, 0 bytes headroom). RDS MINI itself still works - to use it instead of the patches set `ENABLE_RDS_MINI 1`, `PATCH_EX_AM 0` and `PATCH_EX_SSB 1` in `Defines.h`, then rebuild.
 
 **Important:** the audio improvement affects only the **speaker output**, because the headphone jack is connected before the amplifier.
 
@@ -56,66 +61,12 @@ This fork introduces three main branches of improvements over the original firmw
 
 Full changelog is available here: [Changelog.md](https://github.com/diqezit/ats20_ats_ex/blob/mod_no_rds/Changelog.md)
 
+#### **Battery Voltage Divider (ADC accuracy note)**
+
 `I strongly recommend to connect the voltage divider as close to the pin as possible - use for this a two - 10kOm resistors.
 In order to eliminate possible interference with ADC readout distortion`
 
 ![Diagram showing how to connect the pins](https://github.com/user-attachments/assets/681c515e-bbb1-4213-845b-1d2d178f52b2)
-
-**Font, moving elements on the screen have been changed since version 5.0 - if you want to use the old mapping - use version 4.11 without long term support.**
-
-[GET 4.11](https://github.com/diqezit/ats20_ats_ex/releases/tag/v4.11)
-
-### `V4.11`
-_General interface view in version 4.11_
-<p align="center">
-  <img alt="Interface v4.11" src="https://github.com/user-attachments/assets/fcd30ee4-013e-4de6-a1a5-330c730b1e02" />
-</p>
-
-### `v5.x`
-_Key interface changes in the 5.x versions_
-<table align="center">
-  <tr>
-    <td align="center" width="49%">
-      Main Screen
-      <br>
-      <img alt="Main Screen v5.x" src="https://github.com/user-attachments/assets/1bf3ad8d-35a8-442b-b2ad-37518ec571f8" />
-    </td>
-    <td align="center" width="49%">
-      Settings Screen
-      <br>
-      <img alt="Info Screen v5.x" src="https://github.com/user-attachments/assets/551c7c44-bc77-4109-ab67-aa5f2a6ed839" />
-    </td>
-  </tr>
-</table>
-
-### `v6.x`
-_Screen examples in the 6.x versions_
-<table align="center">
-  <tr>
-    <td align="center" width="49%">
-      SSB Mode
-      <br>
-      <img alt="SSB Mode" src="https://github.com/user-attachments/assets/de5d2098-3a76-4f87-af9b-e5157c0be423" />
-    </td>
-    <td align="center" width="49%">
-      Favorites List
-      <br>
-      <img alt="Favorites List" src="https://github.com/user-attachments/assets/c2a5d7f5-47ec-4043-b5f8-89131e22f18f" />
-    </td>
-  </tr>
-  <tr>
-    <td align="center" width="49%">
-      Full Screen Layout
-      <br>
-      <img alt="Full Screen Layout" src="https://github.com/user-attachments/assets/e1282227-e65f-4015-aee0-134ea80bbc51" />
-    </td>
-    <td align="center" width="49%">
-      Settings Menu
-      <br>
-      <img alt="Settings Menu" src="https://github.com/user-attachments/assets/1256b31e-2c32-475e-ba54-332c2ea47e93" />
-    </td>
-  </tr>
-</table>
 
 ---
 
@@ -132,12 +83,12 @@ You will need two things: the programming software and the correct firmware file
 
 2.  **Firmware File (.hex):**
     *   For flashing via USB, you only need the file **without** the bootloader
-    *   **Click here to download:** [**ATS\_EX.ino.eightanaloginputs.hex**](https://github.com/diqezit/ats20_ats_ex/blob/mod_no_rds/ATS_EX/ATS_EX.ino.eightanaloginputs.hex) (Click the link, then find the "Download raw file" button)
+    *   **Click here to download:** [**ATS\_EX.ino.hex**](https://github.com/diqezit/ats20_ats_ex/blob/mod_no_rds/ATS_EX/build/arduino.avr.nano/ATS_EX.ino.hex) (Click the link, then find the "Download raw file" button)
 
 > **📌 Which File Should I Use?**
-> *   The `ATS_EX.ino.eightanaloginputs.hex` file is the correct one for updating your receiver's firmware over a standard USB connection using xLoader
+> *   The `ATS_EX.ino.hex` file is the correct one for updating your receiver's firmware over a standard USB connection using xLoader
 > *   The `ATS_EX.ino.with_bootloader.hex` file is an advanced file used only for programming with an external ISP programmer (like a USBasp). **Do not use this file with xLoader for a standard USB update**
->   *   [Link for advanced users: **With\_bootloader**](https://github.com/diqezit/ats20_ats_ex/blob/mod_no_rds/ATS_EX/ATS_EX.ino.with_bootloader.hex)
+>   *   [Link for advanced users: **With\_bootloader**](https://github.com/diqezit/ats20_ats_ex/blob/mod_no_rds/ATS_EX/build/arduino.avr.nano/ATS_EX.ino.with_bootloader.hex)
 
 #### **Step 2: Install Drivers (If Needed)**
 
@@ -160,7 +111,7 @@ Most ATS-20(+) receivers use a CH340 chip for USB communication. If your compute
 
 1.  Launch `xLoader.exe` from the folder where you extracted it
 2.  Configure the settings precisely as follows:
-    *   **Hex file:** Click the `...` button and select the `ATS_EX.ino.eightanaloginputs.hex` file you downloaded
+    *   **Hex file:** Click the `...` button and select the `ATS_EX.ino.hex` file you downloaded
     *   **Device:** Select `Duemilanove/Nano(ATmega328)`. This is correct for most ATS-20+ boards, which use an old bootloader
     *   **COM Port:** Select the port number you found in Device Manager
     *   **Baud rate:** Set to `57600`
@@ -174,8 +125,12 @@ Most ATS-20(+) receivers use a CH340 chip for USB communication. If your compute
 
 1.  Click the **Upload** button
 2.  The receiver's lights may flash during the process. Wait for it to complete
-3.  xLoader will display a message like "30xxx bytes uploaded" at the bottom of the window when finished
-4.  Your receiver should restart automatically with the new firmware. On the first boot after an update it may show **"MEM RESET"** (or **"MEM WEAR"** if EEPROM is worn) - this is normal.
+3.  xLoader will display a message like "30720 bytes uploaded" at the bottom of the window when finished
+4.  Your receiver should restart automatically with the new firmware
+
+> **📌 About settings and memory when updating to v7.2.1:**
+> *   Coming from **v7.2**: settings, favorites and band states are kept (the EEPROM layout is unchanged, `APP_VERSION` stays 72)
+> *   Coming from **v7.1.x or older**: the first boot performs a one-time factory reset because the EEPROM layout changed in v7.2; the screen briefly shows **"MEM RESET"** (or **"MEM WEAR"** if the EEPROM cell is worn) - this is normal
 
 **Installation is complete!**
 
@@ -212,6 +167,7 @@ This manual provides a comprehensive overview of the ATS-20+ EX firmware's featu
     *   [The Settings Menu: A Deep Dive](#33-the-settings-menu-a-deep-dive)
 5.  **Section 4: Maintenance & Support**
     *   [Factory Reset (EEPROM Reset)](#41-factory-reset-eeprom-reset)
+    *   [Building from Source](#42-building-from-source)
 6.  **Section 5: Experimental Features**
     *   [CW (Morse Code) Decoder](#51-cw-morse-code-decoder-experimental)
 7.  **Quick Reference Button Chart**
@@ -251,7 +207,7 @@ The UI is based on the **Active Command** concept: short-press a button to selec
   * Set `DIS` in Settings to enable automatic display timeout.
   * When auto-off triggers, the screen is turned off and CPU goes into a low-power mode.
   * To wake the screen: press any button or rotate the encoder.
-  * **Wake rule:** the first wake press does not always trigger a “real action” (to avoid accidental toggles). `AGC` is the “safe” wake button.
+  * **Wake rule:** the first wake press does not always trigger a "real action" (to avoid accidental toggles). `AGC` is the "safe" wake button.
 
 ---
 
@@ -259,24 +215,24 @@ The UI is based on the **Active Command** concept: short-press a button to selec
 
 * **Default behavior (no active command):**
   * Rotate the encoder to tune frequency.
-  * In AM/FM tuning uses the current step grid (1k/5k/9k/10k… or FM 5/10/100).
+  * In AM/FM tuning uses the current step grid (1k/5k/9k/10k... or FM 5/10/100).
   * In SSB/CW tuning is fine-tuning via BFO logic (smooth rollover at band edges).
 
 * **Step selection (Active Command):**
-  1. Short-press **`STEP`** → the STEP label becomes highlighted (active command).
+  1. Short-press **`STEP`** -> the STEP label becomes highlighted (active command).
   2. Rotate the encoder to change the step size.
   3. Short-press the encoder button to exit immediately or wait for timeout (about 3 seconds).
   
 * **Notes:**
   * AM and FM steps are sent to the chip (hardware step).
-  * SSB/CW “step” controls BFO tuning resolution (the chip always uses 1 kHz base step internally).
+  * SSB/CW "step" controls BFO tuning resolution (the chip always uses 1 kHz base step internally).
 
 ---
 
 #### **1.3. Volume Control & Mute**
 
 * **Quick adjustment (Active Command):**
-  * Short-press **`VOL+`** → volume becomes active (highlighted).
+  * Short-press **`VOL+`** -> volume becomes active (highlighted).
   * Rotate the encoder to change volume.
 
 * **Continuous adjustment:**
@@ -287,14 +243,14 @@ The UI is based on the **Active Command** concept: short-press a button to selec
   * When muted, the volume field shows **` M`** (not `0`).
 
 * **FM volume compensation:**
-  * `FVA` reduces FM volume in software so switching AM↔FM feels consistent.
+  * `FVA` reduces FM volume in software so switching AM<->FM feels consistent.
 
 ---
 
 #### **1.4. Band Navigation**
 
 * **Band selection (Active Command):**
-  * Short-press **`BAND+`** → band becomes active (highlighted).
+  * Short-press **`BAND+`** -> band becomes active (highlighted).
   * Rotate the encoder to jump between band slots.
 
 * **Continuous band cycling:**
@@ -313,7 +269,7 @@ The UI is based on the **Active Command** concept: short-press a button to selec
 #### **1.5. Mode Switching (AM/SSB/CW)**
 
 * **Short-press `MODE`** to cycle modes:
-  * `AM` → `LSB/USB` → `CW` → `AM`
+  * `AM` -> `LSB/USB` -> `CW` -> `AM`
 * Mode switching is disabled on FM bands (FM always stays FM).
 * Long-press `MODE` actions depend on mode:
   * **LSB/USB:** Sync toggle
@@ -350,6 +306,8 @@ The UI is based on the **Active Command** concept: short-press a button to selec
 
 The receiver includes a lightweight RDS decoder that displays RadioText (RT) from FM broadcast stations directly on the OLED screen.
 
+> **⚠️ v7.2.1 default:** `ENABLE_RDS_MINI` is set to `0` to fit both improved patches. To enable RDS MINI, set `ENABLE_RDS_MINI 1`, `PATCH_EX_AM 0` and `PATCH_EX_SSB 1` in `Defines.h`, then rebuild the firmware. When disabled, the long-press MODE action in FM mode does nothing.
+
 *   **How to Enable:**
     1.  Tune to an FM station.
     2.  **Press and hold the `MODE` button** for 1-2 seconds. An **`RS`** hint will appear on the screen confirming RDS MINI UI is active.
@@ -362,11 +320,11 @@ The receiver includes a lightweight RDS decoder that displays RadioText (RT) fro
 *   **Important Notes:**
     *   RDS is available **only in FM mode**. The decoder is automatically disabled when switching to AM/SSB/CW and re-enabled when returning to FM (if it was previously toggled on).
     *   Not all FM stations transmit RadioText data. If no text appears after several seconds on a strong station, that station may not be broadcasting RT.
-    *   The RDS state (on/off) is **not saved to EEPROM** — it resets to off on every power cycle.
+    *   The RDS state (on/off) is **not saved to EEPROM** - it resets to off on every power cycle.
     *   The decoder processes only **Group 2A and 2B** (RadioText). It does not display station name (PS), clock, or program type.
     *   RDS decoding requires a reasonably strong FM signal. On weak or noisy signals the text may appear garbled or not appear at all. The decoder will clear stale text after 6 seconds of signal loss.
 
-*   **Compile-Time Control:** RDS MINI can be disabled entirely by setting `ENABLE_RDS_MINI 0` in `Defines.h`. This saves approximately 500 bytes of Flash. When disabled, the long-press MODE action in FM mode does nothing.
+*   **Compile-Time Control:** RDS MINI can be enabled or disabled at compile time via `ENABLE_RDS_MINI` in `Defines.h`. When enabled, it costs approximately 500 bytes of Flash. In v7.2.1 it is disabled by default (`ENABLE_RDS_MINI 0`) to make room for both improved patches.
 
 ---
 
@@ -377,8 +335,8 @@ The receiver includes a lightweight RDS decoder that displays RadioText (RT) fro
 Scanning uses the SI4735 hardware seek. It is available only when the encoder button is configured for scanning.
 
 *   **Enable first:** In the Settings Menu set `SCN` to **On**.
-    *   `SCN = On`  → encoder short press starts scan *(AM/FM only)*
-    *   `SCN = Off` → encoder short press opens **STEP** command *(classic behavior)*
+    *   `SCN = On`  -> encoder short press starts scan *(AM/FM only)*
+    *   `SCN = Off` -> encoder short press opens **STEP** command *(classic behavior)*
 
 *   **Start scan:** On **AM** or **FM**, short-press the **encoder button**.
     *   Scan direction follows your last tuning direction (up/down).
@@ -416,7 +374,7 @@ Maximum: **20 favorites** total (shared across all bands).
     * Rotate the encoder to move through the list (3 items per page).
 
 *   **Tune to selected favorite:**
-    * **Short-press the encoder button** → receiver reconfigures and tunes to the saved station.
+    * **Short-press the encoder button** -> receiver reconfigures and tunes to the saved station.
 
 *   **Delete favorite:**
     * **Short-press `BW`** in the Favorites menu (deletes the selected entry).
@@ -442,9 +400,9 @@ The Settings Menu is the main place to configure how the receiver behaves (audio
 ---
 
 #### **Menu Layout**
-- **5 pages**, **6 items per page** (**30 settings total**)
-- Each page is a **2×3 grid**
-- The header shows the current page: `SETTINGS N|5`
+- **6 pages**, up to **6 items per page** (**32 settings total**; page 6 holds 2 items)
+- Pages 1-5 are a **2x3 grid**; page 6 uses its first row only
+- The header shows the current page: `SETTINGS N|6`
 
 ---
 
@@ -454,8 +412,8 @@ The menu has two modes: **Navigate** and **Edit**.
 1) **Navigate (default when you enter)**
 - Rotate the encoder to move between items  
 - The movement order depends on `NAV`:
-  - `ROW`: left → right, then next row (reading order)
-  - `COL`: top → bottom, then next column
+  - `ROW`: left -> right, then next row (reading order)
+  - `COL`: top -> bottom, then next column
 
 2) **Edit**
 - **Short press the encoder button** to toggle Edit mode for the selected item
@@ -464,7 +422,7 @@ The menu has two modes: **Navigate** and **Edit**.
 - Short press encoder again to stop editing (stays in the menu)
 
 3) **Switch Pages**
-- Short press **`BAND+`** to cycle pages (1 → 2 → 3 → 4 → 5 → 1)
+- Short press **`BAND+`** to cycle pages (1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 1)
 
 ---
 
@@ -521,11 +479,11 @@ The menu has two modes: **Navigate** and **Edit**.
 | Name | Detailed Description | Recommended Values | Mode Availability | Type | Range |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | `SCR` | **Screen Brightness**<br>OLED display brightness control.<br>• `1-3`: Night/dark room use<br>• `4-6`: Indoor daylight<br>• `7-10`: Bright conditions<br>**Battery tip:** Lower brightness significantly extends battery life. | **Indoor:** `4-6`<br>**Night:** `2-3`<br>**Daylight:** `7-9` | All modes | Number | `1`..`10` |
-| `SPT` | **Signal Meter Display (4 modes)**<br>• `RSS`: raw RSSI number (0–99)<br>• `SPT`: S-meter (S0..S9+)<br>• `R+B`: RSSI + thin bar graph *(requires `ENABLE_SIGNAL_BAR 1`)*<br>• `S+B`: S-meter + thin bar graph *(requires `ENABLE_SIGNAL_BAR 1`)*<br>**Note:** If `ENABLE_SIGNAL_BAR 0`, bar modes behave like their non-bar variants. | **Default:** `RSS` | All modes | Selection | `RSS`, `SPT`, `R+B`, `S+B` |
+| `SPT` | **Signal Meter Display (4 modes)**<br>• `RSS`: raw RSSI number (0-99)<br>• `SPT`: S-meter (S0..S9+)<br>• `R+B`: RSSI + thin bar graph *(requires `ENABLE_SIGNAL_BAR 1`)*<br>• `S+B`: S-meter + thin bar graph *(requires `ENABLE_SIGNAL_BAR 1`)*<br>**Note:** If `ENABLE_SIGNAL_BAR 0`, bar modes behave like their non-bar variants. | **Default:** `RSS` | All modes | Selection | `RSS`, `SPT`, `R+B`, `S+B` |
 | `SWU` | **Shortwave Units**<br>Frequency display format for SW bands.<br>• `kHz`: 14205 kHz (traditional)<br>• `MHz`: 14.205 MHz (modern)<br>**Preference:** Purely cosmetic - choose what you're used to. | **Traditional:** `kHz`<br>**Modern:** `MHz` | AM/SSB/CW only<br>**"---" in FM** | Switch | `kHz` / `MHz` |
 | `DIS` | **Display Auto-Off Timer**<br>Saves battery by turning off screen after inactivity.<br>**Radio keeps playing** with screen off!<br>**Wake up:** Press any button<br>**Good practice:** Use 10-15 minutes for battery savings. | **Default:** `OFF`<br>**Battery save:** `10m` or `15m` | All modes | Selection | `OFF`, `10m`, `15m`, `30m`, `60m` |
 | `RSI` | **AM RSSI polling** *(click/noise workaround)*<br>• `OFF`: disable AM-family RSSI updates (reduces periodic clicks)<br>• `ON`: enable AM-family RSSI updates | **Default:** `OFF` | AM/SSB/CW only<br>**"---" in FM** | Switch | `ON` / `OFF` |
-| `NAV` | **Menu Navigation Pattern**<br>How encoder moves through settings.<br>• `ROW`: Left→Right then down (like reading)<br>• `COL`: Top→Bottom in columns (traditional)<br>**Try both:** ROW is usually faster for accessing items. | **Default:** `ROW`<br>**Traditional:** `COL` | All modes | Switch | `ROW` / `COL` |
+| `NAV` | **Menu Navigation Pattern**<br>How encoder moves through settings.<br>• `ROW`: Left->Right then down (like reading)<br>• `COL`: Top->Bottom in columns (traditional)<br>**Try both:** ROW is usually faster for accessing items. | **Default:** `ROW`<br>**Traditional:** `COL` | All modes | Switch | `ROW` / `COL` |
 
 ---
 
@@ -538,7 +496,16 @@ The menu has two modes: **Navigate** and **Edit**.
 | `BAP` | **Battery Monitor Pin**<br>Selects which analog pin reads battery voltage.<br>**Default firmware mapping:** A2<br>**Alternative:** A1<br>**How to test:** Battery % should show realistic values. | **Default:** `A2`<br>**Alternative:** `A1` | All modes | Selection | `A2` / `A1` |
 | `SCN` | **Encoder Button Function**<br>What happens when you short-press the encoder.<br>• `On`: Start frequency scanning *(AM/FM only)*<br>• `Off`: Open step size menu (classic)<br>**Note:** Scan is blocked in SSB/CW. | **Recommended:** `On` | All modes | Switch | `On` / `Off` |
 | `FVA` | **FM Volume Compensation**<br>Reduces FM volume to match AM/SSB levels.<br>**Problem:** FM broadcasts are often much louder<br>**Solution:** Set to 5-10 to balance volume across modes<br>**Fine-tune:** Adjust until mode switches don't require volume changes. | **Default:** `0`<br>**Typical:** `5-10` | All modes | Number | `0`..`15` |
-| `SWL` | **SW Link**<br>Links **STEP** and **BW** settings across all SW band segments.<br><br>**What it does:**<br>• Shortwave (SW) is split into many segments (band slots). Normally each segment can store its own STEP/BW values.<br>• When `SWL` is **On**, all SW segments share the same STEP/BW values (they are kept in sync automatically).<br><br>**How it works:**<br>• Any STEP/BW change you make while you are on an SW segment becomes the “master” value and is copied to all other SW segments.<br>• This happens immediately after changing STEP/BW (no need to save/reboot).<br><br>**Why it is useful:**<br>• No surprise filter/step changes when you move between SW broadcast and ham segments.<br>• Keeps tuning behavior consistent across the entire 1.7–30 MHz range.<br><br>**Notes:**<br>• Affects only SW segments (LW/MW and FM are not linked).<br>• Frequency memories per segment stay independent — only STEP/BW are linked. | **Default:** `Off` | All modes | Switch | `On` / `Off` |
+| `SWL` | **SW Link**<br>Links **STEP** and **BW** settings across all SW band segments.<br><br>**What it does:**<br>• Shortwave (SW) is split into many segments (band slots). Normally each segment can store its own STEP/BW values.<br>• When `SWL` is **On**, all SW segments share the same STEP/BW values (they are kept in sync automatically).<br><br>**How it works:**<br>• Any STEP/BW change you make while you are on an SW segment becomes the "master" value and is copied to all other SW segments.<br>• This happens immediately after changing STEP/BW (no need to save/reboot).<br><br>**Why it is useful:**<br>• No surprise filter/step changes when you move between SW broadcast and ham segments.<br>• Keeps tuning behavior consistent across the entire 1.7-30 MHz range.<br><br>**Notes:**<br>• Affects only SW segments (LW/MW and FM are not linked).<br>• Frequency memories per segment stay independent - only STEP/BW are linked. | **Default:** `Off` | All modes | Switch | `On` / `Off` |
+
+---
+
+#### **Page 6: Advanced RF** *(Low-level DSP controls, added in v7.2)*
+
+| Name | Detailed Description | Recommended Values | Mode Availability | Type | Range |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `AGS` | **SSB AGC Speed**<br>How fast the RF AGC attack and release react in SSB/CW (SI4735 properties `0x3700`/`0x3701`, AN332 Rev 0.8 Amendment).<br>• `FST`: attack 4, release 24 (233 dB/s) - reacts quickly to QSB and flutter<br>• `NRM`: attack 8, release 60 (93 dB/s) - chip default<br>• `SLW`: attack 16, release 140 (40 dB/s) - slower recovery, more stable audio on weak signals<br>Written to the chip on every SSB/CW mode entry by `applySsbAgcSpeed()`. | **Default:** `NRM`<br>**Fast fading:** `FST`<br>**Weak signals:** `SLW` | SSB/CW only<br>**"---" in AM/FM** | Selection | `FST` / `NRM` / `SLW` |
+| `SMR` | **AM/SSB Soft Mute Rate**<br>How fast soft mute engages and releases (SI4735 property `0x3300`, AN332 p.158; rate = value x 4.35 dB/s).<br>• `FST`: 128 - almost instant muting between stations<br>• `NRM`: 64 - chip default<br>• `SLW`: 32 - gentle transitions, better for music<br>One shared setting for the whole AM family; applied on mode entry together with the other soft mute parameters. | **Default:** `NRM`<br>**Music listening:** `SLW`<br>**Fast scanning:** `FST` | AM/SSB/CW only<br>**"---" in FM** | Selection | `FST` / `NRM` / `SLW` |
 
 ---
 
@@ -565,7 +532,8 @@ The menu has two modes: **Navigate** and **Edit**.
 > *   **SW AFC:** The `SWA` setting only activates on Shortwave bands (1.7-30 MHz) while in AM mode. It helps track drifting broadcast stations but should be disabled for SSB/CW.
 > *   **Navigation Styles:** The `NAV` setting affects only the Settings menu navigation, not the main screen or Favorites list.
 > *   **Mode Indicators:** Settings showing "---" are not functional in the current mode, helping you focus on relevant parameters only.
-> *   **RDS MINI:** The RDS RadioText feature is controlled via long-press MODE in FM mode, not through the Settings menu. Its state resets on power cycle. It costs approximately 500 bytes of Flash and can be disabled at compile time with `ENABLE_RDS_MINI 0`.
+> *   **RDS MINI:** The RDS RadioText feature is controlled via long-press MODE in FM mode, not through the Settings menu. Its state resets on power cycle. It costs approximately 500 bytes of Flash and can be enabled at compile time with `ENABLE_RDS_MINI 1` (in v7.2.1 it is `0` by default to fit both improved patches).
+> *   **AGS / SMR (added in v7.2):** Both are chip-level DSP controls applied on every mode entry. `AGS` works in SSB/CW only; `SMR` is one shared setting for the whole AM family (AM/SSB/CW).
 
 ---
 
@@ -581,6 +549,33 @@ This procedure resets all settings, band states, and clears all saved favorites 
 4.  The screen will display **"MEM RESET"** on first boot after reset (or **"MEM WEAR"** if EEPROM is worn).
 
 **Alternative Method:** If the encoder button is faulty, you can perform a reset by **holding the `AGC` button** during power-on instead.
+
+---
+
+#### **4.2. Building from Source**
+
+The release build fills the ATmega328P flash completely (30720 of 30720 bytes). If you plan to modify the firmware, or your toolchain produces a slightly larger image, free some space first with the toggles below.
+
+**Toolchain:** avr-gcc 7.3.0 with Arduino AVR core 1.8.x (Visual Micro, Arduino IDE or PlatformIO). Project flags: `-Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -Wl,--relax -mcall-prologues -fno-jump-tables`.
+
+**Memory report of the release build:**
+
+| Resource | Used | Total | Headroom |
+| :--- | :--- | :--- | :--- |
+| Flash | 30720 (100.0%) | 30720 | 0 B |
+| RAM | 1567 (76.5%) | 2048 | 481 B |
+| EEPROM | 432 | 1024 | 592 B |
+
+**Space-saving toggles in `Defines.h`** (each removes a cosmetic feature only, receiver behavior is untouched):
+
+| Toggle | Effect | Frees |
+| :--- | :--- | :--- |
+| `ENABLE_EEPROM_RESET_MSG 0` | Hides the one-time "MEM RESET" boot message | ~70 B |
+| `ENABLE_SPLASH_CREDITS_SCROLL 0` | Disables the scrolling credits line on the splash screen | ~90 B |
+
+**Feature toggles:** `ENABLE_SIGNAL_BAR 1` (on by default), `ENABLE_RDS_MINI 0`, `ENABLE_GAME 0`, `ENABLE_CW_DECODER 0`, `PATCH_EX_AM 1`, and `PATCH_EX_SSB` / `PATCH_EX_SSB_NEW` (only one of the two SSB patch sets may be enabled at a time).
+
+**Patch files are self-contained:** each patch carries its own line count and segmentation in a single PROGMEM table (`ssb_patch_segments` / `am_patch_segments`), so swapping a patch or a revision means replacing its `.h` file without any firmware edits.
 
 ---
 
@@ -660,8 +655,8 @@ For decoder testing at 600Hz, 30WPM try: `A A A A A / T T T T T / E E E E E / N 
 **Morse Timing Engine:**
 - **Dot length:** Adaptive from 2-6 blocks (28-84ms)
 - **Dash/Dot ratio:** ITU standard 3:1 with tolerance for hand-keying
-- **Letter gap:** 1.5× dot length
-- **Word gap:** 4.5× dot length
+- **Letter gap:** 1.5x dot length
+- **Word gap:** 4.5x dot length
 - **Symbol timeout:** 140ms auto-flush for incomplete characters
 
 **Decoder Features:**
@@ -701,7 +696,7 @@ For decoder testing at 600Hz, 30WPM try: `A A A A A / T T T T T / E E E E E / N 
 
 | Button | Short Press (Tap) | Long Press (Hold 1-2 sec) |
 | :--- | :--- | :--- |
-| **`MODE`** | Cycle Mode (`AM`→`SSB`→`CW`) | Toggle Sync *(LSB/USB)* / CW Decoder *(CW, only if `ENABLE_CW_DECODER 1`)* / Toggle RDS *(FM)* |
+| **`MODE`** | Cycle Mode (`AM`->`SSB`->`CW`) | Toggle Sync *(LSB/USB)* / CW Decoder *(CW, only if `ENABLE_CW_DECODER 1`)* / Toggle RDS *(FM)* |
 | **`STEP`** | Activate Step selection | Open/Close Favorites Menu |
 | **`BW`** | Activate Bandwidth selection | Switch Sideband *(SSB/CW only)* |
 | **`BAND+`** | Activate Band selection | Cycle bands up continuously |
@@ -715,12 +710,11 @@ For decoder testing at 600Hz, 30WPM try: `A A A A A / T T T T T / E E E E E / N 
 
 If you encounter difficulties with the new versions, you can temporarily roll back and download the version you like best using:
 
-```
 https://github.com/diqezit/ats20_ats_ex/archive/<commit_hash>.zip
-```
+
 
 Where **`<commit_hash>`** is copied from the list of commits at:
-[https://github.com/diqezit/ats20\_ats\_ex/commits/mod\_no\_rds/](https://github.com/diqezit/ats20_ats_ex/commits/mod_no_rds/)
+[https://github.com/diqezit/ats20_ats_ex/commits/mod_no_rds](https://github.com/diqezit/ats20_ats_ex/commits/mod_no_rds/)
 
 This way you will get the firmware archive of the desired version.
 

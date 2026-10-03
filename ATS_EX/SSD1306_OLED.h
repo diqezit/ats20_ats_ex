@@ -301,7 +301,8 @@ template <int _TYPE, int _BUFF = OLED_NO_BUFFER>
 class GyverOLED {
 public:
     // Constructor
-    GyverOLED(uint8_t address = OLED_I2C_ADDR_DEFAULT) : _address(address) {}
+    constexpr GyverOLED(uint8_t address = OLED_I2C_ADDR_DEFAULT)
+        : _address(address), _invState(0), _x(0), _y(0) {}
 
     // =================================================================================
     // ===== Service Functions =========================================================

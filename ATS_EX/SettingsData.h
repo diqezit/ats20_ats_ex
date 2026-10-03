@@ -410,13 +410,12 @@ int8_t g_modeSettings[MODE_SETTINGS_COUNT][MODE_CONTEXT_COUNT];
 
 // Full page pattern (6 items) left column first, then right
 #define NAV_PAGE6_ORDER(B)   (B)+0, (B)+2, (B)+4, (B)+1, (B)+3, (B)+5
-#define NAV_PAGE6_REVERSE(B) (B)+0, (B)+3, (B)+1, (B)+4, (B)+2, (B)+5
 
 // Partial page pattern (5 items) page 5 has no slot 29
 #define NAV_PAGE5_ORDER(B)   (B)+0, (B)+2, (B)+4, (B)+1, (B)+3
-#define NAV_PAGE5_REVERSE(B) (B)+0, (B)+3, (B)+1, (B)+4, (B)+2
 
 // Navigation position to Physical settings index
+// inverse mapping is computed on the fly in getNextSettingIndex()
 const uint8_t g_navColFirstOrder[SETTINGS_MAX] PROGMEM = {
     NAV_PAGE6_ORDER(0),
     NAV_PAGE6_ORDER(6),
@@ -426,20 +425,8 @@ const uint8_t g_navColFirstOrder[SETTINGS_MAX] PROGMEM = {
     30, 31
 };
 
-// Physical settings index to Navigation position
-const uint8_t g_navColFirstReverse[SETTINGS_MAX] PROGMEM = {
-    NAV_PAGE6_REVERSE(0),
-    NAV_PAGE6_REVERSE(6),
-    NAV_PAGE6_REVERSE(12),
-    NAV_PAGE6_REVERSE(18),
-    NAV_PAGE6_REVERSE(24),
-    30, 31
-};
-
 #undef NAV_PAGE6_ORDER
-#undef NAV_PAGE6_REVERSE
 #undef NAV_PAGE5_ORDER
-#undef NAV_PAGE5_REVERSE
 
 // get next setting index with wrap-around based on NAV mode
 static inline uint8_t getNextSettingIndex(uint8_t current, int16_t delta) {
@@ -451,7 +438,9 @@ static inline uint8_t getNextSettingIndex(uint8_t current, int16_t delta) {
         next = (int16_t)current + delta;
     } else {
         // column order
-        next = (int16_t)pgm_read_byte(&g_navColFirstReverse[current]) + delta;
+        uint8_t p = 0;
+        while (pgm_read_byte(&g_navColFirstOrder[p]) != current) p++;
+        next = (int16_t)p + delta;
     }
 
     while (next < 0) next += SETTINGS_MAX;
@@ -471,7 +460,7 @@ static inline uint8_t getNextSettingIndex(uint8_t current, int16_t delta) {
 
 // UI texts (PROGMEM), fixed width 3 + '\0'
 const char paramTexts[][4] PROGMEM = {
-  "AUT", " ON", "OFF", " 50", " 75", "kHz", "MHz",
+  "AUT", " ON", "OFF", " 50", " 75", U_KHZ, U_MHZ,
   "RSS", "SNR", "100", "50%",
   "10m", "15m", "30m", "60m",
   "ROW", "COL",

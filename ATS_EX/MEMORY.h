@@ -458,7 +458,7 @@ static void readAllReceiverInformation() {
 
     loadActiveStateFromBand();
 
-    if (isSSB()) loadSSBPatch();
+    if (isSSB()) loadPatch();
 
     saveLastFreq();
 }

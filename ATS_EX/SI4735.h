@@ -1012,37 +1012,43 @@ protected:
     int rdsTextAdress2B; //!<  rds_buffer2B current position
     int rdsTextAdress0A; //!<  rds_buffer0A current position
 
-    bool rdsEndGroupA = false;
-    bool rdsEndGroupB = false;
+    bool rdsEndGroupA;
+    bool rdsEndGroupB;
 
-    int16_t deviceAddress = SI473X_ADDR_SEN_LOW; //!<  Stores the current I2C bus address.
+    int16_t deviceAddress;                          //!<  Stores the current I2C bus address.
 
     // Delays
-    uint16_t maxDelaySetFrequency = MAX_DELAY_AFTER_SET_FREQUENCY; //!< Stores the maximum delay after set frequency command (in ms).
-    uint16_t maxDelayAfterPowerUp = MAX_DELAY_AFTER_POWERUP;      //!< Stores the maximum delay you have to setup after a power up command (in ms).
-    unsigned long maxSeekTime = MAX_SEEK_TIME;                     //!< Stores the maximum time (ms) for a seeking process. Defines the maximum seeking time.
+    uint16_t maxDelaySetFrequency;                  //!< Stores the maximum delay after set frequency command (in ms).
+    uint16_t maxDelayAfterPowerUp;                  //!< Stores the maximum delay you have to setup after a power up command (in ms).
+    unsigned long maxSeekTime;                      //!< Stores the maximum time (ms) for a seeking process. Defines the maximum seeking time.
+
+    uint8_t lastMode;                               //!<  Stores the last mode used.
+
+    uint8_t currentAvcAmMaxGain;                    //!<  Stores the current Automatic Volume Control Gain for AM.
+    uint8_t currentClockType;                       //!< Stores the current clock type used (Crystal or REF CLOCK)
+    uint8_t ctsIntEnable;
+    uint8_t gpo2Enable;
+
+    uint16_t refClock;                              //!< Frequency of Reference Clock in Hz.
+    uint16_t refClockPrescale;                      //!< Prescaler for Reference Clock (divider).
+    uint8_t refClockSourcePin;                      //!< 0 = RCLK pin is clock source; 1 = DCLK pin is clock source.
+
+    uint8_t volume;                                 //!< Stores the current vlume setup (0-63).
+
+    uint8_t currentAudioMode;                       //!< Current audio mode used (ANALOG or DIGITAL or both)
+    uint8_t currentSsbStatus;
+    int8_t audioMuteMcuPin;
 
     uint8_t lastTextFlagAB;
-    uint8_t resetPin; //!<  pin used on Arduino Board to RESET the Si47XX device
+    uint8_t resetPin;                 //!<  pin used on Arduino Board to RESET the Si47XX device
 
-    uint8_t currentTune; //!<  tell the current tune (FM, AM or SSB)
+    uint8_t currentTune;              //!<  tell the current tune (FM, AM or SSB)
 
     uint16_t currentMinimumFrequency; //!<  minimum frequency of the current band
     uint16_t currentMaximumFrequency; //!<  maximum frequency of the current band
     uint16_t currentWorkFrequency;    //!<  current frequency
 
     uint16_t currentStep; //!<  Stores the current step used to increment or decrement the frequency.
-
-    uint8_t lastMode = -1; //!<  Stores the last mode used.
-
-    uint8_t currentAvcAmMaxGain = DEFAULT_CURRENT_AVC_AM_MAX_GAIN; //!<  Stores the current Automatic Volume Control Gain for AM.
-    uint8_t currentClockType = XOSCEN_CRYSTAL;                     //!< Stores the current clock type used (Crystal or REF CLOCK)
-    uint8_t ctsIntEnable = 0;
-    uint8_t gpo2Enable = 0;
-
-    uint16_t refClock = 32768;     //!< Frequency of Reference Clock in Hz.
-    uint16_t refClockPrescale = 1; //!< Prescaler for Reference Clock (divider).
-    uint8_t refClockSourcePin = 0; //!< 0 = RCLK pin is clock source; 1 = DCLK pin is clock source.
 
     si47x_frequency currentFrequency; //!<  data structure to get current frequency
     si47x_set_frequency currentFrequencyParams;
@@ -1054,12 +1060,6 @@ protected:
     si47x_ssb_mode currentSSBMode;           //!<  indicates if USB or LSB
 
     si473x_powerup powerUp;
-
-    uint8_t volume = 32; //!< Stores the current vlume setup (0-63).
-
-    uint8_t currentAudioMode = SI473X_ANALOG_AUDIO; //!< Current audio mode used (ANALOG or DIGITAL or both)
-    uint8_t currentSsbStatus;
-    int8_t audioMuteMcuPin = -1;
 
     void waitInterrupr(void);
     si47x_status getInterruptStatus();
