@@ -404,3 +404,9 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# Arduino build output - ignore everything except firmware .hex files
+ATS_EX/build/*
+!ATS_EX/build/arduino.avr.nano/
+ATS_EX/build/arduino.avr.nano/*
+!ATS_EX/build/arduino.avr.nano/*.hexATS_EX/*.hex

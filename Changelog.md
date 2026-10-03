@@ -3234,3 +3234,48 @@ This modification completely eliminates the audio pops that occur when switching
   
 ------------------------------------------------------------------------------------------------------------
 
+### **MOD_NO_RDS v7.2.1**
+
+`SI4735.cpp / Defines.h / SI4735_fixed.h / RadioControl.h / patch_ssb_old.h / patch_ssb_new.h / patch_am.h`
+
+---
+
+## Added
+
+- **Improved AM patch (`patch_am.h`)**
+  - Fixes annoying audio dips during frequency tuning in AM/SSB modes
+  - Uses rev0 because it occupies the smallest memory footprint on the device
+  - Based on NeekeetosNee's research, using den3rats compression
+
+- **New SSB patch by NeekeetosNee (audio improvements and fixes)**
+  - Compile-time selection via `PATCH_EX_SSB_NEW` - only one patch data set is ever linked into flash
+  - Stored in the den3rats compressed format instead of the full 8-byte array
+  - Whole data set fits into the receiver with the RDS function disabled
+
+- **New SSB patch is disabled by default**
+  - Release build ships the stable old SSB patch and the improved AM patch, with RDS disabled
+  - To enable the new SSB patch, build the firmware yourself: set `PATCH_EX_SSB_NEW 1` and `ENABLE_RDS_MINI 0` in `Defines.h`
+
+- **Patch-specific data lives in the patch `.h` itself (`ssb_patch_segments` / `am_patch_segments`)**
+  - Each patch file carries its own line count AND segmentation in a single PROGMEM table
+  - Swapping a patch or revision = replacing its `.h` — no firmware edits, no `Defines.h` constants
+
+---
+
+## Changed
+
+- **RDS disabled by default**
+  - `ENABLE_RDS_MINI` set to `0` to free up ~500B Flash
+  - The improved AM patch (`PATCH_EX_AM`) is activated instead, solving the tuning audio dips
+
+- **`setAM()` / `setFM()` USBLSB fix moved into the library (`SI4735.cpp`)**
+  - Stale SSB sideband bits (ARG1) are cleared directly in the 4-argument library functions
+
+- **Unified compressed patch loader is now table-driven**
+  - `downloadCompressedPatch()` reads the line count and segmentation from the patch's own `*_patch_segments` table
+  - No `is_am` flag, no hardcoded boundaries, no `*_PATCH_LINES_COUNT` in `Defines.h`
+  - Callers updated: `patchDownload()` / `configureAMMode()` now pass `*_patch_segments` (breaking change for custom callers)
+
+
+
+------------------------------------------------------------------------------------------------------------

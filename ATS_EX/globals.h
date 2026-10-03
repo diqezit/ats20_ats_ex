@@ -170,7 +170,7 @@ static inline void cwViewTask();
 static void applyBandConfiguration(bool extraSSBReset = false);
 static void setAmpState(bool on);
 static void applyBrightness();
-static void loadSSBPatch();
+static void loadPatch();
 
 static void handleDelayedFrequencyUpdate();
 static void handleSignalAndStereoUpdates(uint32_t, uint16_t);
@@ -221,6 +221,7 @@ struct __attribute__((packed)) FavoriteStation {
 
 bool g_voltagePinConnected = false;
 bool g_ssbLoaded = false;
+bool g_amLoaded = false;            // AM patch is in chip RAM
 bool g_stereoStatus = false;
 bool autoDisplayOff = false;
 bool g_squelchCutoff = false;

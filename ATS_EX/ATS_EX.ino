@@ -23,7 +23,8 @@
 // Special thanks for testing, ideas, and contributions to:
 // - d3n3rats
 // - jh4vaj
-//
+// - NeekeetosNee (patches)
+// 
 // --- Technical Reference ---
 // For in-depth Si473x programming details, see Skyworks AN332:
 // https://www.skyworksinc.com/-/media/Skyworks/SL/documents/public/application-notes/AN332.pdf
@@ -42,7 +43,15 @@ GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 
 #include "Rotary.h"
 #include "SimpleButton.h"
-#include "patch_ssb_compressed.h"
+
+#if PATCH_EX_SSB_NEW
+#include "patch_ssb_new.h"
+#elif PATCH_EX_SSB
+#include "patch_ssb_old.h"
+#endif
+#if PATCH_EX_AM
+#include "patch_am.h"
+#endif
 
 #include "Globals.h"
 #include "Utils.h"

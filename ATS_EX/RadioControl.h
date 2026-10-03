@@ -368,11 +368,11 @@ static void handleSquelch(void) {
 // ===== HARDWARE CONFIGURATION =============
 // ==========================================
 
-// =-=-=-=-=-=-=-=-= SSB patch helpers =-=-=-=-=-=-=-=-=
+// =-=-=-=-=-=-=-=-= SSB/AM patch helpers =-=-=-=-=-=-=-=-=
 
 // mute amp and switch to fast I2C before patch
 // avoids speaker pop and speeds up the large transfer
-INLINE_AI void ssbPatchEnter() {
+INLINE_AI void patchEnter() {
     setAmpState(false);
     g_si4735.setI2CFastModeCustom(I2C_SSB_PATCH_SPEED_HZ);
     g_si4735.queryLibraryId();
@@ -382,28 +382,30 @@ INLINE_AI void ssbPatchEnter() {
 
 // keep patch selection centralized so build flag picks format
 // keeps code size in check
-INLINE_AI void ssbPatchDownload() {
-#if PATCH_EX_SSB
+// result is checked by the caller when needed; here we just transfer
+INLINE_AI void patchDownload() {
+#if PATCH_EX_SSB || PATCH_EX_SSB_NEW
     // compact path - compressed patch + 0x15 offset table to reduce flash
     g_si4735.downloadCompressedPatch(
         compressed_ssb_patch_content,  // PROGMEM data
+        ssb_patch_segments,            // [0] = line count then (end + base) pairs
         cutoff_places_offsets,         // PROGMEM table
         cutoff_nonzero_lengths
     );
 #else
     // legacy patch + absolute 0x15 line list
-    g_si4735.downloadCompressedPatch(
+    // SI4735_fixed hides base overloads
+    g_si4735.SI4735::downloadCompressedPatch(
         ssb_patch_content,
         sizeof(ssb_patch_content),
         cmd_0x15,
-        sizeof(cmd_0x15)
-    );
+        sizeof(cmd_0x15));
 #endif
 }
 
 // restore normal I2C and apply SSB defaults before unmute
 // prevents clicks and ensures DSP is in a safe state
-INLINE_AI void ssbPatchFinalize() {
+INLINE_AI void patchFinalize() {
     const Band* band = currentBandPtr();
 
     g_si4735.setSSBConfig(
@@ -413,15 +415,18 @@ INLINE_AI void ssbPatchFinalize() {
 
     applyI2CSpeed(); // restore OLED speed after SSB patch / alr overwrites TWBR/TWSR
     g_ssbLoaded = true;
+#if PATCH_EX_AM
+    g_amLoaded = false;  // chip reset in patchEnter() wiped the AM patch
+#endif
     setAmpState(true);
 }
 
 // load SSB patch at runtime so SSB mode is available
 // mute amp during patch + use fast I2C for throughput + restore band BW then unmute
-static void loadSSBPatch() {
-    ssbPatchEnter();
-    ssbPatchDownload();    // returns void, cannot check success
-    ssbPatchFinalize();    // sets g_ssbLoaded = true unconditionally
+static void loadPatch() {
+    patchEnter();
+    patchDownload();    // returns void, cannot check success
+    patchFinalize();    // sets g_ssbLoaded = true unconditionally
 }
 
 // Applies user-defined FM soft mute parameters
@@ -611,6 +616,9 @@ static void NOINLINE configureFMMode(const Band& current_band) {
     setSeekThresholds(true);
 
     g_ssbLoaded = false;
+#if PATCH_EX_AM
+    g_amLoaded = false;   // FM power-up discards any AM/SSB patch
+#endif
 
     si_set(FM_CHANNEL_FILTER, (uint16_t)(uint8_t)current_band.bwIdxFM);
     applyFmDeEmphasisFromSetting();
@@ -626,6 +634,25 @@ static void configureAMMode(const Band& current_band, uint16_t minFreq,
     g_currentMode = AM;
     g_ssbLoaded = false;
 
+#if PATCH_EX_AM
+    // chip must run the patched AM firmware before AM commands are sent
+
+    if (!g_amLoaded) {
+        patchEnter();
+        g_si4735.downloadCompressedPatch(
+            compressed_am_patch_content,
+            am_patch_segments,           // [0] = line count then (end + base) pairs
+            am_cutoff_places_offsets,
+            am_cutoff_nonzero_lengths);
+
+        delay(25);             // patched DSP boots after the last row
+        applyI2CSpeed();       // restore OLED bus speed (patch ran at fast I2C)
+        g_ssbLoaded = false;   // chip reset wiped the SSB patch
+        g_amLoaded = true;
+        // amp stays muted — unmute at the end after DSP is configured
+    }
+#endif
+
     // Set primary mode and frequency
     g_si4735.setAM(
         minFreq,
@@ -640,6 +667,10 @@ static void configureAMMode(const Band& current_band, uint16_t minFreq,
     // Soft Mute settings
     si_set(AM_SOFT_MUTE_SLOPE, 2);  // 2 is recommended by SiLabs
     applySoftMuteSettings(modeCtx);
+
+#if PATCH_EX_AM
+    setAmpState(true);
+#endif
 }
 
 // Centralizes setup for properties shared between AM and SSB to avoid duplication
@@ -677,7 +708,7 @@ static void configureSSBMode(
 
     // reload patch only when requested to save time
     if (!g_ssbLoaded || extraSSBReset)
-        loadSSBPatch();
+        loadPatch();
 
     bool isCW = (g_currentMode == CW);
     uint8_t sync = isCW ? 0 : getSettingParam(Sync);
@@ -1279,7 +1310,7 @@ static inline void performModeCycle(int8_t bw) {
 
     case AM:
         g_currentMode = g_lastSsbMode;
-        loadSSBPatch();
+        loadPatch();
         bw = clampBwIdx(bw, false);
         current_band.bwIdxSSB = bw;
         g_currentBFO = g_savedSsbBfo[g_bandIndex];

@@ -809,6 +809,8 @@ void SI4735::setFM() {
  */
 void SI4735::setAM(uint16_t fromFreq, uint16_t toFreq, uint16_t initialFreq, uint16_t step) {
 
+    currentFrequencyParams.arg.USBLSB = 0;   // clear stale SSB sideband bits (ARG1)
+
     currentMinimumFrequency = fromFreq;
     currentMaximumFrequency = toFreq;
     currentStep = step;
@@ -845,6 +847,9 @@ void SI4735::setAM(uint16_t fromFreq, uint16_t toFreq, uint16_t initialFreq, uin
  * @param step step used to go to the next channel
  */
 void SI4735::setFM(uint16_t fromFreq, uint16_t toFreq, uint16_t initialFreq, uint16_t step) {
+
+    currentFrequencyParams.arg.USBLSB = 0;   // clear stale SSB sideband bits (ARG1)
+
     currentMinimumFrequency = fromFreq;
     currentMaximumFrequency = toFreq;
     currentStep = step;

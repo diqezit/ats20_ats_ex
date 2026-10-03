@@ -887,12 +887,14 @@ bool formatAliasByIndex(char* buf,
     int8_t param) {
     switch (idx) {
 
+#if ENABLE_BATTERY_MONITOR
     case SettingsIndex::BATT_PIN: {
         strcpy_P(buf,
             (param == 1) ? BATT_PIN_NAME_ALT
             : BATT_PIN_NAME_DEFAULT);
         return true;
     }
+#endif
 
     default:
         return false;
