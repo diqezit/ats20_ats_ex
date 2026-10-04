@@ -205,6 +205,7 @@ static inline void initSi4735() {
 
 // pull all saved band/frequency/mode data from EEPROM into RAM
 static inline void loadReceiverConfig() {
+    bandStateInit();
     readAllReceiverInformation();
 }
 
