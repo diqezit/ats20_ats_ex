@@ -68,23 +68,6 @@ static inline void uiScrollPrint21AtRow(TOled& o, uint8_t row,
     o.print(b);
 }
 
-// Draw a 21-column window directly from a PROGMEM string.
-template<typename TOled>
-static inline void uiScrollPrint21AtRow_P(TOled& o, uint8_t row,
-    const char* src, uint8_t len, uint8_t start) {
-    constexpr uint8_t WIN = 21;
-
-    char b[WIN + 1];
-    for (uint8_t i = 0; i < WIN; ++i) {
-        const uint8_t pos = (uint8_t)(start + i);
-        b[i] = (pos < len) ? (char)pgm_read_byte(src + pos) : ' ';
-    }
-    b[WIN] = 0;
-
-    o.setCursor(0, row);
-    o.print(b);
-}
-
 // =====================================================================================
 // Core State, Tuning & EEPROM Utilities
 // =====================================================================================
