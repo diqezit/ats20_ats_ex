@@ -599,31 +599,31 @@ static void showBandwidth() {
 // =-=-=-=-=-=-=-=-= Frequency Helpers =-=-=-=-=-=-=-=-=
 
 // forward declare to allow helper to call it before definition
-static int renderFrequencyString(const char* freqDisplay,
-    int startX,
-    int pixelY);
+static uint8_t renderFrequencyString(const char* freqDisplay,
+    uint8_t startX,
+    uint8_t pixelY);
 
 // compute main seven segment width
 // precompute to align right without building string twice
-static inline uint16_t freqMainWidth(uint16_t khzBFO,
+static inline uint8_t freqMainWidth(uint16_t khzBFO,
     uint8_t dotPos,
     bool ssbMode) {
     uint8_t mainChars = ssbMode ? ilen(khzBFO) : UI_FREQ_MAIN_WIDTH_AMFM;
     bool hasDot = (!ssbMode && dotPos);
     uint8_t totalChars = mainChars + (hasDot ? 1 : 0);
 
-    uint16_t w = (uint16_t)mainChars * SEVEN_SEG_DIGIT_WIDTH;
+    uint8_t w = (uint8_t)(mainChars * SEVEN_SEG_DIGIT_WIDTH);
     if (hasDot) w += SEVEN_SEG_DOT_WIDTH;
     if (totalChars > 1) {
-        w += (uint16_t)(totalChars - 1) * DIGIT_SPACING;
+        w += (uint8_t)((totalChars - 1) * DIGIT_SPACING);
     }
     return w;
 }
 
 // draw SSB tail ".dd" next to main block
 // keep spacing identical to main digits
-static int drawSSBTailDigits(int startX, int pixelY, uint16_t tailBFO) {
-    int curX = startX + 1;
+static uint8_t drawSSBTailDigits(uint8_t startX, uint8_t pixelY, uint16_t tailBFO) {
+    uint8_t curX = (uint8_t)(startX + 1);
 
     oled_digit('.', curX, pixelY);
     curX += SEVEN_SEG_DOT_WIDTH + DIGIT_SPACING;
@@ -639,9 +639,9 @@ static int drawSSBTailDigits(int startX, int pixelY, uint16_t tailBFO) {
 
 // attach SSB tail only for SSB modes
 // AM FM skip to save cycles
-static inline int drawSSBTailIfNeeded(bool ssb,
-    int x,
-    int y,
+static inline uint8_t drawSSBTailIfNeeded(bool ssb,
+    uint8_t x,
+    uint8_t y,
     uint16_t tail) {
     return ssb ? drawSSBTailDigits(x, y, tail) : x;
 }
@@ -657,10 +657,12 @@ uint8_t freqLeftOffset(bool ssbMode) {
 // choose start X so main block stays right aligned to unit label
 // use left offset as lower bound to avoid clipping left edge
 INLINE_AI
-int freqStartX(uint16_t totalWidth,
+uint8_t freqStartX(uint8_t totalWidth,
     uint8_t leftOff) {
-    int aligned = (int)UI_UNIT_X_PX - DIGIT_SPACING - (int)totalWidth;
-    return aligned > (int)leftOff ? aligned : (int)leftOff;
+    const uint8_t rightLimit = UI_UNIT_X_PX - DIGIT_SPACING;
+    return totalWidth <= (uint8_t)(rightLimit - leftOff)
+        ? (uint8_t)(rightLimit - totalWidth)
+        : leftOff;
 }
 
 // visible length of numeric part
@@ -678,12 +680,12 @@ void freqComputeLayout(bool ssbMode,
     uint16_t khzBFO,
     uint8_t dotPos,
     uint8_t leftOff,
-    uint16_t& mainWidth,
-    uint16_t& tailWidth,
-    uint16_t& totalWidth,
-    int& startX) {
+    uint8_t& mainWidth,
+    uint8_t& tailWidth,
+    uint8_t& totalWidth,
+    uint8_t& startX) {
     mainWidth = freqMainWidth(khzBFO, dotPos, ssbMode);
-    tailWidth = ssbMode ? UI_SSB_TAIL_WIDTH : 0;
+    tailWidth = ssbMode ? (uint8_t)UI_SSB_TAIL_WIDTH : 0;
     totalWidth = mainWidth + tailWidth;
     startX = freqStartX(totalWidth, leftOff);
 }
@@ -692,11 +694,11 @@ void freqComputeLayout(bool ssbMode,
 // keep tail attach logic local
 INLINE_AI
 void freqDrawMainAndTail(const char* freqDisplay,
-    int startX,
-    int pixelY,
+    uint8_t startX,
+    uint8_t pixelY,
     bool ssbMode,
     uint16_t tailBFO) {
-    int endX = renderFrequencyString(freqDisplay, startX, pixelY);
+    uint8_t endX = renderFrequencyString(freqDisplay, startX, pixelY);
     drawSSBTailIfNeeded(ssbMode, endX, pixelY, tailBFO);
 }
 
@@ -755,7 +757,7 @@ static void renderClearOrBlink(bool cleanDisplay,
     uint8_t len,
     uint8_t prevLen,
     uint8_t leftOff,
-    int pixelY) {
+    uint8_t pixelY) {
     if (cleanDisplay) {
         clearBox(0, pixelY, UI_SCREEN_W, SEVEN_SEG_DIGIT_HEIGHT);
     } else if (len != prevLen) {
@@ -783,10 +785,10 @@ static void renderUnit(bool ssbMode,
 
 // draw main numeric block char by char
 // spacing matches seven segment glyph metrics
-static int renderFrequencyString(const char* freqDisplay,
-    int startX,
-    int pixelY) {
-    int curX = startX;
+static uint8_t renderFrequencyString(const char* freqDisplay,
+    uint8_t startX,
+    uint8_t pixelY) {
+    uint8_t curX = startX;
 
     for (const char* p = freqDisplay; *p; ++p) {
         char ch = *p;
@@ -795,7 +797,7 @@ static int renderFrequencyString(const char* freqDisplay,
             : SEVEN_SEG_DIGIT_WIDTH) + DIGIT_SPACING;
     }
     // remove trailing spacing to align SSB tail attach point
-    return curX - DIGIT_SPACING;
+    return (uint8_t)(curX - DIGIT_SPACING);
 }
 
 // =-=-=-=-=-=-=-=-= Main Frequency Render Function =-=-=-=-=-=-=-=-=
@@ -821,8 +823,7 @@ static void showFrequency(bool cleanDisplay = false) {
 
     uint8_t len = visibleLen(ssbMode, khzBFO);
 
-    uint16_t mainWidth, tailWidth, totalWidth;
-    int startX;
+    uint8_t mainWidth, tailWidth, totalWidth, startX;
     freqComputeLayout(ssbMode, khzBFO, dotPos, leftOff,
         mainWidth, tailWidth, totalWidth, startX);
 
