@@ -192,7 +192,6 @@ inline void rdsMiniTask(uint32_t) {}
 // =================================================================================================
 
 struct Band {
-    char name[4];
     uint16_t minimumFreq;
     uint16_t maximumFreq;
     BandType bandType;
@@ -411,8 +410,6 @@ static void bandStateInit() {
         Band& band = g_bandList[i];
         const BandDefaults* defaults = &g_bandDefaults[i];
 
-        memcpy_P(band.name, defaults->name, 3);
-        band.name[3] = (i == 3 || i == 5) ? 'm' : ' ';
         band.maximumFreq = pgm_read_word(&defaults->maximumFreq);
         band.minimumFreq = (i == 0) ? 150
             : (i == g_lastBand) ? 6400

@@ -354,12 +354,12 @@ void updateStereoIndicator() {
 static void showBandTag() {
     RETURN_IF_SETTINGS_ACTIVE();
 
-    const Band* band = currentBandPtr();
-
     const bool inv = (g_activeCommand == CMD_BAND) && (g_currentMode != FM);
 
     static char name_buffer[5];
-    memcpy(name_buffer, band->name, UI_BAND_NAME_LEN);
+    const BandDefaults* defaults = &g_bandDefaults[g_bandIndex];
+    memcpy_P(name_buffer, defaults->name, 3);
+    name_buffer[3] = (g_bandIndex == 3 || g_bandIndex == 5) ? 'm' : ' ';
     name_buffer[UI_BAND_NAME_LEN] = '\0';
 
     drawInverted(0, 0, name_buffer, inv);
@@ -1118,16 +1118,14 @@ static const char s_splashCredits[] PROGMEM = APP_SPLASH_CREDITS_TEXT;
 
 // scrolling caption used as "loading bar" replacement
 static void splashCreditsScroll(uint16_t total_ms) {
-    char msg[sizeof(s_splashCredits)];
-    strcpy_P(msg, (PGM_P)s_splashCredits);
-
     const uint8_t msgLen = (uint8_t)(sizeof(s_splashCredits) - 1);
     const uint8_t steps = (uint8_t)(msgLen + 3);   // small gap at the end
 
     uint16_t elapsed = 0;
 
     for (uint8_t pos = 0; pos < steps; ++pos) {
-        uiScrollPrint21AtRow(oled, UI_SPLASH_ANIM_ROW, msg, msgLen, pos);
+        uiScrollPrint21AtRow_P(oled, UI_SPLASH_ANIM_ROW,
+            s_splashCredits, msgLen, pos);
 
         delay(SPLASH_CREDITS_STEP_MS);
         elapsed = (uint16_t)(elapsed + SPLASH_CREDITS_STEP_MS);
