@@ -30,6 +30,8 @@ Compiler and linker flags used for firmware compilation
 -fno-exceptions
 -g3
 -ggdb3
+-fira-algorithm=priority
+-fno-tree-scev-cprop
 ```
 
 Notes:
@@ -41,6 +43,10 @@ Notes:
 - `-fno-unwind-tables -fno-asynchronous-unwind-tables` : drop unwind metadata
 - `-fno-rtti -fno-threadsafe-statics -fno-exceptions` : C++ runtime trimming
 - `-g3 -ggdb3` : full debug info (for objdump/avr-nm analysis)
+- `-fira-algorithm=priority` : alternative register allocator (priority instead of Chaitin-Briggs), fewer spill/reload sequences
+- `-fno-tree-scev-cprop` : disable constant propagation out of loops
+
+> `-fira-algorithm=priority` and `-fno-tree-scev-cprop` are heuristic-only flags: they do not change program semantics, only code generation.
 
 ---
 
@@ -79,6 +85,7 @@ avr-g++ -c -Os -ffunction-sections -fdata-sections -flto -fuse-linker-plugin \
   -fno-fat-lto-objects -fno-jump-tables -mcall-prologues \
   -fno-unwind-tables -fno-asynchronous-unwind-tables \
   -fno-rtti -fno-threadsafe-statics -fno-exceptions -g3 -ggdb3 \
+  -fira-algorithm=priority -fno-tree-scev-cprop \
   -mmcu=atmega328p -DF_CPU=16000000L -DARDUINO_AVR_NANO \
   -I. -o file.o file.cpp
 ```

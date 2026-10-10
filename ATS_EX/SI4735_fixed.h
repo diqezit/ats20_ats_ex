@@ -19,6 +19,7 @@ private:
 public:
 
     using SI4735::lastMode;
+    using SI4735::currentTune;
 
     // ====================================================================================
     // ============================== SEEK ================================================
@@ -338,7 +339,8 @@ public:
         sendSSBModeProperty();
     }
 
-#if TEST
+// #if TEST
+
     // -----------------------------------------------------------------------------
     // Fast SI4735 reset via direct port manipulation
     // Avoids Arduino pinMode()/digitalWrite() to keep wiring_digital.c.o unlinked
@@ -404,5 +406,5 @@ public:
 
         return 0;
     }
-#endif
+// #endif
 };

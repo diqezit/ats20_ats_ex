@@ -87,13 +87,13 @@ static inline uint16_t freqDelta16(uint16_t, uint16_t);
 static inline bool freqRateLimitOk(uint32_t);
 static inline bool freqTimeElapsed(uint32_t);
 static inline bool freqForceUpdate(uint16_t);
-static inline void applyCompensatedVolume();
+static void applyVolume();
+INLINE_AI uint8_t getPageStartIndex(uint8_t page);
 static inline bool amRssiPollingAllowed(uint16_t);
 uint16_t currentCmdTimeoutMs();
 static inline bool shouldSaveStateOnIdle(uint16_t);
 static inline uint16_t displayTimeoutS(uint8_t);
 static inline void persistModeSetting(ModeSettingType, SettingsIndex);
-static inline uint8_t settingsPageStart(uint8_t page);
 static inline void settingsEnter();
 static inline void settingsExitAndSave();
 

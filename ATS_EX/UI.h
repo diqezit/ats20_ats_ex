@@ -1004,8 +1004,8 @@ void settingPosFromIndex(uint8_t idx,
     uint8_t page,
     uint8_t& x,
     uint8_t& y) {
-    const uint8_t base = (uint8_t)((page - 1) * UI_SETTINGS_PER_PAGE); // page is 1-based
-    const uint8_t local = (uint8_t)(idx - base);                       // 0..5
+    const uint8_t base = getPageStartIndex(page);        // page is 1-based
+    const uint8_t local = (uint8_t)(idx - base);         // 0..5
     calcSettingPos(local, x, y);
 }
 
@@ -1093,16 +1093,13 @@ static void showSettingsTitle() {
     oled_inv(false);
 }
 
-// draw current page only
-// precompute base to cut math per item and guard end of list
+// draw current page only — bounds come from the page-start table
 static void showSettings() {
-    const uint8_t base =
-        (uint8_t)((g_SettingsPage - 1) * UI_SETTINGS_PER_PAGE);
-    for (uint8_t i = 0; i < UI_SETTINGS_PER_PAGE; ++i) {
-        const uint8_t cur = (uint8_t)(base + i);
-        if (cur >= SETTINGS_MAX) break;
+    const uint8_t base = getPageStartIndex(g_SettingsPage);
+    const uint8_t end = getPageStartIndex(g_SettingsPage + 1);
+
+    for (uint8_t cur = base; cur < end; ++cur)
         DrawSetting(cur, true);
-    }
 }
 
 

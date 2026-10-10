@@ -611,6 +611,7 @@ static void configureAMMode(const Band& current_band, uint16_t minFreq,
     if (!g_amLoaded) {
 
         g_si4735.lastMode = AM_CURRENT_MODE;   // keep setAM() from rebooting chip + patch are alive
+        g_si4735.currentTune = AM_TUNE_FREQ;
 
         patchEnter();
         g_si4735.downloadCompressedPatch(
@@ -787,7 +788,7 @@ static void applyBandConfiguration(bool extraSSBReset) {
         showStatus(true);
     }
 
-    applyCompensatedVolume();
+    applyVolume();
     applyBandAmpMute(switchingBetweenFMandAM, false);
 
     syncPreviousFreq();

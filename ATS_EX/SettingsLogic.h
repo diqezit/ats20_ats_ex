@@ -54,28 +54,10 @@ static inline void siSetSettingProp(uint16_t prop, SettingsIndex idx) {
 // Volume & Audio helpers
 // =================================================================================================
 
-// FM signals sound louder than other audio sources
-// Apply a user-set offset for consistent volume feel
-// Caches last HW value to skip redundant I2C writes
-static void applyCompensatedVolume() {
-    static uint8_t s_last = 0xFF;
-    uint8_t t = 0;
-
-    if (g_muteVolume) {
-        t = 0;
-    } else {
-        t = g_volume;
-
-        if (isFm()) {
-            uint8_t o = getSettingParam(FmVolAdjust);
-            t = (o >= t) ? 0 : (uint8_t)(t - o);
-        }
-    }
-
-    if (t != s_last) {
-        s_last = t;
-        g_si4735.setVolume(t);
-    }
+// Write the current volume to the chip (0 when muted)
+// chip power-cycle resets RX_VOLUME - so always re-send
+static void applyVolume() {
+    g_si4735.setVolume(g_muteVolume ? 0 : g_volume);
 }
 
 // Volume control
@@ -87,7 +69,7 @@ static void doVolume(int8_t v) {
     } else {
         g_muteVolume = 0;
     }
-    applyCompensatedVolume();
+    applyVolume();
     showVolume();
 }
 
@@ -336,13 +318,6 @@ TOGGLE_ONLY(doBatteryPinSelect, BATT_PIN)
 
 // Settings: Scan button switch
 TOGGLE_ONLY(doScanSwitch, ScanSwitch)
-
-// Settings: FM Volume Adjust
-// Fine-tunes the software volume reduction for FM mode to match AM/SSB levels
-HANDLER(doFmVolAdjust) {
-    SWITCH_TO(FmVolAdjust, 0, 15);
-    if (isFm()) applyCompensatedVolume();
-}
 
 // Settings: SW Link
 // Links step and bandwidth across all SW sub bands when enabled

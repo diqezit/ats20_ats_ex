@@ -3372,3 +3372,24 @@ This modification completely eliminates the audio pops that occur when switching
   - Added index remapping `index -= 12` in `showStep()` for steps >= 12
 
 ------------------------------------------------------------------------------------------------------------
+
+### **MOD_NO_RDS v7.3**
+
+`Defines.h / SettingsData.h / SettingsLogic.h / Input.h / RadioControl.h / SI4735_fixed.h / UI.h / Globals.h / ATS_EX.ino`
+
+---
+
+## Changed
+
+- **FmVolAdjust (FM loudness compensation) removed from the settings map**
+  - `applyCompensatedVolume()` deleted `applyVolume()` sends `g_muteVolume ? 0 : g_volume` on every call - unnecesary - no cached hardware value
+  - EEPROM map re-packed
+
+## Fixed
+
+- **Mode/band switching: AM patch, FM→AM silence, volume restore**
+  - `configureAMMode()` sets `lastMode = AM_CURRENT_MODE` before loading the patch, so `setAM()` skips the power cycle and tunes on the patched DSP
+  - `currentTune` exposed in `SI4735_fixed.h` and reset to `AM_TUNE_FREQ` after the patch load in `configureAMMode()` preventing FM tune commands from reaching the AM chip
+  - `applyVolume()` called unconditionally from `applyBandConfiguration()` re-writing current volume and mute state after every switch
+  
+------------------------------------------------------------------------------------------------------------

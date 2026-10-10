@@ -17,19 +17,19 @@
 //
 // 26 - 289      | 264 B    | 264 B    | 0 B     | EEPROM_BANDS_START             | 44 bands state (44 * 6B)
 //
-// 290 - 321     | 32 B     | 32 B     | 0 B     | EEPROM_SETTINGS_START          | Settings params (SETTINGS_MAX=32)
+// 290 - 320     | 31 B     | 31 B     | 0 B     | EEPROM_SETTINGS_START          | Settings params (SETTINGS_MAX=31)
 //
-// 322 - 330     | 9 B      | 9 B      | 0 B     | EEPROM_MODE_SETTINGS_START     | Mode-dependent settings (3*3)
+// 321 - 329     | 9 B      | 9 B      | 0 B     | EEPROM_MODE_SETTINGS_START     | Mode-dependent settings (3*3)
 //
-// 331 - 430     | 100 B    | 100 B    | 0 B     | EEPROM_FAVORITES_START         | Favorites (20 * 5B)  (*see note)
-// 431           | 1 B      | 1 B      | 0 B     | EEPROM_FAVORITES_COUNT         | Favorite count
+// 330 - 429     | 100 B    | 100 B    | 0 B     | EEPROM_FAVORITES_START         | Favorites (20 * 5B)  (*see note)
+// 430           | 1 B      | 1 B      | 0 B     | EEPROM_FAVORITES_COUNT         | Favorite count
 //
-// 432 - 1023    | 592 B    | 0 B      | 592 B   | (free)                         | Free space (ATmega328P EEPROM)
+// 431 - 1023    | 593 B    | 0 B      | 593 B   | (free)                         | Free space (ATmega328P EEPROM)
 // =================================================================================================
 
 // ReceiverHeader:      7 bytes
 // BandStatePacked:     6 bytes (x44 bands = 264 bytes)
-// Settings:            32 bytes used (SETTINGS_MAX = 32 items * 1 byte each)
+// Settings:            31 bytes used (SETTINGS_MAX = 31 items * 1 byte each)
 // ModeSettings:        9 bytes (MODE_SETTINGS_COUNT * MODE_CONTEXT_COUNT = 3 * 3)
 // FavoriteStation:     5 bytes (x20 stations = 100 bytes)
 // FavoritesCount:      1 byte
@@ -40,13 +40,13 @@ constexpr auto EEPROM_VERSION_ADDRESS = 1;
 
 constexpr auto EEPROM_HEADER_START = 10;                // Used: 7B   (reserved block is 16B: 10..25)
 constexpr auto EEPROM_BANDS_START = 26;                 // Used: 264B (26..289)
-constexpr auto EEPROM_SETTINGS_START = 290;             // Used: 32B  (290..321)
-constexpr auto EEPROM_MODE_SETTINGS_START = 322;        // Used: 9B   (322..330)
-constexpr auto EEPROM_FAVORITES_START = 331;            // Used: 100B (331..430)
-constexpr auto EEPROM_FAVORITES_COUNT = 431;            // Used: 1B   (431)
+constexpr auto EEPROM_SETTINGS_START = 290;             // Used: 31B  (290..320)
+constexpr auto EEPROM_MODE_SETTINGS_START = 321;        // Used: 9B   (321..329)
+constexpr auto EEPROM_FAVORITES_START = 330;            // Used: 100B (330..429)
+constexpr auto EEPROM_FAVORITES_COUNT = 430;            // Used: 1B   (430)
 
 // Increment APP_VERSION to force EEPROM reset due to layout changes
-constexpr auto APP_VERSION = 72;
+constexpr auto APP_VERSION = 73;
 
 
 // =================================================================================================
@@ -83,26 +83,26 @@ constexpr auto APP_VERSION = 72;
 // =================================================================================================
 
 // Display options
-#define ENABLE_SPLASH_SCREEN         1  // 1=show splash screen, 0=disable
-#define ENABLE_EEPROM_RESET_MSG      1  // 1=show EEPROM reset message, 0=disable
-#define ANIMATE_SPLASH               1  // 1=animate splash, 0=disable
-#define ENABLE_SPLASH_CREDITS_SCROLL 1  // splash credits (scrolling) set 0 to disable
+#define ENABLE_SPLASH_SCREEN         1    // 1=show splash screen, 0=disable
+#define ENABLE_EEPROM_RESET_MSG      1    // 1=show EEPROM reset message, 0=disable
+#define ANIMATE_SPLASH               1    // 1=animate splash, 0=disable
+#define ENABLE_SPLASH_CREDITS_SCROLL 1    // splash credits (scrolling) set 0 to disable
 
 // Features
-#define ENABLE_FAVORITES       1        // 1=Favorites enabled
-#define ENABLE_BATTERY_MONITOR 1        // 1=battery monitor enabled
-#define ENABLE_RDS_MINI        0        // 1=RDS RadioText on FM (requires ~500B Flash)
-#define ENABLE_SIGNAL_BAR      1        // 1=draw thin RSSI bar above frequency, 0=disable (~260B Flash)
-#define ENABLE_GAME            0        // 1=enable Pong mini game, 0=disable
-#define ENABLE_CW_DECODER      0        // EXPERIMENTAL: CW (Morse) decoder view
+#define ENABLE_FAVORITES             1    // 1=Favorites enabled
+#define ENABLE_BATTERY_MONITOR       1    // 1=battery monitor enabled
+#define ENABLE_RDS_MINI              1    // 1=RDS RadioText on FM (requires ~738B Flash)
+#define ENABLE_SIGNAL_BAR            1    // 1=draw thin RSSI bar above frequency, 0=disable (~260B Flash)
+#define ENABLE_GAME                  0    // 1=enable Pong mini game, 0=disable
+#define ENABLE_CW_DECODER            0    // EXPERIMENTAL: CW (Morse) decoder view
 
 // Build / debug
-#define PATCH_EX_SSB      1             // 1=highly compressed stable patch loader (recommended)
-#define PATCH_EX_SSB_NEW  0             // new SSB patch version with audio improvementnt and fixes (by NeekeetosNee)
-#define PATCH_EX_AM       1             // 1=AM patch with audio improvementnt and fixes (by NeekeetosNee)
+#define PATCH_EX_SSB                 1    // 1=highly compressed stable patch loader (recommended)
+#define PATCH_EX_SSB_NEW             0    // new SSB patch version with audio improvementnt and fixes (by NeekeetosNee)
+#define PATCH_EX_AM                  1    // 1=AM patch with audio improvementnt and fixes (by NeekeetosNee)
 
-#define TEST         1                  // Enables temporary test code paths / experiments
-#define DEBUG_MODE   0                  // 1=enable debug output (9600 baud), 0=disable
+#define TEST                         1    // Enables temporary test code paths / experiments
+#define DEBUG_MODE                   0    // 1=enable debug output (9600 baud), 0=disable
 
 #if (PATCH_EX_SSB) && (PATCH_EX_SSB_NEW)
 #error "Enable only one: PATCH_EX_SSB or PATCH_EX_SSB_NEW"
@@ -110,7 +110,7 @@ constexpr auto APP_VERSION = 72;
 
 // UI Strings
 
-#define APP_NAME_LINE1 F("ATS-20+ V7.2.2")
+#define APP_NAME_LINE1 F("ATS-20+ V7.3")
 #define APP_NAME_LINE2 F("ATS EX")
 
 #define APP_SPLASH_CREDITS_TEXT  APP_SPLASH_PAD "MOD_NO_RDS GITHUB.COM/DIQEZIT/ATS20_ATS_EX"

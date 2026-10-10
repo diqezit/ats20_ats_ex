@@ -269,26 +269,23 @@ static void handleBandDownShortPress() {
     if (g_settingsActive) noteUserActivity();
 }
 
-// Primary action toggles mute
-// saves current volume for seamless restore
+// Primary action toggles mute (saves volume for seamless restore)
 static void handleVolumeDownShortPress() {
     RETURN_IF_SETTINGS_ACTIVE();
     if (g_activeCommand == CMD_VOLUME) return;
 
-    // If currently muted - restore audio
+    // Mute saves the current volume
+    // unmute restores it
     if (g_muteVolume) {
         g_muteVolume = 0;
-        applyCompensatedVolume();
-        showVolume();
-        return;
+    } else if (g_volume) {
+        g_muteVolume = g_volume;
+    } else {
+        return; // nothing to mute
     }
 
-    // If not muted - store current user volume and mute
-    if (g_volume) {
-        g_muteVolume = g_volume;
-        applyCompensatedVolume();
-        showVolume();
-    }
+    applyVolume();
+    showVolume();
 }
 
 // Toggles display power or wakes it from sleep
@@ -435,13 +432,14 @@ void resetCommandMode() {
     }
 }
 
-// Calculate which settings page the index belongs to pages are 1-based
-// Each page holds 6 items
-// This uses a small math trick instead of index / 6
-// Works correctly while SETTINGS_MAX is 131 or less
+// Settings page (1-based) that owns given setting index
+// Pages are not uniform 6-multiples so use page-start table
 inline uint8_t calculateSettingsPage(uint8_t index) {
-    static_assert(SETTINGS_MAX <= 131, "calculateSettingsPage requires SETTINGS_MAX <= 131");
-    return (uint8_t)((((uint16_t)index * 43u) >> 8) + 1u);
+    uint8_t page = 1;
+    while (page < g_SettingsMaxPages &&
+           index >= getPageStartIndex(page + 1))
+        ++page;
+    return page;
 }
 
 // Draw updated settings on screen
