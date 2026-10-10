@@ -231,14 +231,9 @@ static inline void doBandwidth(uint8_t v) {
 
 // =-=-=-=-=-=-=-=-= Settings & Parameter Handlers =-=-=-=-=-=-=-=-=
 
-// compute first item index for 6-per-page layout
-static inline ALWAYS_INLINE uint8_t settingsPageStart(uint8_t page) {
-    return (uint8_t)(UI_SETTINGS_PER_PAGE * (page - 1));
-}
-
 // shared cursor reset for settings enter / page switch
 static void NOINLINE settingsResetCursor() {
-    g_SettingSelected = settingsPageStart(g_SettingsPage);
+    g_SettingSelected = getPageStartIndex(g_SettingsPage);
     g_SettingEditing = false;
 }
 
@@ -262,7 +257,7 @@ static inline ALWAYS_INLINE void settingsExitAndSave() {
     syncModeDependentSettings(false);
     g_settingsDirty = true;
     saveAllReceiverInformation();
-    showStatus();
+    showStatus(true);
 }
 
 // wrap pages and reset edit mode to avoid accidental write

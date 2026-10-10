@@ -8,7 +8,7 @@ private:
 
     // Read current frequency from last getStatus() response
     // and sync internal tracking variable
-    uint16_t __attribute__((noinline)) readStatusFreq() {
+    uint16_t NOINLINE readStatusFreq() {
         si47x_frequency f;
         f.raw.FREQH = currentStatus.resp.READFREQH;
         f.raw.FREQL = currentStatus.resp.READFREQL;
@@ -19,6 +19,7 @@ private:
 public:
 
     using SI4735::lastMode;
+    using SI4735::currentTune;
 
     // ====================================================================================
     // ============================== SEEK ================================================
@@ -338,7 +339,8 @@ public:
         sendSSBModeProperty();
     }
 
-#if TEST
+// #if TEST
+
     // -----------------------------------------------------------------------------
     // Fast SI4735 reset via direct port manipulation
     // Avoids Arduino pinMode()/digitalWrite() to keep wiring_digital.c.o unlinked
@@ -347,7 +349,7 @@ public:
     // If RESET_PIN moves to another pin — change port/bit below
     // -----------------------------------------------------------------------------
 
-    static void __attribute__((noinline)) delay10ms() {
+    static void NOINLINE delay10ms() {
         delay(10);
     }
 
@@ -404,5 +406,5 @@ public:
 
         return 0;
     }
-#endif
+// #endif
 };

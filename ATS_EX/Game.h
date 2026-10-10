@@ -134,13 +134,13 @@ static inline void gmPadCheck(int8_t& nx, int8_t ny) {
 }
 
 // =-=-=-=-=-=-=-=-= Core =-=-=-=-=-=-=-=-=
-__attribute__((noinline))
+NOINLINE
 static void gmRow(uint8_t row, const char* s) {
     oled.setCursor(0, row);
     oled.print(s);
 }
 
-__attribute__((noinline))
+NOINLINE
 static void gmServe(bool toRight) {
     gm.bx = G_MX;
     gm.by = G_MY;
@@ -150,13 +150,13 @@ static void gmServe(bool toRight) {
     gm.serve = G_SERVE_TICKS;
 }
 
-__attribute__((noinline))
+NOINLINE
 static void gmGoal(uint8_t& sc, bool serveDir) {
     if (sc < G_WIN) ++sc;
     gmServe(serveDir);
 }
 
-__attribute__((noinline))
+NOINLINE
 static void gmReset() {
     gm.aiY = gm.plY = G_MY;
     gm.scAI = gm.scPL = 0;
@@ -166,7 +166,7 @@ static void gmReset() {
 }
 
 // =-=-=-=-=-=-=-=-= Draw =-=-=-=-=-=-=-=-=
-__attribute__((noinline))
+NOINLINE
 static void gmDraw() {
     char ln[G_W + 1];
     ln[G_W] = '\0';
@@ -196,7 +196,7 @@ static inline void gmDrawAndSync() {
     gmDraw();
 }
 
-__attribute__((noinline))
+NOINLINE
 static void gmEndRound() {
     oled.setCursor(48, 4);
     oled.print(gmPlayerWon() ? F("WIN ") : F("LOSE"));

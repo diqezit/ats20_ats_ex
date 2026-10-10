@@ -40,7 +40,7 @@ static bool g_eepromBad = false;
 
 #if ENABLE_EEPROM_RESET_MSG
 // Notify user that settings have been reset to defaults
-static void drawEepromResetMsg() {
+static void NOINLINE drawEepromResetMsg() {
     oled_cls();
     oled_xy(37, 3);
     oled_puts(g_eepromBad ? F("MEM WEAR") : F("MEM RESET"));

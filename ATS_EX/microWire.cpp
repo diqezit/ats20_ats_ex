@@ -1,5 +1,10 @@
 #include "microWire.h"
 
+#ifndef NOINLINE
+#define NOINLINE __attribute__((noinline))
+#endif
+
+
 enum : uint8_t {
     TWI_ST_SLA_W_NACK = 0x20,
     TWI_ST_DATA_NACK = 0x30,
@@ -11,7 +16,7 @@ enum : uint8_t {
 
 // Wait for TWINT with about 30ms timeout at 16MHz
 // On timeout: reset TWI hardware and return 0
-static uint8_t __attribute__((noinline)) twiWaitTwintOrReset() {
+static uint8_t NOINLINE twiWaitTwintOrReset() {
     uint16_t n = 60000; // 26 ms timeout upon 16 MHz
     do {
         if (TWCR & _BV(TWINT)) return 1;
@@ -23,7 +28,7 @@ static uint8_t __attribute__((noinline)) twiWaitTwintOrReset() {
 }
 
 // Write command to TWCR and wait for completion
-static uint8_t __attribute__((noinline)) twiCommand(uint8_t cr) {
+static uint8_t NOINLINE twiCommand(uint8_t cr) {
     TWCR = cr;
     return twiWaitTwintOrReset();
 }
@@ -131,11 +136,11 @@ uint8_t TwoWire::read() {
     return TWDR;
 }
 
-uint8_t __attribute__((noinline)) TwoWire::requestFrom(uint8_t address, uint8_t length) {
+uint8_t NOINLINE TwoWire::requestFrom(uint8_t address, uint8_t length) {
     return requestFrom(address, length, true);
 }
 
-uint8_t __attribute__((noinline)) TwoWire::requestFrom(uint8_t address, uint8_t length, bool sendStop) {
+uint8_t NOINLINE TwoWire::requestFrom(uint8_t address, uint8_t length, bool sendStop) {
     TWI_CLEAR_FLAGS();
 
     _stop_after_request = sendStop;
@@ -197,13 +202,13 @@ void TwoWire::stop() {
     TWCR = (uint8_t)(_BV(TWSTO) | _BV(TWEN) | _BV(TWINT));
 }
 
-void __attribute__((noinline)) TwoWire::failAddressNack() {
+void NOINLINE TwoWire::failAddressNack() {
     _address_nack = true;
     _requested_bytes = 0;
     stop();
 }
 
-void __attribute__((noinline)) TwoWire::failDataNack() {
+void NOINLINE TwoWire::failDataNack() {
     _data_nack = true;
     _requested_bytes = 0;
     stop();

@@ -351,14 +351,14 @@ static inline void     goertzelProcessSample(int16_t sample, int16_t coeff,
     GoertzelState* st);
 static inline uint32_t goertzelGetPower(const GoertzelState* st);
 static uint32_t        calculateGoertzelPower(uint8_t bin)
-__attribute__((noinline));
+NOINLINE;
 static inline uint32_t findBestFrequencyPower(uint8_t currentBin);
 static uint8_t         sampleAndAnalyzeSignal()
-__attribute__((noinline));
+NOINLINE;
 
 // Signal analysis functions
 static inline bool    validateSignalBlock(uint16_t minVal, uint16_t maxVal);
-static uint8_t        fillBufferAndValidate() __attribute__((noinline));
+static uint8_t        fillBufferAndValidate() NOINLINE;
 static inline void    updateEnvelopeAndNoise(uint8_t magnitude);
 static inline bool    detectToneWithHysteresis();
 
@@ -383,7 +383,7 @@ static inline void addToMorsePattern(bool isDash);
 static inline char indexToChar(uint8_t i);
 static inline char lookupMorseCharacter();
 static inline char decodeMorseFromAccumulator();
-static void        flushCurrentSymbol() __attribute__((noinline));
+static void        flushCurrentSymbol() NOINLINE;
 static inline void processDecodedEvent(cw_event_t event);
 
 // State management functions

@@ -61,7 +61,7 @@ static inline uint8_t getBatteryPin() {
 
 // https://github.com/diqezit/ats20_ats_ex/issues/16
 
-static uint8_t __attribute__((noinline))
+static uint8_t NOINLINE
 calcBatterySegmentPct(uint16_t adc_value,
     uint16_t start_adc,
     uint8_t pct_delta,

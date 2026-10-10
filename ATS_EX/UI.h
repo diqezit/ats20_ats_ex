@@ -607,7 +607,8 @@ static void showBandwidth() {
 // forward declare to allow helper to call it before definition
 static uint8_t renderFrequencyString(const char* freqDisplay,
     uint8_t startX,
-    uint8_t pixelY);
+    uint8_t pixelY,
+    bool forceAll);
 
 // compute main seven segment width
 // precompute to align right without building string twice
@@ -635,10 +636,13 @@ static uint8_t drawSSBTailDigits(uint8_t startX, uint8_t pixelY, uint16_t tailBF
     oled_digit('.', curX, pixelY);
     curX += SEVEN_SEG_DOT_WIDTH + DIGIT_SPACING;
 
-    oled_digit('0' + (tailBFO / 10), curX, pixelY);
+    // tail is 0..99 (bfoSplitFreq) one 8-bit divmod
+    const DivMod10 dm = divmod10_u8((uint8_t)tailBFO);
+
+    oled_digit('0' + dm.q, curX, pixelY);
     curX += SEVEN_SEG_DIGIT_WIDTH + DIGIT_SPACING;
 
-    oled_digit('0' + (tailBFO % 10), curX, pixelY);
+    oled_digit('0' + dm.r, curX, pixelY);
     curX += SEVEN_SEG_DIGIT_WIDTH; // no spacing after last digit
 
     return curX;
@@ -704,8 +708,10 @@ void freqDrawMainAndTail(const char* freqDisplay,
     uint8_t startX,
     uint8_t pixelY,
     bool ssbMode,
-    uint16_t tailBFO) {
-    uint8_t endX = renderFrequencyString(freqDisplay, startX, pixelY);
+    uint16_t tailBFO,
+    bool forceAll) {
+
+    uint8_t endX = renderFrequencyString(freqDisplay, startX, pixelY, forceAll);
     drawSSBTailIfNeeded(ssbMode, endX, pixelY, tailBFO);
 }
 
@@ -758,22 +764,23 @@ static void prepareMainFreq(uint8_t displayMode,
 
 // =-=-=-=-=-=-=-=-= Frequency Rendering =-=-=-=-=-=-=-=-=
 
-// clear area only when needed
-// full clear on force or when width grows on digit count change
-static void renderClearOrBlink(bool cleanDisplay,
+// last drawn main frequency block (RAM only)
+// equal char = equal width, keeps cursor X in sync when skipping
+static char s_freqPrev[UI_FREQ_BUF_LEN];
+
+// clear box on force or digit count change
+// returns true when wiped - cache is stale / redraw all glyphs
+static bool renderClearOrBlink(bool cleanDisplay,
     uint8_t len,
     uint8_t prevLen,
-    uint8_t leftOff,
     uint8_t pixelY) {
-    if (cleanDisplay) {
+
+    if (cleanDisplay || len != prevLen) {
         clearBox(0, pixelY, UI_SCREEN_W, SEVEN_SEG_DIGIT_HEIGHT);
-    } else if (len != prevLen) {
-        // length change may leave stale pixels on the right
-        clearBox(leftOff,
-            pixelY,
-            UI_SCREEN_W - leftOff,
-            SEVEN_SEG_DIGIT_HEIGHT);
+        return true;
     }
+
+    return false;
 }
 
 // print unit in a row aligned to seven segment block
@@ -785,25 +792,32 @@ static void renderUnit(bool ssbMode,
 
     constexpr uint8_t row = (UI_FREQ_TOP_PX + SEVEN_SEG_DIGIT_HEIGHT - UI_CHAR_H) / UI_CHAR_H;
 
-    clearBox(UI_UNIT_X_PX, row * UI_CHAR_H, 3 * UI_CHAR_W, UI_CHAR_H);
+    // unit is always 3 chars
+    // overwrites previous text
     oled_xy(UI_UNIT_X_PX, row);
     oled_puts((__FlashStringHelper*)unit);
 }
 
 // draw main numeric block char by char
-// spacing matches seven segment glyph metrics
+// skip glyphs already on screen
+// only changed digits go over I2C
+// forceAll - box was wiped so redraw every glyph
 static uint8_t renderFrequencyString(const char* freqDisplay,
     uint8_t startX,
-    uint8_t pixelY) {
+    uint8_t pixelY,
+    bool forceAll) {
     uint8_t curX = startX;
 
-    for (const char* p = freqDisplay; *p; ++p) {
-        char ch = *p;
-        oled_digit(ch, curX, pixelY);
+    const char* p = freqDisplay;
+    for (char* c = s_freqPrev; char ch = *p; ++p, ++c) {
+        if (forceAll || ch != *c) {
+            oled_digit(ch, curX, pixelY);
+            *c = ch;
+        }
         curX += (ch == '.' ? SEVEN_SEG_DOT_WIDTH
             : SEVEN_SEG_DIGIT_WIDTH) + DIGIT_SPACING;
     }
-    // remove trailing spacing to align SSB tail attach point
+    // drop trailing spacing for SSB tail attach
     return (uint8_t)(curX - DIGIT_SPACING);
 }
 
@@ -836,9 +850,9 @@ static void showFrequency(bool cleanDisplay = false) {
 
     const uint8_t pixelY = UI_FREQ_TOP_PX;
 
-    renderClearOrBlink(cleanDisplay, len, prevLen, leftOff, pixelY);
+    const bool forceAll = renderClearOrBlink(cleanDisplay, len, prevLen, pixelY);
 
-    freqDrawMainAndTail(freqDisplay, startX, pixelY, ssbMode, tailBFO);
+    freqDrawMainAndTail(freqDisplay, startX, pixelY, ssbMode, tailBFO, forceAll);
     renderUnit(ssbMode, len, unit);
 
     prevLen = len;
@@ -1004,8 +1018,8 @@ void settingPosFromIndex(uint8_t idx,
     uint8_t page,
     uint8_t& x,
     uint8_t& y) {
-    const uint8_t base = (uint8_t)((page - 1) * UI_SETTINGS_PER_PAGE); // page is 1-based
-    const uint8_t local = (uint8_t)(idx - base);                       // 0..5
+    const uint8_t base = getPageStartIndex(page);        // page is 1-based
+    const uint8_t local = (uint8_t)(idx - base);         // 0..5
     calcSettingPos(local, x, y);
 }
 
@@ -1093,16 +1107,13 @@ static void showSettingsTitle() {
     oled_inv(false);
 }
 
-// draw current page only
-// precompute base to cut math per item and guard end of list
+// draw current page only — bounds come from the page-start table
 static void showSettings() {
-    const uint8_t base =
-        (uint8_t)((g_SettingsPage - 1) * UI_SETTINGS_PER_PAGE);
-    for (uint8_t i = 0; i < UI_SETTINGS_PER_PAGE; ++i) {
-        const uint8_t cur = (uint8_t)(base + i);
-        if (cur >= SETTINGS_MAX) break;
+    const uint8_t base = getPageStartIndex(g_SettingsPage);
+    const uint8_t end = getPageStartIndex(g_SettingsPage + 1);
+
+    for (uint8_t cur = base; cur < end; ++cur)
         DrawSetting(cur, true);
-    }
 }
 
 
@@ -1186,8 +1197,8 @@ void showSavedConfirmation() {
 // draw main status in stable order
 // frequency first so rest aligns to that layout
 void showStatus(bool cleanFreq) {
-    showSignalQuality();
     showFrequency(cleanFreq);
+    showSignalQuality();
     showModulation();
     showStep();
     showBandwidth();

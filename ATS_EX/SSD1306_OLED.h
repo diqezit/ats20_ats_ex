@@ -309,7 +309,7 @@ public:
     // =================================================================================
 
     // Sets up I2C and sends initialization commands to configure display parameters
-    void init(int __attribute__((unused)) sda = 0, int __attribute__((unused)) scl = 0) {
+    void init(int UNUSED sda = 0, int UNUSED scl = 0) {
         Wire.begin();
         Wire.setClock(I2C_BASE_HZ);
 
@@ -443,7 +443,7 @@ public:
     // =-=-=-=-=-=-=-=-= Mid-level data transfer =-=-=-=-=-=-=-=-=
 
     // send rectangular window of data to display
-    __attribute__((noinline))
+    NOINLINE
         void partialUpdate(uint8_t x, uint8_t y, uint8_t w, uint8_t h, const unsigned char* data) {
         uint8_t startPage;
         OLED_INT_PAGE_FROM_PIX(startPage, y);
@@ -571,7 +571,7 @@ public:
 private:
     // Core write without beginData()/endTransm() for batching
     // one glyph into an already open I2C data burst from print/write
-    __attribute__((noinline)) void writeCore(uint8_t data) {
+    NOINLINE void writeCore(uint8_t data) {
         if (_x + FONT_TOTAL > _maxX) return;  // clip so a long string cannot overwrite next UI field
 
         // invert fills pixels and gap as one cell

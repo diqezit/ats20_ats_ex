@@ -42,6 +42,11 @@
 
 #include "SI4735.h"
 
+#ifndef NOINLINE
+#define NOINLINE __attribute__((noinline))
+#endif
+
+
  /**
   * @brief Construct a new SI4735::SI4735
   *
@@ -416,7 +421,7 @@ void SI4735::waitToSend() { // func partially not orig and edited
  * @param uint8_t FUNC sets the receiver function have to be used [0 = FM Receive; 1 = AM (LW/MW/SW) and SSB (if SSB patch apllied)]
  * @param uint8_t OPMODE set the kind of audio mode you want to use.
  */
-void __attribute__((noinline)) SI4735::setPowerUp(uint8_t CTSIEN, uint8_t GPO2OEN, uint8_t PATCH, uint8_t XOSCEN, uint8_t FUNC, uint8_t OPMODE) {
+void NOINLINE SI4735::setPowerUp(uint8_t CTSIEN, uint8_t GPO2OEN, uint8_t PATCH, uint8_t XOSCEN, uint8_t FUNC, uint8_t OPMODE) {
     powerUp.arg.CTSIEN = CTSIEN;   // 1 -> Interrupt anabled;
     powerUp.arg.GPO2OEN = GPO2OEN; // 1 -> GPO2 Output Enable;
     powerUp.arg.PATCH = PATCH;     // 0 -> Boot normally;

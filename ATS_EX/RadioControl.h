@@ -25,22 +25,33 @@
 
 // =-=-=-=-=-=-=-=-= Band state helpers =-=-=-=-=-=-=-=-=
 
+// kHz bounds only - Hz rollover and SSB clamp set
+// their own limits - dont reuse this for them
+INLINE_AI bool freqInBand(const Band& b, uint16_t f) {
+    return (f >= b.minimumFreq) && (f <= b.maximumFreq);
+}
+
 // only accept live freq if it belongs to current band
 // protects band memory from off-range writes
 INLINE_AI bool freqInCurrentBand(uint16_t f) {
-    const Band* b = currentBandPtr();
-    return (f >= b->minimumFreq) && (f <= b->maximumFreq);
+    return freqInBand(*currentBandPtr(), f);
 }
 
 // most state is already in the band list
 // only need to sync the single live frequency variable
 void syncActiveStateToBand() {
-    Band* b = currentBandPtr();
     const uint16_t f = g_currentFrequency;
 
     // only accept live freq if it belongs to current band
-    if (f >= b->minimumFreq && f <= b->maximumFreq)
-        b->currentFreq = f;
+    // protects band memory from off-range writes
+    if (freqInCurrentBand(f))
+        currentBandPtr()->currentFreq = f;
+}
+
+// syncActiveStateToBand + markStateAsDirty
+static void NOINLINE syncBandState() {
+    syncActiveStateToBand();
+    markStateAsDirty();
 }
 
 // functions will read step/bw directly from the band list
@@ -57,14 +68,12 @@ siSetProperty(uint16_t prop_addr, uint16_t prop_val) {
 }
 
 // apply a list of Si4735 properties from PROGMEM
-// single pass table keeps call sites small and easy to audit
-static void applyProperties(const uint16_t props[][2]) {
-    const uint16_t* p = &props[0][0];  // walk pairs [addr,val] PROGMEM
-    for (;;) {
-        uint16_t prop_addr = pgm_read_word(p++);
-        if (prop_addr == 0) break;
-        uint16_t prop_val = pgm_read_word(p++);
+static void NOINLINE applyProperties(const uint16_t* p, uint8_t count) {
+    while (count--) {
+        uint16_t prop_addr = pgm_read_word(p);
+        uint16_t prop_val  = pgm_read_word(p + 1);
         si_set(prop_addr, prop_val);
+        p += 2;
     }
 }
 
@@ -77,8 +86,9 @@ static void applyProperties(const uint16_t props[][2]) {
 //
 //   [0..3]   soft mute
 //   [4..12]  NB + blend
-//   [13..19] Hi-Cut speaker EQ
-//   [20..26] Hi-Cut AN332 defaults
+//   [13..16] Hi-Cut rates shared by both profiles
+//   [17..19] Hi-Cut speaker EQ thresholds + cutoff
+//   [20..22] Hi-Cut AN332 defaults, disabled
 //
 // count-based: no terminator
 //
@@ -88,45 +98,36 @@ static const uint16_t fm_audio_props[][2] PROGMEM = {
     { 0x1301, FM_PROP_SOFTMUTE_SLOPE },
     { 0x1304, FM_PROP_SOFTMUTE_REL_RATE },
     { 0x1305, FM_PROP_SOFTMUTE_ATT_RATE },
+
     // --- noise blanker ---
     { FM_NB_DETECT_THRESHOLD, FM_PROP_NB_REJ_THRESH },
     { FM_NB_INTERVAL,         FM_PROP_NB_ATT_RATE },
     { FM_NB_RATE,             FM_PROP_NB_REL_RATE },
     { FM_NB_IIR_FILTER,       FM_PROP_NB_ADC_OVER_THRESH },
     { FM_NB_DELAY,            FM_PROP_NB_ADC_OVER_DELAY },
+
     // --- multipath blend ---
     { FM_BLEND_MULTIPATH_STEREO_THRESHOLD, FM_MP_STEREO_THR_DEFAULT },
     { FM_BLEND_MULTIPATH_MONO_THRESHOLD,   FM_MP_MONO_THR_DEFAULT },
     { 0x180A, FM_MP_ATTACK_DEFAULT },
     { 0x180B, FM_MP_RELEASE_DEFAULT },
+
+    // --- Hi-Cut: rates shared by both profiles ---
+    { FM_HICUT_ATTACK_RATE_PROP,        FM_HICUT_ATTACK_DEFAULT },
+    { FM_HICUT_RELEASE_RATE_PROP,       FM_HICUT_RELEASE_DEFAULT },
+    { FM_HICUT_MP_TRIGGER_PROP,         FM_HICUT_MP_TRIGGER_DEFAULT },
+    { FM_HICUT_MP_END_PROP,             FM_HICUT_MP_END_DEFAULT },
+
     // --- Hi-Cut: speaker EQ profile ---
     { FM_HICUT_SNR_HIGH_THRESHOLD_PROP, 127 },
     { FM_HICUT_SNR_LOW_THRESHOLD_PROP,  127 },
-    { FM_HICUT_ATTACK_RATE_PROP,        FM_HICUT_ATTACK_DEFAULT },
-    { FM_HICUT_RELEASE_RATE_PROP,       FM_HICUT_RELEASE_DEFAULT },
-    { FM_HICUT_MP_TRIGGER_PROP,         FM_HICUT_MP_TRIGGER_DEFAULT },
-    { FM_HICUT_MP_END_PROP,             FM_HICUT_MP_END_DEFAULT },
     { FM_HICUT_CUTOFF_PROP,             FM_PROP_HICUT_CUTOFF },
+
     // --- Hi-Cut: AN332 defaults, disabled ---
     { FM_HICUT_SNR_HIGH_THRESHOLD_PROP, FM_HICUT_SNR_HIGH_DEFAULT },
     { FM_HICUT_SNR_LOW_THRESHOLD_PROP,  FM_HICUT_SNR_LOW_DEFAULT },
-    { FM_HICUT_ATTACK_RATE_PROP,        FM_HICUT_ATTACK_DEFAULT },
-    { FM_HICUT_RELEASE_RATE_PROP,       FM_HICUT_RELEASE_DEFAULT },
-    { FM_HICUT_MP_TRIGGER_PROP,         FM_HICUT_MP_TRIGGER_DEFAULT },
-    { FM_HICUT_MP_END_PROP,             FM_HICUT_MP_END_DEFAULT },
     { FM_HICUT_CUTOFF_PROP,             0x0000 }, // Hi-Cut disabled
 };
-
-// Apply one counted range of fm_audio_props
-static void NOINLINE fmApplyTableRange(uint8_t start, uint8_t count) {
-    const uint16_t* p = &fm_audio_props[start][0];
-    while (count--) {
-        uint16_t prop_addr = pgm_read_word(p);
-        uint16_t prop_val  = pgm_read_word(p + 1);
-        si_set(prop_addr, prop_val);
-        p += 2;
-    }
-}
 
 // SW link helpers
 static inline bool swLinkEnabled() {
@@ -190,7 +191,7 @@ findBandForFreq(uint16_t freq, uint8_t start, uint8_t endExcl, uint8_t filter) {
             ((filter == FIND_BAND_FM) != (b.bandType == FM_BAND_TYPE)))
             continue;
 
-        if (freq >= b.minimumFreq && freq <= b.maximumFreq)
+        if (freqInBand(b, freq))
             return i;
     }
     return g_bandIndex;
@@ -233,23 +234,17 @@ swAfcRegFromHzK(uint32_t fk1000, uint16_t winHz) {
 
 // PPM defaults (115/85 ppm) via applyProperties
 // simple path to restore datasheet defaults
-static void applySwAfcProfilePpm() {
-    static const uint16_t props[][2] PROGMEM = {
-        { AM_MODE_AFC_SW_PULL_IN_RANGE, AM_AFC_SW_PULL_IN_RANGE_VAL },
-        { AM_MODE_AFC_SW_LOCK_IN_RANGE, AM_AFC_SW_LOCK_IN_RANGE_VAL },
-        { 0, 0 }
-    };
-    applyProperties(props);
+INLINE_AI void applySwAfcRegs(uint16_t pullIn, uint16_t lockIn) {
+    si_set(AM_MODE_AFC_SW_PULL_IN_RANGE, pullIn);
+    si_set(AM_MODE_AFC_SW_LOCK_IN_RANGE, lockIn);
 }
 
 // Fixed-Hz windows at current frequency
 // compute registers per live kHz to keep window constant in Hz at any dial
 static void applySwAfcProfileHz(uint16_t pullHz, uint16_t lockHz) {
     const uint32_t fk1000 = (uint32_t)g_currentFrequency * 1000UL;
-    const uint16_t rPull = swAfcRegFromHzK(fk1000, pullHz);
-    const uint16_t rLock = swAfcRegFromHzK(fk1000, lockHz);
-    si_set(AM_MODE_AFC_SW_PULL_IN_RANGE, rPull);
-    si_set(AM_MODE_AFC_SW_LOCK_IN_RANGE, rLock);
+    applySwAfcRegs(swAfcRegFromHzK(fk1000, pullHz),
+                   swAfcRegFromHzK(fk1000, lockHz));
 }
 
 // Entry: 0=OFF, 1=PPM, 2=Hz Normal, 3=Hz Aggressive
@@ -271,7 +266,7 @@ static void applySwAfc() {
         break;
 
     default: // Covers OFF (0) and PPM (1)
-        applySwAfcProfilePpm();
+        applySwAfcRegs(AM_AFC_SW_PULL_IN_RANGE_VAL, AM_AFC_SW_LOCK_IN_RANGE_VAL);
         break;
     }
 }
@@ -341,13 +336,24 @@ static void applyAvcGain(ModeContext modeCtx) {
 
 // =-=-=-=-=-=-=-=-= BFO helpers =-=-=-=-=-=-=-=-=
 
+// invert a value for USB
+// not the chip-side BFO inversion in updateBFO
+INLINE_AI int16_t usbSign(uint8_t sideband, int16_t v) {
+    return (sideband == USB) ? (int16_t)-v : v;
+}
+
+// LSB/USB mode byte
+// or last CW sideband while in CW
+INLINE_AI uint8_t ssbSidebandOf(uint8_t mode, uint8_t cwSideband) {
+    return (mode == CW) ? cwSideband : mode;
+}
+
 // user calibration compensates crystal drift
 // invert for USB to keep tuning natural
 INLINE_AI int16_t bfoCalibrationHz(uint8_t sideband) {
     // Per-band BFO calibration (stored in Band::bfoCal)
     const int8_t cal = currentBandPtr()->bfoCal;
-    int16_t v = (int16_t)cal * (int16_t)BFO_CALIBRATION_MULTIPLIER;
-    return (sideband == USB) ? (int16_t)-v : v;
+    return usbSign(sideband, (int16_t)cal * (int16_t)BFO_CALIBRATION_MULTIPLIER);
 }
 
 // Sets BFO with user calibration and CW pitch offset (CWP)
@@ -357,14 +363,14 @@ static void updateBFO() {
     const uint8_t mode = g_currentMode;
     const uint8_t cwSideband = g_lastCWMode;
 
-    const uint8_t sideband = (mode == CW) ? cwSideband : mode;
+    const uint8_t sideband = ssbSidebandOf(mode, cwSideband);
     const int16_t calibration = bfoCalibrationHz(sideband);
 
     int16_t cwOffset = 0;
     if (mode == CW) {
         // CWPitch param is 5..8 -> 500..800 Hz
         int16_t pitch = (int16_t)getSettingParam(CWPitch) * 100;
-        cwOffset = (cwSideband == USB) ? (int16_t)-pitch : pitch;
+        cwOffset = usbSign(cwSideband, pitch);
     }
 
     const int16_t finalBfo = (int16_t)(g_currentBFO + calibration + cwOffset);
@@ -479,6 +485,29 @@ static void loadPatch() {
     patchFinalize();    // sets g_ssbLoaded = true unconditionally
 }
 
+#if PATCH_EX_AM
+// load AM patch at runtime
+static void loadAMPatch() {
+    // stop setAM() from rebooting the chip
+    // patch must stay in DSP RAM
+    g_si4735.lastMode = AM_CURRENT_MODE;
+    g_si4735.currentTune = AM_TUNE_FREQ;
+
+    patchEnter();
+
+    g_si4735.downloadCompressedPatch(
+        compressed_am_patch_content,
+        am_patch_segments,
+        am_cutoff_places_offsets,
+        am_cutoff_nonzero_lengths);
+
+    delay(25);            // wait for patched DSP to boot
+    applyI2CSpeed();      // back to OLED bus speed
+    g_ssbLoaded = false;  // chip reset wiped SSB patch
+    g_amLoaded = true;
+}
+#endif
+
 // Applies or disables AM Noise Blanker based on user settings
 // threshold 0 disables per datasheet which is safer than toggling bits
 static void applyAMNoiseBlankerSettings() {
@@ -488,16 +517,17 @@ static void applyAMNoiseBlankerSettings() {
         {AM_NB_RATE,             AM_NB_RATE_DEFAULT},
         {AM_NB_IIR_FILTER,       AM_NB_IIR_FILTER_DEFAULT},
         {AM_NB_DELAY,            AM_NB_DELAY_DEFAULT},
-        {0, 0} // terminator
     };
     static const uint16_t am_nb_off_props[][2] PROGMEM = {
         // setting threshold to 0 disables feature per datasheet
         {AM_NB_DETECT_THRESHOLD, 0},
-        {0, 0} // terminator
     };
 
     // apply appropriate set of properties based on user setting
-    applyProperties(getSettingParam(AMNoiseBlanker) ? am_nb_on_props : am_nb_off_props);
+    if (getSettingParam(AMNoiseBlanker))
+        applyProperties(&am_nb_on_props[0][0], 5);
+    else
+        applyProperties(&am_nb_off_props[0][0], 1);
 }
 
 // Applies user setting for forcing mono or allowing auto-stereo in FM mode
@@ -513,14 +543,12 @@ static void applyFMStereoSettings() {
 // calls table ranges directly
 static void FMAudioConfigure() {
 
-    // fixed block [0..3] soft mute constants
-    fmApplyTableRange(0, 4);
+    // soft mute + NB + blend
+    applyProperties(&fm_audio_props[0][0], 13);
 
-    // NB + blend [4..12] joint block by original design
-    fmApplyTableRange(4, 9);
-
-    // Hi-Cut [13..19] speaker EQ or [20..26] AN332 defaults / disabled
-    fmApplyTableRange(getSettingParam(FMAudioProfile) ? 13 : 20, 7);
+    // Hi-Cut
+    applyProperties(&fm_audio_props[13][0], 4);
+    applyProperties(&fm_audio_props[getSettingParam(FMAudioProfile) ? 17 : 20][0], 3);
 
     // user-adjustable soft mute (EEPROM values / not table-able)
     si_set(FM_SOFT_MUTE_MAX_ATTENUATION, (uint16_t)(uint8_t)getSettingParam(FmSmAtt));
@@ -530,17 +558,18 @@ static void FMAudioConfigure() {
 // Helper to set seek thresholds for both AM and FM
 // lower thresholds improve find rate on weak stations
 static void setSeekThresholds(bool isFM) {
+
     static const uint16_t fm_seek[][2] PROGMEM = {
         {FM_SEEK_TUNE_SNR_THRESHOLD,  FM_SEEK_SNR_THRESHOLD_VAL},
         {FM_SEEK_TUNE_RSSI_THRESHOLD, FM_SEEK_RSSI_THRESHOLD_VAL},
-        {0, 0}
     };
+
     static const uint16_t am_seek[][2] PROGMEM = {
         {AM_SEEK_SNR_THRESHOLD,  AM_SEEK_SNR_THRESHOLD_VAL},
         {AM_SEEK_RSSI_THRESHOLD, AM_SEEK_RSSI_THRESHOLD_VAL},
-        {0, 0}
     };
-    applyProperties(isFM ? fm_seek : am_seek);
+
+    applyProperties(isFM ? &fm_seek[0][0] : &am_seek[0][0], 2);
 }
 
 // Helper to apply soft mute settings
@@ -566,6 +595,13 @@ static void NOINLINE applyFmSeekConfig(
     si_set(FM_SEEK_BAND_BOTTOM, minLimit);
     si_set(FM_SEEK_BAND_TOP, maxLimit);
     si_set(FM_SEEK_FREQ_SPACING, 10);
+}
+
+// chip step for SSB/CW is always 1 kHz
+// fine tune is BFO
+INLINE_AI void setSsbTune(
+    uint16_t minFreq, uint16_t maxFreq, uint16_t freq, uint8_t sideband) {
+    g_si4735.setSSB(minFreq, maxFreq, freq, 1, sideband);
 }
 
 // Orchestrates complete Si4735 setup for FM mode
@@ -607,24 +643,7 @@ static void configureAMMode(const Band& current_band, uint16_t minFreq,
 
 #if PATCH_EX_AM
     // chip must run the patched AM firmware before AM commands are sent
-
-    if (!g_amLoaded) {
-
-        g_si4735.lastMode = AM_CURRENT_MODE;   // keep setAM() from rebooting chip + patch are alive
-
-        patchEnter();
-        g_si4735.downloadCompressedPatch(
-            compressed_am_patch_content,
-            am_patch_segments,           // [0] = line count then (end + base) pairs
-            am_cutoff_places_offsets,
-            am_cutoff_nonzero_lengths);
-
-        delay(25);             // patched DSP boots after the last row
-        applyI2CSpeed();       // restore OLED bus speed (patch ran at fast I2C)
-        g_ssbLoaded = false;   // chip reset wiped the SSB patch
-        g_amLoaded = true;
-        // amp stays muted — unmute at the end after DSP is configured
-    }
+    if (!g_amLoaded) loadAMPatch();
 #endif
 
     // Set primary mode and frequency
@@ -687,11 +706,10 @@ static void configureSSBMode(
     bool isCW = (g_currentMode == CW);
     uint8_t sync = isCW ? 0 : getSettingParam(Sync);
 
-    g_si4735.setSSB(
+    setSsbTune(
         minFreq, maxFreq,
         current_band.currentFreq,
-        1, // Base step for the chip (1 kHz)
-        isCW ? g_lastCWMode : g_currentMode
+        ssbSidebandOf(g_currentMode, g_lastCWMode)
     );
 
     g_si4735.configureSSBModeBatch(
@@ -778,16 +796,12 @@ static void applyBandConfiguration(bool extraSSBReset) {
 
     applyAgcSettings();
 
-#if ENABLE_FAVORITES
-    if (!g_settingsActive && !g_favoritesActive) {
-#else
-    if (!g_settingsActive) {
-#endif
+    if (!g_settingsActive && (!ENABLE_FAVORITES || !g_favoritesActive)) {
         oled.clear();
         showStatus(true);
     }
 
-    applyCompensatedVolume();
+    applyVolume();
     applyBandAmpMute(switchingBetweenFMandAM, false);
 
     syncPreviousFreq();
@@ -849,6 +863,11 @@ static inline void bfoFastRollover(uint16_t * freq, int32_t * bfo) {
     snapToNewStep(freq, steps_khz > 0);
 }
 
+// absolute Hz for a kHz + BFO pair
+INLINE_AI int32_t toAbsHz(int32_t khz, int32_t bfo_hz) {
+    return (khz * HZ_PER_KHZ) + bfo_hz;
+}
+
 // convert absolute Hz back to kHz + BFO after band edge decision
 // keeps BFO in 0..999 Hz
 static inline void absHzToFreqBfo(long absolute_freq_hz, uint16_t * freq, int32_t * bfo) {
@@ -861,11 +880,11 @@ static inline void absHzToFreqBfo(long absolute_freq_hz, uint16_t * freq, int32_
 // Re-anchor base kHz when absolute frequency exits current band boundaries
 // Converts absolute Hz back to kHz + BFO pair for seamless tuning across band edges
 static void bfoPreciseRollover(uint16_t * freq, int32_t * bfo) {
-    long absolute_freq_hz = ((long)(*freq) * HZ_PER_KHZ) + *bfo;
+    long absolute_freq_hz = toAbsHz((int32_t)(*freq), *bfo);
 
     const Band* band = currentBandPtr();
-    long min_freq_hz = (long)band->minimumFreq * HZ_PER_KHZ;
-    long max_freq_hz = (long)band->maximumFreq * HZ_PER_KHZ;
+    long min_freq_hz = toAbsHz((int32_t)band->minimumFreq, 0);
+    long max_freq_hz = toAbsHz((int32_t)band->maximumFreq, 0);
 
     if (absolute_freq_hz >= max_freq_hz || absolute_freq_hz < min_freq_hz) {
         absHzToFreqBfo(absolute_freq_hz, freq, bfo);
@@ -933,9 +952,7 @@ static inline uint16_t executeHardwareSeek() {
 
     setupSeekParameters(minLimit, maxLimit);
 
-    noInterrupts();
     g_seekStop = false;
-    interrupts();
 
     // Return final frequency directly to avoid redundant status/frequency query
     return g_si4735.seekStationProgressGetFrequency(showFrequencySeek, checkStopSeeking, g_seekDirection);
@@ -960,9 +977,8 @@ static inline void finalizeSeekUpdate(bool bandChanged) {
     }
 
     applySwAfc(); // Recalculate AFC window for SW (AM) after seek
-    syncActiveStateToBand();
     showStatus(true);
-    markStateAsDirty();
+    syncBandState();
     syncPreviousFreq();
 }
 
@@ -1016,8 +1032,9 @@ static inline void applySameFamilySwitchUI(BandType oldType, BandType newType) {
 // when loadStoredFreq=false keep seamless edge crossing
 // when true recall band memory
 static void bandSwitch(bool up, bool loadStoredFreq) {
-    syncActiveStateToBand();
-    markStateAsDirty();
+
+    // before the index changes - save live freq into the OLD band slot
+    syncBandState();
 
     // Cache old band type BEFORE changing g_bandIndex
     BandType oldType = currentBandPtr()->bandType;
@@ -1107,8 +1124,7 @@ static void NOINLINE doFrequencyTune(int16_t delta) {
     g_processFreqChange = true;
     markFreqChangeTime();
     showFrequency();
-    syncActiveStateToBand();
-    markStateAsDirty();
+    syncBandState();
 }
 
 // =-=-=-=-=-=-=-=-= SSB Tune Helpers =-=-=-=-=-=-=-=-=
@@ -1207,7 +1223,7 @@ static inline void normalizeSsbBeforeSwitch(Band & band) {
     int32_t bfo_hz = g_currentBFO;
 
     // use absolute Hz in 32bit to prevent overflow and simplify math
-    int32_t total_freq_hz = (freq_khz * HZ_PER_KHZ) + bfo_hz;
+    const int32_t total_freq_hz = toAbsHz(freq_khz, bfo_hz);
 
     // floor-division normalization
     hzToKHzBfoFloor(total_freq_hz, freq_khz, bfo_hz);
@@ -1255,8 +1271,7 @@ static inline void prepareModeSwitch(int8_t & bw) {
     // Refresh the cache only when exiting LSB/USB
     cacheSsbBfoIfLeaving(mode_before);
 
-    syncActiveStateToBand();
-    markStateAsDirty();
+    syncBandState();
 
     if (g_currentMode == CW)
         setAmpState(false);
@@ -1315,11 +1330,11 @@ static void doCWSwitch() {
     // The Si4735 requires re-sending the TUNE command to change sideband
     // preventing audio gaps
     const Band* current_band = currentBandPtr();
-    g_si4735.setSSB(
+
+    setSsbTune(
         current_band->minimumFreq,
         current_band->maximumFreq,
         g_currentFrequency,
-        1, // Hardware step
         g_lastCWMode
     );
 

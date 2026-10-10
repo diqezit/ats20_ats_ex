@@ -95,12 +95,11 @@ enum SettingsIndex : uint8_t {
     RSSI_AM_Off,
     NAV,
 
-    // --- Page 5: Hardware Configuration ---
+    // --- Page 5: Hardware Configuration (5 items) ---
     AntennaCap,
     CPUSpeed,
     BATT_PIN,
     ScanSwitch,
-    FmVolAdjust,
     SWLink,
 
     // --- Page 6: Advanced RF ---
@@ -167,7 +166,6 @@ SETTINGS_CB(doAntennaCapacitor);
 SETTINGS_CB(doCPUSpeed);
 SETTINGS_CB(doBatteryPinSelect);
 SETTINGS_CB(doScanSwitch);
-SETTINGS_CB(doFmVolAdjust);
 SETTINGS_CB(doSwLink);
 
 SETTINGS_CB(doSsbAgcSpeed);
@@ -272,12 +270,11 @@ const SettingMeta g_SettingsMeta[SETTINGS_MAX] PROGMEM = {
     META("RSI",  1, Switch,     ACT_AM,     0,  1, 1,                           doRSSIAMOff        ),
     META("NAV",  0, Switch,     ACT_ALWAYS, 0, 15, 1,                           doNavStyle         ),
 
-    // --- Page 5: Hardware Configuration ---
+    // --- Page 5: Hardware Configuration (5 items) ---
     META("CAP",  0, Switch,     ACT_ALWAYS, 0,  1, 1,                           doAntennaCapacitor ),
     META("CPU",  0, Switch,     ACT_ALWAYS, 0,  9, 1,                           doCPUSpeed         ),
     META("BAP",  0, Switch,     ACT_ALWAYS, 0,  0, 1,                           doBatteryPinSelect ),
     META("SCN",  1, Switch,     ACT_ALWAYS, 1,  2, 1,                           doScanSwitch       ),
-    META("FVA",  0, Num,        ACT_ALWAYS, 0,  0, 15,                          doFmVolAdjust      ),
     META("SWL",  0, Switch,     ACT_ALWAYS, 1,  2, 1,                           doSwLink           ),
 
     // --- Page 6: Advanced RF ---
@@ -300,7 +297,7 @@ static void toggleSetting(uint8_t settingIndex) {
 
 // Precomputed page start indices
 // Index 0 unused, pages are 1-based
-const uint8_t g_pageStartIdx[7] PROGMEM = { 0, 0, 6, 12, 18, 24, 30 };
+const uint8_t g_pageStartIdx[8] PROGMEM = { 0, 0, 6, 12, 18, 24, 29, 31 };
 
 // =================================================================================================
 // Settings API (RAM access)
@@ -411,7 +408,8 @@ int8_t g_modeSettings[MODE_SETTINGS_COUNT][MODE_CONTEXT_COUNT];
 // Full page pattern (6 items) left column first, then right
 #define NAV_PAGE6_ORDER(B)   (B)+0, (B)+2, (B)+4, (B)+1, (B)+3, (B)+5
 
-// Partial page pattern (5 items) page 5 has no slot 29
+// Partial page pattern (5 items) — page 5 (CAP, CPU, BAP, SCN, SWL);
+// page 6 holds only AGS + SMR in natural order (29, 30)
 #define NAV_PAGE5_ORDER(B)   (B)+0, (B)+2, (B)+4, (B)+1, (B)+3
 
 // Navigation position to Physical settings index
@@ -421,8 +419,8 @@ const uint8_t g_navColFirstOrder[SETTINGS_MAX] PROGMEM = {
     NAV_PAGE6_ORDER(6),
     NAV_PAGE6_ORDER(12),
     NAV_PAGE6_ORDER(18),
-    NAV_PAGE6_ORDER(24),
-    30, 31
+    NAV_PAGE5_ORDER(24),
+    29, 30
 };
 
 #undef NAV_PAGE6_ORDER

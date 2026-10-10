@@ -512,10 +512,6 @@ static void fav_drawHeader() {
 // render explicit empty list message
 // avoid blank UI so user sees state immediately
 static inline void fav_renderEmptyList() {
-    clearBox(0,
-        (UI_FAV_LIST_START_ROW - 1) * UI_CHAR_H,
-        UI_SCREEN_W,
-        UI_FAV_PAGE_CLEAR_ROWS * UI_CHAR_H);
     drawInverted(UI_FAV_EMPTY_LIST_X,
         UI_FAV_EMPTY_LIST_ROW,
         F("EMPTY LIST"),
@@ -537,15 +533,15 @@ static inline bool fav_shouldRedrawContent(bool force_redraw,
 // draw current page or empty state
 // keep the branch local so caller stays small
 static inline void fav_drawPageOrEmpty(uint8_t page) {
+
+    clearBox(0,
+        (UI_FAV_LIST_START_ROW - 1) * UI_CHAR_H,
+        UI_SCREEN_W,
+        UI_FAV_PAGE_CLEAR_ROWS * UI_CHAR_H);
+
     if (!g_totalFavorites) {
         fav_renderEmptyList();
     } else {
-        // full clear per page avoids ghosting
-        clearBox(0,
-            (UI_FAV_LIST_START_ROW - 1) * UI_CHAR_H,
-            UI_SCREEN_W,
-            UI_FAV_PAGE_CLEAR_ROWS * UI_CHAR_H);
-
         uint8_t start, end;
         fav_unpackPageBounds(page, start, end);
 

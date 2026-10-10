@@ -3372,3 +3372,45 @@ This modification completely eliminates the audio pops that occur when switching
   - Added index remapping `index -= 12` in `showStep()` for steps >= 12
 
 ------------------------------------------------------------------------------------------------------------
+
+# MOD_NO_RDS v7.3
+
+`Defines.h / SettingsData.h / SettingsLogic.h / Input.h / RadioControl.h / SI4735_fixed.h / UI.h / Globals.h / ATS_EX.ino`
+
+---
+
+## Changed
+
+- **FmVolAdjust (FM loudness compensation) removed from the settings map**
+  - `applyCompensatedVolume()` deleted
+  - `applyVolume()` sends `g_muteVolume ? 0 : g_volume` on every call (no cached hardware value)
+  - EEPROM map re-packed
+
+- **UI.h: frequency rendering now diff-based**
+  - added `s_freqPrev[UI_FREQ_BUF_LEN]` cache. `renderFrequencyString()` skips glyphs already on screen, only changed digits go over I2C
+  - `renderClearOrBlink()` returns `bool` (wiped / not) instead of `void`. Cache invalidated on clear or digit-count change
+  - `renderUnit()` no longer clears its box before printing (same chars overwrite in place)
+  - `forceAll` flag threaded through `renderFrequencyString()` / `freqDrawMainAndTail()`
+  - `drawSSBTailDigits()` uses `divmod10_u8()` (one division instead of `/10` + `%10`)
+
+- **Favorites.h: page clear consolidated**
+  - `clearBox()` moved out of `fav_renderEmptyList()` into `fav_drawPageOrEmpty()`. Single clear on both empty/list paths
+
+---
+
+## Fixed
+
+- **Mode/band switching: AM patch, FM to AM silence, volume restore**
+  - `configureAMMode()` sets `lastMode = AM_CURRENT_MODE` before loading the patch, so `setAM()` skips the power cycle and tunes on the patched DSP
+  - `currentTune` exposed in `SI4735_fixed.h` and reset to `AM_TUNE_FREQ` after the patch load in `configureAMMode()`. Prevents FM tune commands from reaching the AM chip
+  - `applyVolume()` called unconditionally from `applyBandConfiguration()`. Re-writes current volume and mute state after every switch
+
+---
+
+## Optimizations
+
+  - Removed duplicate code and unused terminators to save flash space
+  - Fixed a bug where frequency could be read twice during fast updates
+  
+  
+------------------------------------------------------------------------------------------------------------
