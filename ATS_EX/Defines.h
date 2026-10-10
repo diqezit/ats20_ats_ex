@@ -97,8 +97,8 @@ constexpr auto APP_VERSION = 72;
 #define ENABLE_CW_DECODER      0        // EXPERIMENTAL: CW (Morse) decoder view
 
 // Build / debug
-#define PATCH_EX_SSB      0             // 1=highly compressed stable patch loader (recommended)
-#define PATCH_EX_SSB_NEW  1             // new SSB patch version with audio improvementnt and fixes (by NeekeetosNee)
+#define PATCH_EX_SSB      1             // 1=highly compressed stable patch loader (recommended)
+#define PATCH_EX_SSB_NEW  0             // new SSB patch version with audio improvementnt and fixes (by NeekeetosNee)
 #define PATCH_EX_AM       1             // 1=AM patch with audio improvementnt and fixes (by NeekeetosNee)
 
 #define TEST         1                  // Enables temporary test code paths / experiments
@@ -110,7 +110,7 @@ constexpr auto APP_VERSION = 72;
 
 // UI Strings
 
-#define APP_NAME_LINE1 F("ATS-20+ V7.2.1")
+#define APP_NAME_LINE1 F("ATS-20+ V7.2.2")
 #define APP_NAME_LINE2 F("ATS EX")
 
 #define APP_SPLASH_CREDITS_TEXT  APP_SPLASH_PAD "MOD_NO_RDS GITHUB.COM/DIQEZIT/ATS20_ATS_EX"

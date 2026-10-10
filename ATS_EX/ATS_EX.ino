@@ -474,8 +474,7 @@ static inline ALWAYS_INLINE void engageDisplaySleep() {
 }
 
 // Handles auto display-off timer
-// tracks time in seconds to keep math in 16-bit
-static inline void checkDisplayTimeout() {
+static inline void checkDisplayTimeout(uint16_t now_s) {
 #if ENABLE_GAME
     if (gameIsActive()) return;
 #endif
@@ -486,14 +485,13 @@ static inline void checkDisplayTimeout() {
 
     uint16_t timeout_s = displayTimeoutS(p);
 
-    if (secondsOf(millis()) - g_lastUserActivityTime > timeout_s)
+    if (now_s - g_lastUserActivityTime > timeout_s)
         engageDisplaySleep();
 }
 
 // for all time-based tasks
-static void NOINLINE handlePeriodicTasks() {
+static void NOINLINE handlePeriodicTasks(uint16_t now_s) {
     const uint32_t now = millis();
-    const uint16_t now_s = secondsOf(now);
 
     if (g_displayOn) {
         handleSignalAndStereoUpdates(now, now_s);
@@ -570,7 +568,10 @@ static inline bool handleGameMode(int16_t encDelta) {
 void NOINLINE loop() { // no iline to less bloated main func this is must be
 
     updateEncoderState();
-    checkDisplayTimeout();
+
+    const uint16_t now_s = secondsOf(millis());
+
+    checkDisplayTimeout(now_s);
 
 #if ENABLE_CW_DECODER
     if (handleCWViewMode()) return;
@@ -595,7 +596,7 @@ void NOINLINE loop() { // no iline to less bloated main func this is must be
     if (!frequencyTuned)
         processButtonEvents();
 
-    handlePeriodicTasks();
+    handlePeriodicTasks(now_s);
 }
 
 // Overriding original main to save some space and reduce register pressure

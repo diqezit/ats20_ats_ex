@@ -56,7 +56,8 @@ static inline uint8_t getBatteryPin() {
 #define PCT_DELTA_FINAL_DROP    (BATT_PCT_AT_KNEE - 0)
 #define ADC_DELTA_FINAL_DROP    (BATT_ADC_KNEE - BATT_ADC_EMPTY)
 
-#define BATT_DISPLAY_UPDATE_INTERVAL_MS 10000
+// Battery voltage changes slowly no need to read ADC every loop
+#define BATT_ADC_SAMPLE_INTERVAL_MS 250
 
 // https://github.com/diqezit/ats20_ats_ex/issues/16
 
@@ -135,30 +136,29 @@ static void NOINLINE updateStablePercent() {
     }
 }
 
-// Public interface for the battery monitoring subsystem. Updates the internal
-// state and shows it on the display if the timer has elapsed or if forced.
+// Public interface for the battery monitoring subsystem
 void updateAndShowBattery(bool forceShow) {
     if (!g_voltagePinConnected) return;
 
-    updateStablePercent();
-
-    // 16-bit timestamp is enough for a 10s UI interval and saves code vs 32-bit math
-    // Wrap-around (65.5s) is harmless here
-    static uint16_t lastChargeShow16 = 0;
-
-    // Redraw immediately when percent changed 
+    static uint16_t lastSample16 = 0;
     static uint8_t lastShown = 255;
-    if (g_stableBatteryPercent != lastShown) forceShow = true;
 
     const uint16_t now16 = (uint16_t)millis();
 
-    if ((uint16_t)(now16 - lastChargeShow16) > (uint16_t)BATT_DISPLAY_UPDATE_INTERVAL_MS || forceShow) {
+    if (forceShow || (uint16_t)(now16 - lastSample16) >= (uint16_t)BATT_ADC_SAMPLE_INTERVAL_MS) {
+        updateStablePercent();
+        lastSample16 = now16;
+    }
+
+    // Redraw immediately when percent changed
+    if (g_stableBatteryPercent != lastShown) forceShow = true;
+
+    if (forceShow) {
 #if ENABLE_CW_DECODER
         if (!g_cwViewActive) showChargeOnDisplay();
 #else
         showChargeOnDisplay();
 #endif
-        lastChargeShow16 = now16;
         lastShown = g_stableBatteryPercent;
     }
 }

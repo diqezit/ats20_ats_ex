@@ -3346,3 +3346,29 @@ This modification completely eliminates the audio pops that occur when switching
   
 ------------------------------------------------------------------------------------------------------------
 
+### **MOD_NO_RDS v7.2.2**
+
+`ATS_EX.ino / Battery.h / UI.h / globals.h`
+
+---
+
+## Changed
+
+- **Battery Monitoring & Display Update Loop Optimization**
+  - Sampling interval changed to 250 ms (`BATT_ADC_SAMPLE_INTERVAL_MS`)
+  - ADC is no longer read on every loop pass, saving around 104 us conversion time per pass
+  - Battery filter now runs every 250 ms with smooth low-pass filtering and hysteresis
+  - Periodic display redraw timer removed, battery is drawn only on change or force update to reduce I2C traffic
+
+- **Loop Pass Seconds Optimization**
+  - Combined duplicate `secondsOf(millis())` calls into one `now_s` value per `loop()` pass
+  - Passed `now_s` into `checkDisplayTimeout(now_s)` and `handlePeriodicTasks(now_s)`
+  - Removed duplicate 32-bit division (~250 cycles) per loop pass while keeping timeout logic working as before
+
+## Optimizations
+
+- **Flash Optimization via PROGMEM Table Deduplication**
+  - Removed duplicate SSB steps 12-15 from `step_lookup_table` because they were identical to AM steps 0-3
+  - Added index remapping `index -= 12` in `showStep()` for steps >= 12
+
+------------------------------------------------------------------------------------------------------------

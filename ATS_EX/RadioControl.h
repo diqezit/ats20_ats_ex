@@ -444,7 +444,6 @@ static void NOINLINE patchEnter() {
 // keeps code size in check
 // result is checked by the caller when needed; here we just transfer
 INLINE_AI void patchDownload() {
-#if PATCH_EX_SSB || PATCH_EX_SSB_NEW
     // compact path - compressed patch + 0x15 offset table to reduce flash
     g_si4735.downloadCompressedPatch(
         compressed_ssb_patch_content,  // PROGMEM data
@@ -452,15 +451,6 @@ INLINE_AI void patchDownload() {
         cutoff_places_offsets,         // PROGMEM table
         cutoff_nonzero_lengths
     );
-#else
-    // legacy patch + absolute 0x15 line list
-    // SI4735_fixed hides base overloads
-    g_si4735.SI4735::downloadCompressedPatch(
-        ssb_patch_content,
-        sizeof(ssb_patch_content),
-        cmd_0x15,
-        sizeof(cmd_0x15));
-#endif
 }
 
 // restore normal I2C and apply SSB defaults before unmute
@@ -619,6 +609,9 @@ static void configureAMMode(const Band& current_band, uint16_t minFreq,
     // chip must run the patched AM firmware before AM commands are sent
 
     if (!g_amLoaded) {
+
+        g_si4735.lastMode = AM_CURRENT_MODE;   // keep setAM() from rebooting chip + patch are alive
+
         patchEnter();
         g_si4735.downloadCompressedPatch(
             compressed_am_patch_content,

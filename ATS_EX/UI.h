@@ -533,6 +533,12 @@ static void showStep() {
         break;
     }
 
+    // kHz-range SSB steps (indices 12-15) show the same labels as AM cells 0-3
+    // step_lookup_table dedup in flash
+    // remap index instead
+    if (index >= 12)
+        index -= 12;
+
     oled_inv(inv);
     oled_puts((__FlashStringHelper*)step_lookup_table[index]);
     oled_inv(false);

@@ -176,8 +176,8 @@ static void handleDelayedFrequencyUpdate();
 static void handleSignalAndStereoUpdates(uint32_t, uint16_t);
 static inline void handleCommandTimeout(uint16_t);
 static inline void handleSettingsSave(uint16_t);
-static inline void checkDisplayTimeout();
-static void handlePeriodicTasks();
+static inline void checkDisplayTimeout(uint16_t now_s);
+static void handlePeriodicTasks(uint16_t now_s);
 
 #if ENABLE_RDS_MINI
 bool rdsMiniUiEnabled();
@@ -447,13 +447,20 @@ struct BandDefaults {
 // =================================================================================================
 
 // step strings padded to 4 chars to reduce mem usage
+//
+// SSB cells 12-15 ("1/5/9/10 kHz", Hz-steps 1000..10000)
+// were byte-identical to AM cells 0-3 and removed to save flash
+// 
+// showStep() remaps table indices >= 12 by -12
 static const char step_lookup_table[][7] PROGMEM = {
+
     // AM Steps (indices 0-6)
     "1 " U_KHZ " ", "5 " U_KHZ " ", "9 " U_KHZ " ", "10 " U_KHZ,
     "50 " U_KHZ, "100" U_KHZ, "1 " U_MHZ " ",
-    // SSB Steps (indices 7-15)
+
+    // SSB Steps (indices 7-11) indices 12-15 alias AM cells 0-3
     "10 " U_HZ " ", "25 " U_HZ " ", "50 " U_HZ " ", "100 " U_HZ,
-    "500 " U_HZ, "1 " U_KHZ " ", "5 " U_KHZ " ", "9 " U_KHZ " ", "10 " U_KHZ
+    "500 " U_HZ
 };
 
 // Array with tuning steps. The structure is defined like - AM (in kHz), then SSB (in Hz)
