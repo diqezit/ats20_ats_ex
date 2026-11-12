@@ -4,91 +4,32 @@
 // FastTime - compact replacement block core for Arduino timing chain (wiring.c.o)
 // =====================================================================================
 //
-// stock core pulls 344 B of flash for time keeping
-//        __vector_16 (Timer0 OVF ISR)  148 B   — also maintains timer0_overflow_count
-//        micros()                       74 B   — used ONLY by the stock delay()
-//        millis()                       24 B
-//        delay()                        98 B   — micros()-based
-// 
-//      + hooks.c.o and 4 B of RAM (timer0_overflow_count)
-//      so firmware never calls micros() directly (only stock delay used it)
-//      and dropping overflow counter is behavior-neutral...
+// Timer0 CTC provides a 1 ms tick at 16/8/2 MHz
+// millis() and delay() share this tick ( micros() not needed)
+// delayMicroseconds() uses AVR-libc loops with runtime clock scaling
 //
-// what this section provides instead
-//        ISR(TIM0_COMPA_vect) one increment per exact 1 ms tick (Timer0 CTC configured in Boot.h initTimer0(): /64, OCR0A=249)
-//        millis()             byte-identical logic to the core (atomic 32-bit read)
-//        delay()              millis()-based / never returns earlier than requested
-//        delayMicroseconds()  the exact stock 16 MHz busy-loop (sbiw/brne)
-//
-// wiring.c.o is no longer pulled into the link (nothing references it) hooks.c.o drops with it
-//
-// stock core counts 1024 us overflows and corrects 2.4% drift with fractional accumulator
-// CTC reconfiguration makes hardware tick exactly 1000.000 us so ISR is an single increment
-// and millis() stays drift-free with less code (and 2.4% fewer timer interrupts)
-
+// Keeping wiring.c.o unused saves its overflow counter and timing code
 
 #include <Arduino.h>
 #include <avr/interrupt.h>
+#include <avr/power.h>
+#include <util/delay_basic.h>
 
-// Timer0 is set up by Boot.h initTimer0() in CTC mode
-// 
-// 64 prescaler
-// OCR0A=249
-// 
-// compare-A match every 250 ticks = 16000 cycles = exactly 1000 us at 16 MHz
-// 
-// tick itself is an exact millisecond not needed aculator here
 static_assert(F_CPU == 16000000UL,
-    "FastTime constants are written for 16 MHz (compile-time F_CPU)"
-    "millis() + delay() keep the stock core"
-    "CPU time / delayMicroseconds() compensates via CLKPR"
-    "Only different COMPILE-time clock needs new constants");
+    "FastTime requires a 16 MHz source clock; runtime CLKPR is handled separately");
 
 volatile unsigned long timer0_millis = 0;
 
-// Naked + hand asm: exactly the semantics of timer0_millis++ but about half the size
-// 74 B GCC version -> 54 B and ~25 cycles shorter per tick
-// 
-// Only r24 and SREG are saved
-//
-// The increment is a subi/sbci 0xFF chain
-// 
-// each byte gets +1 iff every lower byte was 0xFF
-//
-// r1 stays zero it is never written here
-#if defined(TIM0_COMPA_vect)
-ISR(TIM0_COMPA_vect, ISR_NAKED)
-#else
-ISR(TIMER0_COMPA_vect, ISR_NAKED)
-#endif
+// CPU changes adjust Timer0
+// this counter can stay in ms
+ISR(TIMER0_COMPA_vect)
 {
-    __asm__ __volatile__ (
-        "push r24"                  "\n\t"
-        "in   r24, __SREG__"        "\n\t"
-        "push r24"                  "\n\t"
-        "lds  r24, timer0_millis"   "\n\t"
-        "subi r24, 0xFF"            "\n\t"
-        "sts  timer0_millis, r24"   "\n\t"
-        "lds  r24, timer0_millis+1" "\n\t"
-        "sbci r24, 0xFF"            "\n\t"
-        "sts  timer0_millis+1, r24" "\n\t"
-        "lds  r24, timer0_millis+2" "\n\t"
-        "sbci r24, 0xFF"            "\n\t"
-        "sts  timer0_millis+2, r24" "\n\t"
-        "lds  r24, timer0_millis+3" "\n\t"
-        "sbci r24, 0xFF"            "\n\t"
-        "sts  timer0_millis+3, r24" "\n\t"
-        "pop  r24"                  "\n\t"
-        "out  __SREG__, r24"        "\n\t"
-        "pop  r24"                  "\n\t"
-        "reti"
-    );
+    ++timer0_millis;
 }
 
 extern "C" {
 
-// Byte-identical logic to the stock core
-// atomic 32-bit read with SREG save/restore
+// Read timer bytes together so an interrupt cannot mix old and new values
 unsigned long millis(void)
 {
     unsigned long m;
@@ -101,12 +42,7 @@ unsigned long millis(void)
     return m;
 }
 
-// Busy-wait on millis()
-//
-// Never returns earlier than the requested interval (millis is monotonic) at most ~1 ms later than the stock micros()-accurate delay
-// Every call site in this firmware is a "wait at least N ms" chip handshake (I2C settle / power-up / debounce) so this is a drop-in
-// 
-// Single live value (end) + signed wrap-safe compare keeps the register save/restore in the prologue minimal
+// Let waits finish even when millis wraps back to zero
 NOINLINE void delay(unsigned long ms)
 {
     if (!ms) return;
@@ -114,31 +50,26 @@ NOINLINE void delay(unsigned long ms)
     while ((int32_t)(millis() - end) < 0) { }
 }
 
-// exact stock Arduino core busy-loop (4-cycle sbiw/brne) for 16 MHz
-// scaled by  RUNTIME CPU prescaler
-//
-// stays accurate at 16 / 8 / 4 / 2 MHz
-// (settings "CPU" 50% / display-off 8 MHz / deep sleep 2 MHz)
-//
-// CLKPR is read straight from hardware
-// applyI2CSpeed() in Boot.h already uses for I2C clock
-// 
-// Masked to 0..3 (divisors 1..8) covers every prescaler this firmware can set and keeps us <<= 3 free of 16-bit overflow
-// (max argument here is 2500)
-//
-// At CLKPR = 0 (full 16 MHz) shift is no-op and loop timing is exact stock one
-// Constant 1-bit shifts in small loop expand inline so no libgcc __ashlhi3 gets pulled into link
+// Radio waits must not end early when CPU slows down
+// Call overhead covers rounding to four-cycle library loops
 NOINLINE void delayMicroseconds(unsigned int us)
 {
-    uint8_t p = CLKPR & 0x03;   // runtime divider exponent: 0=16MHz 1=8MHz 2=4MHz 3=2MHz
-    while (p--) us <<= 1;       // scale loop count: CPU runs 2^p times slower
+    enum { DELAY_LOOP_CYCLES = 4 };
 
-    __asm__ __volatile__ (
-        "1: sbiw %0,1" "\n\t"
-        "brne 1b"
-        : "=w" (us)
-        : "0" (us)
-    );
+    if (!us) return;
+
+    uint32_t loops = microsecondsToClockCycles(us) / DELAY_LOOP_CYCLES;
+    loops >>= clock_prescale_get();
+
+    // Split long waits to fit 16-bit library counter
+    while (loops > UINT16_MAX) {
+        _delay_loop_2(UINT16_MAX);
+        loops -= UINT16_MAX;
+    }
+
+    // Zero would run 65536 iterations
+    const uint16_t remainder = (uint16_t)loops;
+    if (remainder) _delay_loop_2(remainder);
 }
 
 } // extern "C"

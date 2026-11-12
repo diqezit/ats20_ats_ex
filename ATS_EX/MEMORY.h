@@ -8,10 +8,10 @@
 // It isolates the rest of the application from the details of memory layout
 // and raw read/write operations
 //
-// Includes logic to detect and prevent writes to worn-out EEPROM
-// This is critical for device longevity as EEPROM has a limited write cycle life
-// When wear is detected it flags the memory as bad and operates in a
-// read-only mode to keep the receiver functional
+// Optional APP_ID readback guard after saving factory defaults
+// is a limited write-failure check not an EEPROM wear measurement
+// ENABLE_EEPROM_BAD_CHECK=0 compiles out guard and its dependent branches
+// Normal EEPROM reads / updates / defaults and version validation remain active
 //
 // Also manages data versioning. If the firmware is updated and the EEPROM
 // layout changes it will automatically reset settings to factory defaults
@@ -28,10 +28,14 @@
         else         EE_READ_BLOCK((ptr), (addr), (nbytes));   \
     } while (0)
 
-// Global flag for EEPROM wear detection
+// keep disabled so its dependent branches disappear
+#if ENABLE_EEPROM_BAD_CHECK
 static bool g_eepromBad = false;
+#else
+static constexpr bool g_eepromBad = false;
+#endif
 
-// Macro to skip EEPROM writes if wear detected
+// to skip EEPROM writes after optional readback guard fails
 #define CHECK_EEPROM_WEAR() if (g_eepromBad) return
 
 // ==========================================
@@ -421,9 +425,12 @@ static void readAllReceiverInformation() {
         // Now both RAM arrays are pristine and consistent, save them
         saveAllReceiverInformation(true);
 
-        // Check if write was successful
+#if ENABLE_EEPROM_BAD_CHECK
+        // Check only APP_ID after reset-save
+        // does not measure wear
         if (EE_READ8(EEPROM_APP_ID_ADDRESS) != EEPROM_APP_ID)
             g_eepromBad = true;
+#endif
 
 #if ENABLE_EEPROM_RESET_MSG
         drawEepromResetMsg();

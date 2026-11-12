@@ -89,6 +89,7 @@ constexpr auto APP_VERSION = 73;
 #define ENABLE_SPLASH_CREDITS_SCROLL 1    // splash credits (scrolling) set 0 to disable
 
 // Features
+#define ENABLE_EEPROM_BAD_CHECK      0    // 1=APP_ID readback guard
 #define ENABLE_FAVORITES             1    // 1=Favorites enabled
 #define ENABLE_BATTERY_MONITOR       1    // 1=battery monitor enabled
 #define ENABLE_RDS_MINI              1    // 1=RDS RadioText on FM (requires ~738B Flash)
@@ -110,7 +111,7 @@ constexpr auto APP_VERSION = 73;
 
 // UI Strings
 
-#define APP_NAME_LINE1 F("ATS-20+ V7.3")
+#define APP_NAME_LINE1 F("ATS-20+ V7.3.1")
 #define APP_NAME_LINE2 F("ATS EX")
 
 #define APP_SPLASH_CREDITS_TEXT  APP_SPLASH_PAD "MOD_NO_RDS GITHUB.COM/DIQEZIT/ATS20_ATS_EX"

@@ -3414,3 +3414,36 @@ This modification completely eliminates the audio pops that occur when switching
   
   
 ------------------------------------------------------------------------------------------------------------
+
+# MOD_NO_RDS v7.3.1
+
+`Boot.h / Utils.h / Defines.h / MEMORY.h`
+
+---
+
+## Fixed
+
+- **Timer0 timing at reduced CPU speeds**
+  - Timer0 now keeps a 1 ms tick at 16/8/2 MHz
+  - Button and menu timeouts keep their intended duration when CPU slows down
+  - Startup clears bootloader timer state; clock changes preserve a pending tick
+
+- **`delayMicroseconds()` clock scaling**
+  - Corrected delay calculation for runtime CPU frequency
+  - Fixed zero argument handling and split long waits into 16-bit blocks
+
+---
+
+## Changed
+
+- **FastTime timing code**
+  - Replaced hand-written Timer0 ISR assembly with `++timer0_millis`
+  - `delayMicroseconds()` now uses Arduino and AVR-libc helpers
+  - Removed manual setup-time corrections; waits can be slightly longer than requested
+
+- **EEPROM BAD check disabled by default**
+  - `ENABLE_EEPROM_BAD_CHECK 0` removes the limited APP_ID readback guard and `MEM WEAR` branches
+  - Normal EEPROM loading, saving, version checks and `MEM RESET` remain active
+  - EEPROM layout and `APP_VERSION 73` unchanged
+
+------------------------------------------------------------------------------------------------------------

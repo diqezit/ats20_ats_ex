@@ -98,15 +98,42 @@ void applyI2CSpeed() {
     TWBR = TWBR_TABLE[p];
 }
 
-// change CPU divider with mandatory CLKPCE unlock sequence
-// then fix I2C timing to match new clock
+enum {
+    TIMER0_TICK_HZ = 1000,
+    TIMER0_DIVIDER = 64
+};
+
+// Keep button and menu timeouts unchanged when CPU slows down
+// Restart partial millisecond to avoid extra timing state
 static void setCpuPrescaler(uint8_t prescaler) {
-    uint8_t oldSREG = SREG;
+
+    const uint8_t timerTop = F_CPU / TIMER0_DIVIDER / TIMER0_TICK_HZ - 1;
+    const uint8_t oldSREG = SREG;
     cli();
-    CLKPR = CLKPR_UNLOCK_KEY; // unlock - write CLKPCE bit
-    CLKPR = prescaler;        // must follow within 4 cycles
+
+    if (CLKPR != prescaler) {
+        // Keep pending compare flag so ISR still counts a completed millisecond
+        TCCR0B = 0;
+        TCNT0 = 0;
+
+        if (prescaler == clock_div_2) {
+            OCR0A = timerTop / 2;
+        } else {
+            OCR0A = timerTop;
+        }
+
+        CLKPR = CLKPR_UNLOCK_KEY;
+        CLKPR = prescaler;
+
+        if (prescaler == clock_div_8) {
+            TCCR0B = _BV(CS01);
+        } else {
+            TCCR0B = _BV(CS01) | _BV(CS00);
+        }
+    }
+
     SREG = oldSREG;
-    applyI2CSpeed();          // SCL would drift without this
+    applyI2CSpeed();
 }
 
 // ==========================================
@@ -123,14 +150,19 @@ ISR(INT1_vect, ISR_ALIASOF(INT0_vect));
 // ===== BOOT HELPERS ======================
 // ==========================================
 
-// Timer0 CTC with 64 prescaler - compare match every 250 ticks = exact 1 ms
-// gives millis() with zero drift and a minimal compare-match ISR (see Utils.h FastTime section)
-// OC0A/OC0B pins stay disconnected (COM bits 0): D5/D6 keep normal GPIO use
+// Start with a full millisecond so bootloader state cannot shift timeouts
+// Keep timer outputs disconnected because D5 and D6 are button inputs
 static inline void initTimer0() {
-    TCCR0A = (uint8_t)_BV(WGM01);                  // CTC
-    TCCR0B = (uint8_t)(_BV(CS01) | _BV(CS00));     // prescaler 64
-    OCR0A  = (uint8_t)((F_CPU / 64 / 1000) - 1);   // 249 @ 16 MHz -> 1000.000 us period
-    TIMSK0 = (uint8_t)_BV(OCIE0A);                 // compare-A interrupt
+
+    TCCR0B = 0;
+    TCCR0A = _BV(WGM01);
+    OCR0A = F_CPU / TIMER0_DIVIDER / TIMER0_TICK_HZ - 1;
+    TCNT0 = 0;
+
+    // Ignore compare event left by bootloader
+    TIFR0 = _BV(OCF0A);
+    TIMSK0 = _BV(OCIE0A);
+    TCCR0B = _BV(CS01) | _BV(CS00);
 }
 
 // bootloader enables UART for firmware upload - turn it off
